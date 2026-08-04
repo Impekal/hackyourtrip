@@ -35,6 +35,22 @@ auf einem Dashboard die besten aktuellen Optionen pro Strecke zeigt.
 - **Automatisierung:** `.github/workflows/check-deals.yml` lässt den Bot
   alle 3 Stunden per GitHub Actions laufen - kein eigener Server nötig.
 
+## Zwei Ansichten auf `docs/index.html`
+
+- **🔍 Suche** - interaktive Deal-Plattform-artige Suche direkt im Browser:
+  Formular mit allen Optionen (Start/Ziel, Datum + Flexibilität, Budget,
+  Priorität, Modi, Gepäck, BahnCard/Deutschlandticket), Ergebnisse erscheinen
+  sofort - ganz ohne Server, weil `docs/app.js` dieselbe Mock-Provider- und
+  Ranking-Logik wie `traveldeals/` clientseitig in JavaScript nachbildet.
+  Kein Fehlerpreis/Preisfall hier, weil das eine echte Preishistorie über die
+  Zeit braucht, die eine zustandslose Browser-Suche nicht hat. Am Ende lässt
+  sich die Suche als YAML-Block für `config/routes.yaml` kopieren, um sie in
+  echte, dauerhafte Alerts zu verwandeln.
+- **🔔 Meine Alerts** - das bisherige Dashboard: liest `docs/data/deals.json`,
+  das Ergebnis des letzten `traveldeals.cli check`-Laufs (lokal oder per
+  GitHub-Actions-Cron), inklusive Fehlerpreis-/Preisfall-Erkennung, weil das
+  auf echter (wenn auch mit Mock-Preisen gefüllter) Historie basiert.
+
 ## Architektur
 
 ```
@@ -52,7 +68,10 @@ traveldeals/
   currency.py       Wechselkurse (live via frankfurter.app, sonst Fallback-Tabelle)
   notifiers/        Telegram, E-Mail (SMTP), Konsole
   cli.py            `python -m traveldeals.cli check` - der komplette Lauf
-docs/               statisches Dashboard (GitHub Pages), liest docs/data/deals.json
+docs/
+  index.html        Tabs "Suche" (live) und "Meine Alerts" (Cron-Ergebnis)
+  app.js            JS-Port von Mock-Providern + Ranking fürs Suche-Tab,
+                     plus Fetch-Logik fürs Alerts-Tab
 data/               Preishistorie (wird vom Cronjob committet)
 .github/workflows/  Scheduled Job, der `check` laufen lässt
 ```
