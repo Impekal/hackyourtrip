@@ -1,0 +1,55 @@
+name: Check travel deals
+
+on:
+  schedule:
+    - cron: "0 */3 * * *"   # alle 3 Stunden
+  workflow_dispatch: {}      # manuell auslösbar über die Actions-Tab
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      # Das Repo ist öffentlich, config/routes.yaml daher bewusst nicht
+      # eingecheckt (siehe .gitignore). Stattdessen liegt der Inhalt als
+      # Repo-Secret ROUTES_YAML_CONTENT (Settings -> Secrets and variables ->
+      # Actions) und wird hier nur zur Laufzeit auf die Disk geschrieben.
+      # Ohne dieses Secret läuft der Job trotzdem, findet aber keine Routen.
+      - name: Write routes config from secret
+        env:
+          ROUTES_YAML_CONTENT: ${{ secrets.ROUTES_YAML_CONTENT }}
+        run: |
+          if [ -n "$ROUTES_YAML_CONTENT" ]; then
+            printf '%s\n' "$ROUTES_YAML_CONTENT" > config/routes.yaml
+          fi
+
+      - name: Run deal check
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          SMTP_FROM: ${{ secrets.SMTP_FROM }}
+          SMTP_TO: ${{ secrets.SMTP_TO }}
+        run: python -m traveldeals.cli check
+
+      - name: Commit updated price history + dashboard data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/pricehistory.json docs/data/deals.json
+          git diff --cached --quiet || git commit -m "Update deal data [skip ci]"
+          git push

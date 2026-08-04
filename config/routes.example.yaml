@@ -1,0 +1,47 @@
+# Kopiere diese Datei nach config/routes.yaml und trage deine eigenen
+# Strecken ein. config/routes.yaml wird nicht eingecheckt (siehe .gitignore),
+# damit deine persönlichen Reisepläne nicht im Repo landen.
+routes:
+  - id: berlin-barcelona-herbst
+    origin: BER
+    destination: BCN
+    depart_date_from: 2026-09-10
+    depart_date_until: 2026-09-14
+    flex_days_before: 2       # wie viele Tage früher auch ok wären
+    flex_days_after: 2        # wie viele Tage später auch ok wären
+    min_nights: 4             # für Hotel/Flug+Hotel-Kombis
+    max_nights: 7
+    budget: 400               # Gesamtbudget in `currency`, leer = kein Limit
+    currency: EUR
+    max_duration_hours: 5     # maximale Reisezeit, leer = kein Limit
+    priority: best_value      # cheapest | fastest | best_value
+    modes:
+      - flight
+      - flight_hotel
+    baggage:
+      carry_on_only: false
+      checked_bags: 1
+      checked_bag_kg: 23
+    rail:
+      bahncard: null          # "25" | "50" | "100" | null
+      deutschlandticket: false
+    low_cost_airlines_ok: true
+    notes: "Herbstferien, Datum ist flexibel"
+
+  - id: koeln-hamburg-bahn-oder-bus
+    origin: Köln Hbf
+    destination: Hamburg Hbf
+    depart_date_from: 2026-10-01
+    depart_date_until: 2026-10-01
+    flex_days_before: 1
+    flex_days_after: 1
+    budget: 60
+    currency: EUR
+    max_duration_hours: 8
+    priority: cheapest
+    modes:
+      - train_or_bus
+    rail:
+      bahncard: "25"
+      deutschlandticket: false
+    notes: "Kurztrip, Bahn oder Bus - Hauptsache günstig"
