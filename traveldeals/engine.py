@@ -2,27 +2,30 @@
 TripOptions for one RoutePreference.
 
 Pipeline per route: gather offers per requested mode -> build combos where
-requested -> filter by hard constraints (budget, max duration, low-cost
-allowed) -> score & rank by the user's priority -> attach smart
-recommendations (later-departure savings, baggage savings, currency info,
-price-drop/error-fare flags) -> return the top N.
+requested -> filter by hard constraints (budget, max duration, low-cost,
+hotel amenities, transport comfort) -> score & rank by the user's priority
+(best_value blends in a comfort score, not just price/duration) -> attach
+smart recommendations (later-departure savings, baggage savings, currency
+info, price-drop/error-fare flags) -> return the top N.
 """
 from __future__ import annotations
 
 from datetime import date, datetime
 
 from traveldeals.currency import convert, get_rates_per_eur
-from traveldeals.models import (Mode, Offer, Priority, RoutePreference,
+from traveldeals.models import (OR_COMBO_MODES, HotelPref, Mode, Offer,
+                                 Priority, RoutePreference, TransportPref,
                                  TripOption)
 from traveldeals.pricehistory import PriceHistory
 from traveldeals.providers.base import Provider
 
-# best_value weighting: price matters more than duration by default because
-# the brief frames "budget" as the primary constraint and duration as a
-# secondary preference ("wie viele Stunden ich verbringen möchte"). Tune here
-# if that balance should shift.
-BEST_VALUE_PRICE_WEIGHT = 0.6
-BEST_VALUE_DURATION_WEIGHT = 0.4
+# best_value weighting: price still matters most, but a comfort score (hotel
+# amenities / transport comfort - see comfort_score() below) now factors in
+# too, since "bestes Verhaeltnis" should mean more than just price vs time.
+# Tune here if that balance should shift.
+BEST_VALUE_PRICE_WEIGHT = 0.5
+BEST_VALUE_DURATION_WEIGHT = 0.25
+BEST_VALUE_COMFORT_WEIGHT = 0.25
 
 # below this fraction of the median observed price, flag a price drop; below
 # this fraction of the historical minimum, flag a likely error fare.
@@ -33,11 +36,90 @@ ERROR_FARE_RATIO = 0.5
 # surfacing as a "go carry-on-only" recommendation.
 BAGGAGE_SAVINGS_THRESHOLD = 0.15
 
+# seat-pitch ranges used to normalize legroom_cm into a 0..1 comfort
+# component - flight economy seats are simply tighter than train/bus seats,
+# so each mode gets its own scale rather than one shared range.
+LEGROOM_RANGE_BY_MODE = {
+    Mode.FLIGHT: (66.0, 96.0),
+    Mode.TRAIN: (85.0, 120.0),
+    Mode.BUS: (70.0, 100.0),
+}
+
 _HOTEL_COMBO_TRANSPORT_MODE = {
     Mode.FLIGHT_HOTEL: Mode.FLIGHT,
     Mode.TRAIN_HOTEL: Mode.TRAIN,
     Mode.BUS_HOTEL: Mode.BUS,
 }
+
+
+def hotel_comfort_score(offer: Offer) -> float:
+    """0..1, higher is better: blends stars, user rating, amenity coverage,
+    and closeness - equal-weighted since there's no principled reason to
+    prefer one over another without user-specific data."""
+    stars_norm = ((offer.stars or 3) - 1) / 4
+    rating_norm = (offer.rating or 7.0) / 10
+    amenities = [offer.wifi, offer.breakfast_included, offer.free_cancellation,
+                 offer.parking, offer.air_conditioning, offer.pets_allowed, offer.pool_or_fitness]
+    amenity_norm = sum(1 for a in amenities if a) / len(amenities)
+    distance_norm = 1 - min(offer.distance_km or 3.0, 10) / 10
+    return (stars_norm + rating_norm + amenity_norm + distance_norm) / 4
+
+
+def transport_comfort_score(offer: Offer) -> float:
+    """0..1, higher is better: legroom, onboard wifi/power, directness,
+    punctuality - equal-weighted, same rationale as hotel_comfort_score."""
+    lo, hi = LEGROOM_RANGE_BY_MODE.get(offer.mode, (70.0, 100.0))
+    legroom_norm = min(max(((offer.legroom_cm or lo) - lo) / (hi - lo), 0), 1)
+    direct_bonus = {0: 1.0, 1: 0.5}.get(offer.stops, 0.0)
+    punctuality_norm = (offer.punctuality_pct or 80.0) / 100
+    parts = [legroom_norm, float(offer.wifi_onboard), float(offer.power_outlets), direct_bonus, punctuality_norm]
+    return sum(parts) / len(parts)
+
+
+def comfort_score(option: TripOption) -> float:
+    scores = []
+    for o in option.offers:
+        if o.mode == Mode.HOTEL:
+            scores.append(hotel_comfort_score(o))
+        elif o.mode in (Mode.FLIGHT, Mode.TRAIN, Mode.BUS):
+            scores.append(transport_comfort_score(o))
+    return sum(scores) / len(scores) if scores else 0.5
+
+
+def _meets_hotel_constraints(offer: Offer, pref: HotelPref) -> bool:
+    if pref.min_stars is not None and (offer.stars or 0) < pref.min_stars:
+        return False
+    if pref.min_rating is not None and (offer.rating or 0) < pref.min_rating:
+        return False
+    if pref.max_distance_km is not None and (offer.distance_km or 0) > pref.max_distance_km:
+        return False
+    if pref.require_wifi and not offer.wifi:
+        return False
+    if pref.require_breakfast and not offer.breakfast_included:
+        return False
+    if pref.require_free_cancellation and not offer.free_cancellation:
+        return False
+    if pref.require_parking and not offer.parking:
+        return False
+    if pref.require_air_conditioning and not offer.air_conditioning:
+        return False
+    if pref.require_pets_allowed and not offer.pets_allowed:
+        return False
+    if pref.require_pool_or_fitness and not offer.pool_or_fitness:
+        return False
+    return True
+
+
+def _meets_transport_constraints(offer: Offer, pref: TransportPref) -> bool:
+    if pref.direct_only and offer.stops > 0:
+        return False
+    if pref.require_wifi_onboard and not offer.wifi_onboard:
+        return False
+    if pref.require_power_outlets and not offer.power_outlets:
+        return False
+    if pref.min_punctuality_pct is not None and (offer.punctuality_pct or 0) < pref.min_punctuality_pct:
+        return False
+    return True
 
 
 class DealEngine:
@@ -65,9 +147,10 @@ class DealEngine:
             elif mode in _HOTEL_COMBO_TRANSPORT_MODE:
                 transport_mode = _HOTEL_COMBO_TRANSPORT_MODE[mode]
                 candidates.extend(self._combo_options(mode, pool(transport_mode), pool(Mode.HOTEL)))
-            elif mode == Mode.TRAIN_OR_BUS:
-                for offer in pool(Mode.TRAIN) + pool(Mode.BUS):
-                    candidates.append(self._single_offer_option(Mode.TRAIN_OR_BUS, offer))
+            elif mode in OR_COMBO_MODES:
+                mode_a, mode_b = OR_COMBO_MODES[mode]
+                for offer in pool(mode_a) + pool(mode_b):
+                    candidates.append(self._single_offer_option(mode, offer))
 
         candidates = [c for c in candidates if self._meets_hard_constraints(c, route)]
         for c in candidates:
@@ -117,6 +200,11 @@ class DealEngine:
                 return False
         if not route.low_cost_airlines_ok and any(o.is_low_cost for o in option.offers):
             return False
+        for offer in option.offers:
+            if offer.mode == Mode.HOTEL and not _meets_hotel_constraints(offer, route.hotel):
+                return False
+            if offer.mode in (Mode.FLIGHT, Mode.TRAIN, Mode.BUS) and not _meets_transport_constraints(offer, route.transport):
+                return False
         return True
 
     def _score(self, option: TripOption, priority: Priority, all_candidates: list[TripOption]) -> float:
@@ -128,7 +216,10 @@ class DealEngine:
         durations = [c.total_duration_hours for c in all_candidates]
         price_norm = _normalize(option.total_price, prices)
         duration_norm = _normalize(option.total_duration_hours, durations)
-        return BEST_VALUE_PRICE_WEIGHT * price_norm + BEST_VALUE_DURATION_WEIGHT * duration_norm
+        discomfort_norm = 1 - comfort_score(option)
+        return (BEST_VALUE_PRICE_WEIGHT * price_norm
+                + BEST_VALUE_DURATION_WEIGHT * duration_norm
+                + BEST_VALUE_COMFORT_WEIGHT * discomfort_norm)
 
     # -- recommendations -------------------------------------------------------
 
@@ -183,7 +274,8 @@ class DealEngine:
             )
 
     def _add_currency_info(self, option: TripOption, route: RoutePreference) -> None:
-        if not self._rates_per_eur or option.mode not in (Mode.FLIGHT, Mode.FLIGHT_HOTEL, Mode.HOTEL):
+        involves_flight_or_hotel = any(o.mode in (Mode.FLIGHT, Mode.HOTEL) for o in option.offers)
+        if not self._rates_per_eur or not involves_flight_or_hotel:
             return
         others = [c for c in ("USD", "GBP") if c != option.currency]
         equivalents = [f"{convert(option.total_price, option.currency, c, self._rates_per_eur)} {c}" for c in others]

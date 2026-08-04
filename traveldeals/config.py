@@ -13,7 +13,8 @@ from pathlib import Path
 
 import yaml
 
-from traveldeals.models import BaggagePref, Mode, Priority, RailPref, RoutePreference
+from traveldeals.models import (BaggagePref, HotelPref, Mode, Priority,
+                                 RailPref, RoutePreference, TransportPref)
 
 
 def _parse_date(value) -> date:
@@ -25,6 +26,8 @@ def _parse_date(value) -> date:
 def _parse_route(raw: dict) -> RoutePreference:
     baggage_raw = raw.get("baggage", {}) or {}
     rail_raw = raw.get("rail", {}) or {}
+    hotel_raw = raw.get("hotel", {}) or {}
+    transport_raw = raw.get("transport", {}) or {}
     return RoutePreference(
         id=raw["id"],
         origin=raw["origin"],
@@ -48,6 +51,24 @@ def _parse_route(raw: dict) -> RoutePreference:
         rail=RailPref(
             bahncard=rail_raw.get("bahncard"),
             deutschlandticket=bool(rail_raw.get("deutschlandticket", False)),
+        ),
+        hotel=HotelPref(
+            min_stars=hotel_raw.get("min_stars"),
+            min_rating=hotel_raw.get("min_rating"),
+            max_distance_km=hotel_raw.get("max_distance_km"),
+            require_wifi=bool(hotel_raw.get("require_wifi", False)),
+            require_breakfast=bool(hotel_raw.get("require_breakfast", False)),
+            require_free_cancellation=bool(hotel_raw.get("require_free_cancellation", False)),
+            require_parking=bool(hotel_raw.get("require_parking", False)),
+            require_air_conditioning=bool(hotel_raw.get("require_air_conditioning", False)),
+            require_pets_allowed=bool(hotel_raw.get("require_pets_allowed", False)),
+            require_pool_or_fitness=bool(hotel_raw.get("require_pool_or_fitness", False)),
+        ),
+        transport=TransportPref(
+            direct_only=bool(transport_raw.get("direct_only", False)),
+            require_wifi_onboard=bool(transport_raw.get("require_wifi_onboard", False)),
+            require_power_outlets=bool(transport_raw.get("require_power_outlets", False)),
+            min_punctuality_pct=transport_raw.get("min_punctuality_pct"),
         ),
         low_cost_airlines_ok=bool(raw.get("low_cost_airlines_ok", True)),
         notes=raw.get("notes", ""),

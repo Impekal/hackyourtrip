@@ -32,6 +32,18 @@ def _date_candidates(route: RoutePreference) -> list[date]:
     return [start + timedelta(days=i) for i in range(max(days, 1) + 1)]
 
 
+def _transport_comfort_fields(rnd: random.Random, mode: Mode, stops_weights: list[float]) -> dict:
+    """Shared random comfort-field generation for flight/train/bus offers."""
+    lo, hi = {Mode.FLIGHT: (66.0, 96.0), Mode.TRAIN: (85.0, 120.0), Mode.BUS: (70.0, 100.0)}[mode]
+    return {
+        "stops": rnd.choices([0, 1, 2], weights=stops_weights, k=1)[0],
+        "wifi_onboard": rnd.random() < 0.6,
+        "power_outlets": rnd.random() < 0.55,
+        "legroom_cm": round(rnd.uniform(lo, hi), 1),
+        "punctuality_pct": round(rnd.uniform(70, 99), 1),
+    }
+
+
 class MockFlightProvider(Provider):
     mode = Mode.FLIGHT
     _BOOKING_SITES = ["Skyscanner", "Google Flights", "Kiwi.com", "Airline direct"]
@@ -68,6 +80,7 @@ class MockFlightProvider(Provider):
                     url="https://example.invalid/flight",
                     checked_bag_fee=checked_bag_fee,
                     is_low_cost=is_low_cost,
+                    **_transport_comfort_fields(rnd, self.mode, [0.55, 0.35, 0.10]),
                 ))
         # A rare, deliberately-planted "error fare" so the anomaly-detection
         # path (engine.py + pricehistory.py) has something real to catch in
@@ -122,6 +135,7 @@ class MockTrainProvider(Provider):
                     url="https://example.invalid/train",
                     details={"bahncard_applied": route.rail.bahncard,
                              "deutschlandticket_ok": route.rail.deutschlandticket and duration <= 1.0},
+                    **_transport_comfort_fields(rnd, self.mode, [0.75, 0.20, 0.05]),
                 ))
         return offers
 
@@ -153,6 +167,7 @@ class MockBusProvider(Provider):
                     arrive_time=arrive_dt.isoformat(),
                     duration_hours=duration,
                     url="https://example.invalid/bus",
+                    **_transport_comfort_fields(rnd, self.mode, [0.65, 0.30, 0.05]),
                 ))
         return offers
 
@@ -185,5 +200,15 @@ class MockHotelProvider(Provider):
                     duration_hours=nights * 24.0,
                     url="https://example.invalid/hotel",
                     details={"nights": nights, "per_night": per_night},
+                    stars=rnd.choices([2, 3, 4, 5], weights=[0.1, 0.35, 0.4, 0.15], k=1)[0],
+                    rating=round(rnd.uniform(6.0, 9.8), 1),
+                    wifi=rnd.random() < 0.85,
+                    breakfast_included=rnd.random() < 0.5,
+                    free_cancellation=rnd.random() < 0.6,
+                    distance_km=round(rnd.uniform(0.1, 8.0), 1),
+                    parking=rnd.random() < 0.4,
+                    air_conditioning=rnd.random() < 0.7,
+                    pets_allowed=rnd.random() < 0.3,
+                    pool_or_fitness=rnd.random() < 0.35,
                 ))
         return offers

@@ -12,13 +12,29 @@ auf einem Dashboard die besten aktuellen Optionen pro Strecke zeigt.
 
 ## Was der Bot kann
 
-- **Modi:** Flug, Bahn, Bus, Hotel, Flug+Hotel, Bahn+Hotel, Bus+Hotel,
-  "Bahn oder Bus – was günstiger/schneller ist" - pro Strecke frei kombinierbar.
+- **10 Such-Modi** (im Suche-Tab als eigene Reiter, weil z.B. bei "nur Hotel"
+  eine Anreise irrelevant ist - jeder Modus zeigt nur die Felder, die für ihn
+  Sinn ergeben): Flug, Bahn, Bus, Hotel, Bahn/Bus, Flug/Bahn, Flug/Bus (jeweils
+  "was ist besser"), Flug+Hotel, Bahn+Hotel, Bus+Hotel.
 - **Einstellungen pro Strecke** (`config/routes.yaml`): Start/Ziel, Datum +
   Flexibilität in Tagen davor/danach, Mindest-/Max-Aufenthalt (für Hotel),
   Budget, Währung, maximale Reisezeit, Priorität (`cheapest` / `fastest` /
   `best_value`), Gepäck (Handgepäck-only, Anzahl/Gewicht Koffer), Bahn-Extras
   (BahnCard 25/50/100, Deutschlandticket), ob Low-Cost-Airlines ok sind.
+- **Hotel-Kriterien** (mehr als eine typische Trivago-Suche zeigt, siehe
+  `HotelPref` in `traveldeals/models.py`): Min. Sterne, Mindestbewertung,
+  max. Entfernung zu Zentrum/Bahnhof/Flughafen, WLAN, Frühstück inkl.,
+  kostenlose Stornierung, Parkplatz, Klimaanlage, Haustiere erlaubt,
+  Pool/Fitness - fließen nicht nur als Filter, sondern auch als Komfort-Score
+  ins `best_value`-Ranking ein (siehe unten).
+- **Transport-Kriterien** (`TransportPref`): nur Direktverbindungen, WLAN an
+  Bord, Steckdosen, Mindest-Pünktlichkeit, Beinfreiheit (mode-abhängig
+  normalisiert) - ebenfalls Filter *und* Komfort-Score.
+- **Komfort-Score im `best_value`-Ranking:** `best_value` ist nicht mehr nur
+  Preis/Dauer, sondern `50% Preis + 25% Dauer + 25% Komfort` (Gewichte in
+  `engine.py` anpassbar) - eine 5€ teurere, aber deutlich komfortablere
+  Option kann so gewinnen, wenn der Rest der Angebote eine echte Preisspanne
+  hat (bei nur 2 Kandidaten verzerrt Min-Max-Normalisierung sonst stark).
 - **Smarte Empfehlungen** (siehe `traveldeals/engine.py`):
   - 🕐 "1h später fliegen/fahren spart X€" - vergleicht alle Abfahrten am
     selben Tag.
@@ -38,10 +54,11 @@ auf einem Dashboard die besten aktuellen Optionen pro Strecke zeigt.
 ## Zwei Ansichten auf `docs/index.html`
 
 - **🔍 Suche** - interaktive Deal-Plattform-artige Suche direkt im Browser:
-  Formular mit allen Optionen (Start/Ziel, Datum + Flexibilität, Budget,
-  Priorität, Modi, Gepäck, BahnCard/Deutschlandticket), Ergebnisse erscheinen
+  10 Modus-Reiter (Flug/Bahn/Bus/Hotel/Kombis), jeweils nur mit den dazu
+  passenden Feldern (z.B. kein "Von" im Hotel-Tab), Ergebnisse erscheinen
   sofort - ganz ohne Server, weil `docs/app.js` dieselbe Mock-Provider- und
-  Ranking-Logik wie `traveldeals/` clientseitig in JavaScript nachbildet.
+  Ranking-Logik (inkl. Komfort-Score und Hotel-/Transport-Filtern) wie
+  `traveldeals/` clientseitig in JavaScript nachbildet.
   Kein Fehlerpreis/Preisfall hier, weil das eine echte Preishistorie über die
   Zeit braucht, die eine zustandslose Browser-Suche nicht hat. Am Ende lässt
   sich die Suche als YAML-Block für `config/routes.yaml` kopieren, um sie in
@@ -152,3 +169,9 @@ ersetzen (Interface bleibt gleich, s.o.):
   die einfachste Lösung für v1. Für ein echtes Formular mit Login würde sich
   z.B. Supabase (Postgres + Auth, kostenloser Free-Tier) anbieten statt einer
   reinen YAML-Datei.
+- **LLM-gestützte Kurzbegründung (optional, z.B. Gemini):** Ranking/Preise
+  bleiben bewusst regelbasiert (deterministisch, testbar, kein API-Kosten-
+  Risiko) - ein LLM würde hier nicht rechnen, sondern höchstens eine
+  freitextliche Erklärung ("warum Option 3 die beste Wahl ist") oder fuzzy
+  Wünsche wie "ruhige Lage" einordnen, die sich schlecht in feste Filter
+  pressen lassen. Bisher nicht umgesetzt.

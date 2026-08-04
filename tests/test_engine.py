@@ -1,8 +1,8 @@
 from datetime import date
 
 from traveldeals.engine import DealEngine
-from traveldeals.models import (BaggagePref, Mode, Offer, Priority,
-                                 RoutePreference)
+from traveldeals.models import (BaggagePref, HotelPref, Mode, Offer,
+                                 Priority, RoutePreference, TransportPref)
 from traveldeals.pricehistory import PriceHistory
 from traveldeals.providers.base import Provider
 
@@ -126,3 +126,86 @@ def test_error_fare_flagged_against_history(tmp_path):
     route = make_route()
     result = engine.search(route)
     assert result[0].is_error_fare is True
+
+
+def test_flight_or_train_combo_merges_both_pools_and_picks_cheapest(tmp_path):
+    flight = Offer(mode=Mode.FLIGHT, provider="p", booking_site="A", price=200, currency="EUR",
+                    depart_time="2026-09-10T09:00:00", arrive_time="2026-09-10T11:00:00", duration_hours=2)
+    train = Offer(mode=Mode.TRAIN, provider="p", booking_site="B", price=60, currency="EUR",
+                   depart_time="2026-09-10T09:00:00", arrive_time="2026-09-10T15:00:00", duration_hours=6)
+    engine = make_engine({
+        Mode.FLIGHT: FakeProvider(Mode.FLIGHT, [flight]),
+        Mode.TRAIN: FakeProvider(Mode.TRAIN, [train]),
+    }, tmp_path)
+    route = make_route(modes=[Mode.FLIGHT_OR_TRAIN], priority=Priority.CHEAPEST)
+    result = engine.search(route)
+    assert result[0].total_price == 60
+    assert result[0].offers[0].mode == Mode.TRAIN
+    assert result[0].mode == Mode.FLIGHT_OR_TRAIN
+
+
+def test_hotel_min_stars_filter_excludes_low_rated(tmp_path):
+    offers = [
+        Offer(mode=Mode.HOTEL, provider="p", booking_site="Booking.com", price=100, currency="EUR",
+              depart_time="2026-09-10T00:00:00", arrive_time="2026-09-14T00:00:00", duration_hours=96,
+              stars=2, rating=6.0),
+        Offer(mode=Mode.HOTEL, provider="p", booking_site="Booking.com", price=150, currency="EUR",
+              depart_time="2026-09-10T00:00:00", arrive_time="2026-09-14T00:00:00", duration_hours=96,
+              stars=4, rating=8.5),
+    ]
+    engine = make_engine({Mode.HOTEL: FakeProvider(Mode.HOTEL, offers)}, tmp_path)
+    route = make_route(modes=[Mode.HOTEL], hotel=HotelPref(min_stars=3))
+    result = engine.search(route)
+    assert len(result) == 1
+    assert result[0].total_price == 150
+
+
+def test_hotel_required_amenity_filter(tmp_path):
+    offers = [
+        Offer(mode=Mode.HOTEL, provider="p", booking_site="Booking.com", price=100, currency="EUR",
+              depart_time="2026-09-10T00:00:00", arrive_time="2026-09-14T00:00:00", duration_hours=96,
+              free_cancellation=False),
+        Offer(mode=Mode.HOTEL, provider="p", booking_site="Booking.com", price=120, currency="EUR",
+              depart_time="2026-09-10T00:00:00", arrive_time="2026-09-14T00:00:00", duration_hours=96,
+              free_cancellation=True),
+    ]
+    engine = make_engine({Mode.HOTEL: FakeProvider(Mode.HOTEL, offers)}, tmp_path)
+    route = make_route(modes=[Mode.HOTEL], hotel=HotelPref(require_free_cancellation=True))
+    result = engine.search(route)
+    assert len(result) == 1
+    assert result[0].total_price == 120
+
+
+def test_transport_direct_only_filter(tmp_path):
+    offers = [
+        Offer(mode=Mode.FLIGHT, provider="p", booking_site="A", price=100, currency="EUR",
+              depart_time="2026-09-10T09:00:00", arrive_time="2026-09-10T11:00:00", duration_hours=2, stops=1),
+        Offer(mode=Mode.FLIGHT, provider="p", booking_site="B", price=150, currency="EUR",
+              depart_time="2026-09-10T09:00:00", arrive_time="2026-09-10T11:00:00", duration_hours=2, stops=0),
+    ]
+    engine = make_engine({Mode.FLIGHT: FakeProvider(Mode.FLIGHT, offers)}, tmp_path)
+    route = make_route(transport=TransportPref(direct_only=True))
+    result = engine.search(route)
+    assert len(result) == 1
+    assert result[0].total_price == 150
+
+
+def test_best_value_prefers_more_comfortable_hotel_at_similar_price(tmp_path):
+    basic = Offer(mode=Mode.HOTEL, provider="p", booking_site="Booking.com", price=100, currency="EUR",
+                   depart_time="2026-09-10T00:00:00", arrive_time="2026-09-14T00:00:00", duration_hours=96,
+                   stars=2, rating=6.0, wifi=False, distance_km=8.0)
+    comfy = Offer(mode=Mode.HOTEL, provider="p", booking_site="Booking.com", price=105, currency="EUR",
+                   depart_time="2026-09-10T00:00:00", arrive_time="2026-09-14T00:00:00", duration_hours=96,
+                   stars=5, rating=9.5, wifi=True, breakfast_included=True, free_cancellation=True,
+                   parking=True, air_conditioning=True, pool_or_fitness=True, distance_km=0.2)
+    # a much pricier decoy so basic/comfy both sit near the low end of the
+    # price range - with only 2 candidates, min-max normalization would
+    # otherwise stretch their small 5 EUR gap to the full 0..1 range and
+    # let price dominate regardless of how small the real difference is.
+    decoy = Offer(mode=Mode.HOTEL, provider="p", booking_site="Booking.com", price=400, currency="EUR",
+                   depart_time="2026-09-10T00:00:00", arrive_time="2026-09-14T00:00:00", duration_hours=96,
+                   stars=3, rating=7.0)
+    engine = make_engine({Mode.HOTEL: FakeProvider(Mode.HOTEL, [basic, comfy, decoy])}, tmp_path)
+    route = make_route(modes=[Mode.HOTEL], priority=Priority.BEST_VALUE)
+    result = engine.search(route)
+    assert result[0].total_price == 105

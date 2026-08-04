@@ -25,6 +25,22 @@ routes:
     rail:
       bahncard: null          # "25" | "50" | "100" | null
       deutschlandticket: false
+    hotel:                    # nur relevant fuer hotel/*_hotel-Modi
+      min_stars: 3
+      min_rating: 7.5         # von 10
+      max_distance_km: 3      # zu Zentrum/Bahnhof/Flughafen
+      require_wifi: true
+      require_breakfast: false
+      require_free_cancellation: true
+      require_parking: false
+      require_air_conditioning: false
+      require_pets_allowed: false
+      require_pool_or_fitness: false
+    transport:                # fuer flight/train/bus und deren Kombis
+      direct_only: false
+      require_wifi_onboard: false
+      require_power_outlets: false
+      min_punctuality_pct: null
     low_cost_airlines_ok: true
     notes: "Herbstferien, Datum ist flexibel"
 
