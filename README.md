@@ -82,16 +82,16 @@ auf einem Dashboard die besten aktuellen Optionen pro Strecke zeigt.
   Airline-Systeme direkt live ab; das ist mit kostenlosen Zugängen nicht
   erreichbar. Wer mehr Ergebnisse will, erhöht die Flex-Tage - das erweitert
   das Fenster, ohne zusätzliche API-Anfragen zu kosten.
-- **KI-Empfehlung (Gemini), optional:** Button unter der Suche schickt die
-  gefundenen Angebote plus die eigenen Kriterien an Gemini und bekommt eine
+- **KI-Empfehlung, optional:** Button unter der Suche schickt die gefundenen
+  Angebote plus die eigenen Kriterien an ein Sprachmodell und bekommt eine
   begründete Empfehlung zurück. Läuft über denselben Cloudflare-Worker wie
-  die Preisabfrage (ein Gemini-Key kann genauso wenig im Browser-JS liegen
-  wie ein API-Token) und braucht das zusätzliche Repo-Secret
-  `GEMINI_API_KEY`; ohne das Secret blendet die Oberfläche einen Hinweis ein
-  statt zu scheitern. **Wichtig:** Gemini analysiert und empfiehlt nur die
-  bereits gefundenen Angebote - es kann selbst keine Flüge suchen und darf
-  laut Prompt auch keine erfinden. Mehr Ergebnisse kommen von der
-  Monatsabfrage oben, nicht von der KI.
+  die Preisabfrage (ein API-Key kann genauso wenig im Browser-JS liegen wie
+  ein Reise-API-Token). Unterstützt **Gemini, Groq oder Mistral** - einer
+  genügt, Setup siehe unten; ohne Key blendet die Oberfläche einen Hinweis
+  ein statt zu scheitern. **Wichtig:** die KI bewertet nur die bereits
+  gefundenen Angebote - sie kann selbst keine Flüge suchen und darf laut
+  Prompt auch keine erfinden. Mehr Ergebnisse kommen von der Monatsabfrage
+  oben, nicht von der KI.
 - **Komfort-Score im `best_value`-Ranking:** `best_value` ist nicht mehr nur
   Preis/Dauer, sondern `50% Preis + 25% Dauer + 25% Komfort` (Gewichte in
   `engine.py` anpassbar) - eine 5€ teurere, aber deutlich komfortablere
@@ -250,20 +250,46 @@ genau wie bei den anderen Secrets oben:
    in `docs/app.js` in die Konstante `PROXY_URL` eintragen (Zeile mit
    `const PROXY_URL = '';`) und committen.
 
-### KI-Empfehlung (Gemini) aktivieren - optional
+### KI-Empfehlung aktivieren - optional
 
-Der Worker kann zusätzlich eine KI-Empfehlung liefern (`POST /ai`). Dafür:
+Der Worker kann zusätzlich eine KI-Empfehlung liefern (`POST /ai`).
+**Drei Anbieter werden unterstützt** - es reicht *einer*, und zwar der, für
+den du am einfachsten einen Key bekommst:
 
-1. Kostenlosen API-Key auf [aistudio.google.com](https://aistudio.google.com/apikey)
-   erstellen ("Get API key" -> *Create API key*).
-2. Als Repo-Secret `GEMINI_API_KEY` hinterlegen (Settings -> Secrets and
-   variables -> Actions).
+| Anbieter | Key holen | Repo-Secret | Braucht Cloud-Projekt/Abrechnung? |
+|---|---|---|---|
+| Google Gemini | [aistudio.google.com](https://aistudio.google.com/apikey) | `GEMINI_API_KEY` | Cloud-Projekt ja, Abrechnung nein |
+| Groq | [console.groq.com/keys](https://console.groq.com/keys) | `GROQ_API_KEY` | nein |
+| Mistral | [console.mistral.ai/api-keys](https://console.mistral.ai/api-keys) | `MISTRAL_API_KEY` | nein |
+
+Google sperrt die Key-Erstellung für manche Konten komplett (Alter, Region,
+oder Workspace-Richtlinie - erkennbar an "Sie sind derzeit nicht berechtigt,
+API Key zu erstellen"). Deshalb sind Groq und Mistral als vollwertige
+Alternativen eingebaut; beide vergeben Keys ohne Cloud-Projekt und ohne
+Zahlungsdaten.
+
+1. Bei einem der drei Anbieter einen Key erstellen.
+2. Als Repo-Secret unter dem passenden Namen aus der Tabelle hinterlegen
+   (Settings -> Secrets and variables -> Actions).
 3. Worker neu deployen (Actions-Tab -> *Deploy proxy worker* -> *Run
-   workflow*) - der Key wird dabei automatisch als Worker-Secret gesetzt.
+   workflow*) - der Key wird automatisch als Worker-Secret gesetzt.
 
-Ohne dieses Secret funktioniert alles andere normal weiter; der Button
-zeigt dann nur einen Hinweis, dass die KI-Empfehlung nicht eingerichtet ist.
-Der Key liegt ausschließlich im Worker, nie im Browser-JS.
+Sind mehrere gesetzt, gewinnt Gemini vor Groq vor Mistral. Ohne jeden Key
+funktioniert alles andere normal weiter; der Button zeigt dann nur einen
+Hinweis. Der Key liegt ausschließlich im Worker, nie im Browser-JS.
+
+**Modellname überschreiben:** Anbieter mustern Modellnamen gelegentlich aus.
+Falls die Antwort dann "model not found" o.ä. lautet, muss dafür kein Code
+geändert werden - eine Repo-*Variable* (nicht Secret) namens `AI_MODEL`
+setzen und neu deployen. Standard ist `gemini-2.0-flash`,
+`llama-3.3-70b-versatile` bzw. `mistral-small-latest`.
+
+**Kann ich einen Key aus einem anderen Google-Projekt nehmen?** Ja - der
+Worker schickt den Key nur weiter, das Projekt dahinter ist ihm egal. Zwei
+Bedingungen: in dem Projekt muss die *Generative Language API* aktiviert
+sein, und falls für den Key API-Einschränkungen gesetzt sind, muss sie dort
+erlaubt sein. Ein Key für einen *anderen* Google-Dienst (Maps, YouTube, …)
+funktioniert nicht.
 
 Was die KI macht und was nicht: sie bekommt die *bereits gefundenen*
 Angebote plus die eingestellten Kriterien und begründet eine Auswahl. Sie
@@ -277,7 +303,8 @@ cd worker/
 npm install
 npx wrangler login
 npx wrangler secret put TRAVELPAYOUTS_TOKEN   # denselben Token wie oben einfügen
-npx wrangler secret put GEMINI_API_KEY        # optional, nur für die KI-Empfehlung
+npx wrangler secret put GROQ_API_KEY          # optional, nur für die KI-Empfehlung
+                                              # (oder GEMINI_API_KEY / MISTRAL_API_KEY)
 npx wrangler deploy
 ```
 Ausgegebene URL wie oben in `PROXY_URL` eintragen.

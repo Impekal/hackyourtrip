@@ -1245,12 +1245,14 @@ async function requestAiRecommendation() {
     });
     const payload = await resp.json().catch(() => null);
     if (resp.status === 501) {
-      // Key not set up - say so plainly instead of pretending it failed.
-      aiResultEl.textContent = 'KI-Empfehlung ist nicht eingerichtet: im Cloudflare-Worker fehlt das Secret GEMINI_API_KEY (siehe README).';
+      // No provider key set up - say so plainly instead of pretending it failed.
+      aiResultEl.textContent = 'KI-Empfehlung ist nicht eingerichtet: im Cloudflare-Worker fehlt ein Anbieter-Schlüssel '
+        + '(GEMINI_API_KEY, GROQ_API_KEY oder MISTRAL_API_KEY - siehe README).';
     } else if (!resp.ok || !payload?.text) {
       aiResultEl.textContent = `KI-Empfehlung nicht möglich: ${payload?.error || `HTTP ${resp.status}`}`;
     } else {
-      aiResultEl.textContent = payload.text;
+      // Name the model, so it's obvious which provider actually answered.
+      aiResultEl.textContent = payload.text + (payload.model ? `\n\n— ${payload.model}` : '');
     }
   } catch (e) {
     aiResultEl.textContent = `KI-Empfehlung nicht erreichbar: ${e.message}`;

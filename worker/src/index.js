@@ -8,9 +8,9 @@
  *
  *   GET  /cheap   -> Travelpayouts aviasales/v3/prices_for_dates
  *   GET  /latest  -> Travelpayouts v2/prices/latest
- *   POST /ai      -> Gemini, for the optional "KI-Empfehlung" (needs
- *                    GEMINI_API_KEY; without it the endpoint reports itself
- *                    as unconfigured and the UI just hides the feature)
+ *   POST /ai      -> whichever AI provider has its key set, for the optional
+ *                    "KI-Empfehlung" (see AI_PROVIDERS; with none set the
+ *                    endpoint reports itself unconfigured and the UI says so)
  *
  * Deliberately thin: no business logic here beyond auth-hiding, input
  * validation, CORS, and edge caching - month fan-out, duration estimation,
@@ -46,10 +46,83 @@ const FORWARDABLE_PARAMS = [
   "period_type", "beginning_of_period",
 ];
 
-// Gemini for the optional AI recommendation. It only ever sees the offers
-// the search already found - it cannot look up flights of its own, so it
-// analyses and recommends rather than searching.
-const GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
+// Providers for the optional AI recommendation, in priority order: the
+// first one with its key present wins. Several are supported on purpose -
+// Google blocks API-key creation for some accounts entirely (age, region,
+// or Workspace policy), and that shouldn't be the end of the feature. Groq
+// and Mistral hand out keys without a cloud project or billing setup.
+//
+// Whichever runs, it only ever sees the offers the search already found -
+// none of them can look up flights, so they analyse and recommend rather
+// than search.
+//
+// Each model can be overridden with the AI_MODEL secret/var without a code
+// change, since providers retire model names on their own schedule.
+const AI_PROVIDERS = [
+  {
+    name: "gemini",
+    keyVar: "GEMINI_API_KEY",
+    defaultModel: "gemini-2.0-flash",
+    buildRequest(key, model, prompt) {
+      return {
+        url: `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`,
+        headers: { "Content-Type": "application/json" },
+        body: {
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { temperature: 0.3, maxOutputTokens: 700 },
+        },
+      };
+    },
+    extractText: (payload) => (payload?.candidates?.[0]?.content?.parts || [])
+      .map((p) => p.text || "").join(""),
+    extractError: (payload) => payload?.error?.message,
+  },
+  // Groq and Mistral both speak the OpenAI chat-completions shape, so they
+  // share buildRequest/extractText and differ only in URL and model.
+  {
+    name: "groq",
+    keyVar: "GROQ_API_KEY",
+    defaultModel: "llama-3.3-70b-versatile",
+    url: "https://api.groq.com/openai/v1/chat/completions",
+  },
+  {
+    name: "mistral",
+    keyVar: "MISTRAL_API_KEY",
+    defaultModel: "mistral-small-latest",
+    url: "https://api.mistral.ai/v1/chat/completions",
+  },
+];
+
+function openAiStyleRequest(key, model, prompt, url) {
+  return {
+    url,
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+    body: {
+      model,
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.3,
+      max_tokens: 700,
+    },
+  };
+}
+
+function pickAiProvider(env) {
+  const provider = AI_PROVIDERS.find((p) => env[p.keyVar]);
+  if (!provider) return null;
+  const model = env.AI_MODEL || provider.defaultModel;
+  return {
+    name: provider.name,
+    model,
+    prepare: (prompt) => (provider.buildRequest
+      ? provider.buildRequest(env[provider.keyVar], model, prompt)
+      : openAiStyleRequest(env[provider.keyVar], model, prompt, provider.url)),
+    readText: provider.extractText
+      || ((payload) => payload?.choices?.[0]?.message?.content || ""),
+    readError: provider.extractError
+      || ((payload) => payload?.error?.message || payload?.message),
+  };
+}
+
 const AI_MAX_BODY_BYTES = 32 * 1024;
 
 function corsHeaders(origin) {
@@ -78,18 +151,22 @@ function isValidDateOrMonth(value) {
 }
 
 /**
- * POST /ai - forward a prepared prompt to Gemini and hand back just the
- * text. The prompt is built client-side from offers the search already
- * found; nothing here fetches travel data.
+ * POST /ai - forward a prepared prompt to whichever AI provider is
+ * configured and hand back just the text. The prompt is built client-side
+ * from offers the search already found; nothing here fetches travel data.
  */
 async function handleAiRequest(request, env, allowedOrigin) {
   if (request.method !== "POST") {
     return jsonResponse({ error: "Use POST for /ai." }, 405, allowedOrigin);
   }
-  if (!env.GEMINI_API_KEY) {
-    // Not an error: the AI recommendation is optional, and the UI hides
-    // itself when the key isn't set up.
-    return jsonResponse({ configured: false, error: "GEMINI_API_KEY is not configured." }, 501, allowedOrigin);
+  const provider = pickAiProvider(env);
+  if (!provider) {
+    // Not an error: the AI recommendation is optional, and the UI says so
+    // rather than showing a failure.
+    return jsonResponse({
+      configured: false,
+      error: `No AI provider configured. Set one of: ${AI_PROVIDERS.map((p) => p.keyVar).join(", ")}.`,
+    }, 501, allowedOrigin);
   }
 
   let body;
@@ -107,31 +184,28 @@ async function handleAiRequest(request, env, allowedOrigin) {
     return jsonResponse({ error: "Missing 'prompt'." }, 400, allowedOrigin);
   }
 
+  const spec = provider.prepare(prompt);
   let upstreamResponse;
   try {
-    upstreamResponse = await fetch(`${GEMINI_URL}?key=${encodeURIComponent(env.GEMINI_API_KEY)}`, {
+    upstreamResponse = await fetch(spec.url, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.3, maxOutputTokens: 700 },
-      }),
+      headers: spec.headers,
+      body: JSON.stringify(spec.body),
     });
   } catch (err) {
-    return jsonResponse({ error: `Gemini request failed: ${err.message}` }, 502, allowedOrigin);
+    return jsonResponse({ error: `${provider.name} request failed: ${err.message}` }, 502, allowedOrigin);
   }
 
   const payload = await upstreamResponse.json().catch(() => null);
   if (!upstreamResponse.ok) {
-    const detail = payload?.error?.message || `status ${upstreamResponse.status}`;
-    return jsonResponse({ error: `Gemini error: ${detail}` }, 502, allowedOrigin);
+    const detail = provider.readError(payload) || `status ${upstreamResponse.status}`;
+    return jsonResponse({ error: `${provider.name} error: ${detail}` }, 502, allowedOrigin);
   }
-  const text = (payload?.candidates?.[0]?.content?.parts || [])
-    .map((p) => p.text || "").join("").trim();
+  const text = (provider.readText(payload) || "").trim();
   if (!text) {
-    return jsonResponse({ error: "Gemini returned no usable text." }, 502, allowedOrigin);
+    return jsonResponse({ error: `${provider.name} returned no usable text.` }, 502, allowedOrigin);
   }
-  return jsonResponse({ configured: true, text }, 200, allowedOrigin);
+  return jsonResponse({ configured: true, provider: provider.name, model: provider.model, text }, 200, allowedOrigin);
 }
 
 export default {
