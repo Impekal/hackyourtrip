@@ -250,6 +250,141 @@ function mockHotelOffers(route) {
 }
 
 /* =========================================================================
+ * Real flight prices via the HackYourTrip proxy (worker/) - optional.
+ *
+ * The Suche tab runs in the visitor's browser, so it can never hold the
+ * real Travelpayouts token itself (anyone could read it from dev tools).
+ * PROXY_URL points at a small Cloudflare Worker (see worker/README or the
+ * repo README's "Live-Suche mit echten Preisen" section) that hides the
+ * token server-side and proxies GET /v1/prices/cheap. Leave PROXY_URL empty
+ * to keep the Suche tab on mock data only - everything below degrades
+ * gracefully (empty string, network error, non-2xx response, or an empty
+ * result all just fall back to mockFlightOffers()).
+ * ===================================================================== */
+const PROXY_URL = ''; // e.g. 'https://hackyourtrip-proxy.<you>.workers.dev'
+const REAL_FLIGHT_MAX_DATES = 5; // mirrors traveldeals/providers/travelpayouts.py
+
+// Mirrors traveldeals/providers/geo.py: distance-based duration estimate,
+// direct flights only - a connection's layover length has nothing to do
+// with origin-destination distance, so it stays unknown (0) rather than
+// guessed. Kept intentionally small (dense in Europe, sparse worldwide
+// hubs) to match the routes this tool is realistically used for.
+const AVERAGE_BLOCK_SPEED_KMH = 750;
+const FIXED_OVERHEAD_HOURS = 0.5;
+const AIRPORT_COORDS = {
+  BER: [52.3667, 13.5033], MUC: [48.3538, 11.7861], FRA: [50.0379, 8.5622],
+  DUS: [51.2895, 6.7668], HAM: [53.6304, 9.9882], STR: [48.6899, 9.2220],
+  CGN: [50.8659, 7.1427], HAJ: [52.4611, 9.6851], NUE: [49.4987, 11.0669],
+  LEJ: [51.4239, 12.2364], DTM: [51.5183, 7.6122], BRE: [53.0475, 8.7867],
+  VIE: [48.1103, 16.5697], ZRH: [47.4647, 8.5492], GVA: [46.2381, 6.1090],
+  SZG: [47.7933, 13.0043], INN: [47.2602, 11.3440], BSL: [47.5896, 7.5299],
+  LHR: [51.4700, -0.4543], LGW: [51.1537, -0.1821], STN: [51.8860, 0.2389],
+  LTN: [51.8747, -0.3683], MAN: [53.3537, -2.2750], EDI: [55.9500, -3.3725],
+  GLA: [55.8642, -4.4331], DUB: [53.4213, -6.2701],
+  CDG: [49.0097, 2.5479], ORY: [48.7233, 2.3794], NCE: [43.6584, 7.2159],
+  LYS: [45.7256, 5.0811], MRS: [43.4393, 5.2214], TLS: [43.6291, 1.3638],
+  BOD: [44.8283, -0.7156], NTE: [47.1532, -1.6110],
+  AMS: [52.3086, 4.7639], BRU: [50.9014, 4.4844],
+  MAD: [40.4983, -3.5676], BCN: [41.2971, 2.0785], PMI: [39.5517, 2.7388],
+  VLC: [39.4893, -0.4816], SVQ: [37.4180, -5.8931], BIO: [43.3011, -2.9106],
+  IBZ: [38.8729, 1.3731], AGP: [36.6749, -4.4991],
+  FCO: [41.8003, 12.2389], MXP: [45.6306, 8.7281], LIN: [45.4451, 9.2767],
+  VCE: [45.5053, 12.3519], NAP: [40.8860, 14.2908],
+  LIS: [38.7813, -9.1359], OPO: [41.2481, -8.6814],
+  CPH: [55.6180, 12.6560], ARN: [59.6519, 17.9186], OSL: [60.1976, 11.1004],
+  HEL: [60.3172, 24.9633], KEF: [63.9850, -22.6056],
+  WAW: [52.1657, 20.9671], PRG: [50.1008, 14.2600], BUD: [47.4298, 19.2610],
+  OTP: [44.5711, 26.0850], SOF: [42.6952, 23.4062], ZAG: [45.7429, 16.0688],
+  LJU: [46.2237, 14.4576], RIX: [56.9236, 23.9711], TLL: [59.4133, 24.8328],
+  VNO: [54.6341, 25.2858], BEG: [44.8184, 20.3091],
+  ATH: [37.9364, 23.9445], SKG: [40.5197, 22.9709], IST: [41.2753, 28.7519],
+  DXB: [25.2532, 55.3657], DOH: [25.2731, 51.6081], AUH: [24.4330, 54.6511],
+  SIN: [1.3644, 103.9915], HKG: [22.3080, 113.9185], NRT: [35.7720, 140.3929],
+  HND: [35.5494, 139.7798], ICN: [37.4602, 126.4407], BKK: [13.6900, 100.7501],
+  KUL: [2.7456, 101.7099], DEL: [28.5562, 77.1000], BOM: [19.0887, 72.8679],
+  CAI: [30.1219, 31.4056], JNB: [-26.1392, 28.2460], CPT: [-33.9715, 18.6021],
+  SYD: [-33.9399, 151.1753], MEL: [-37.6690, 144.8410], AKL: [-37.0082, 174.7850],
+  JFK: [40.6413, -73.7781], EWR: [40.6895, -74.1745], LAX: [33.9416, -118.4085],
+  ORD: [41.9742, -87.9073], MIA: [25.7959, -80.2870], SFO: [37.6213, -122.3790],
+  YYZ: [43.6777, -79.6248], YUL: [45.4706, -73.7408],
+  GRU: [-23.4356, -46.4731], EZE: [-34.8222, -58.5358],
+};
+
+function haversineKm([lat1, lon1], [lat2, lon2]) {
+  const r = 6371;
+  const toRad = d => (d * Math.PI) / 180;
+  const dphi = toRad(lat2 - lat1);
+  const dlambda = toRad(lon2 - lon1);
+  const a = Math.sin(dphi / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dlambda / 2) ** 2;
+  return 2 * r * Math.asin(Math.sqrt(a));
+}
+
+function estimateDirectFlightDurationHours(origin, destination) {
+  const a = AIRPORT_COORDS[origin.toUpperCase()];
+  const b = AIRPORT_COORDS[destination.toUpperCase()];
+  if (!a || !b) return null;
+  return round1(haversineKm(a, b) / AVERAGE_BLOCK_SPEED_KMH + FIXED_OVERHEAD_HOURS);
+}
+
+function sessionCacheGet(key) {
+  try { const v = sessionStorage.getItem(key); return v ? JSON.parse(v) : null; } catch (e) { return null; }
+}
+function sessionCacheSet(key, value) {
+  try { sessionStorage.setItem(key, JSON.stringify(value)); } catch (e) { /* private mode etc. - fine to skip caching */ }
+}
+
+function travelpayoutsRawToOffer(raw, currency) {
+  const departIso = raw.departure_at.replace(/Z$/, '');
+  const depart = new Date(departIso);
+  const stops = Number(raw.transfers ?? 0);
+  let durationHours = 0;
+  let arrive = depart;
+  if (stops === 0) {
+    const estimate = estimateDirectFlightDurationHours(raw.origin, raw.destination);
+    if (estimate !== null) {
+      durationHours = estimate;
+      arrive = new Date(depart.getTime() + estimate * 3600000);
+    }
+  }
+  return {
+    mode: 'flight',
+    bookingSite: `Aviasales (${raw.airline ?? '?'}${raw.flight_number ?? ''})`,
+    price: Number(raw.price), currency, depart, durationHours,
+    bagFee: 0, isLowCost: false, stops,
+    wifiOnboard: false, powerOutlets: false, legroomCm: null, punctualityPct: null,
+  };
+}
+
+async function fetchRealFlightOffers(route) {
+  if (!PROXY_URL) return null; // not configured - caller falls back to mock
+  const offers = [];
+  for (const day of dayCandidates(route).slice(0, REAL_FLIGHT_MAX_DATES)) {
+    const dateStr = isoDay(day);
+    const cacheKey = `hyt:${route.origin}:${route.destination}:${dateStr}:${route.currency}`;
+    let payload = sessionCacheGet(cacheKey);
+    if (!payload) {
+      try {
+        const url = `${PROXY_URL.replace(/\/$/, '')}/cheap?origin=${encodeURIComponent(route.origin)}`
+          + `&destination=${encodeURIComponent(route.destination)}&depart_date=${dateStr}`
+          + `&currency=${route.currency.toLowerCase()}`;
+        const resp = await fetch(url);
+        if (!resp.ok) continue;
+        payload = await resp.json();
+        sessionCacheSet(cacheKey, payload);
+      } catch (e) {
+        continue; // this day failed - keep trying the others
+      }
+    }
+    if (!payload || payload.success === false) continue;
+    const currency = (payload.currency || route.currency).toUpperCase();
+    for (const raw of Object.values(payload.data || {})) {
+      offers.push(travelpayoutsRawToOffer(raw, currency));
+    }
+  }
+  return offers;
+}
+
+/* =========================================================================
  * Currency - live rate via the free Frankfurter API when reachable
  * (this page is a real hosted site, not a sandboxed artifact, so the fetch
  * is allowed), falling back to a static table otherwise.
@@ -349,20 +484,29 @@ const OR_COMBO_MODES = { train_or_bus: ['train', 'bus'], flight_or_train: ['flig
 
 async function runSearch(route) {
   const pools = {};
-  const pool = mode => (pools[mode] ??= ({ flight: mockFlightOffers, train: mockTrainOffers, bus: mockBusOffers, hotel: mockHotelOffers }[mode](route)));
+  async function pool(mode) {
+    if (pools[mode]) return pools[mode];
+    if (mode === 'flight') {
+      const real = await fetchRealFlightOffers(route);
+      pools[mode] = (real && real.length) ? real : mockFlightOffers(route);
+    } else {
+      pools[mode] = { train: mockTrainOffers, bus: mockBusOffers, hotel: mockHotelOffers }[mode](route);
+    }
+    return pools[mode];
+  }
 
   let candidates = [];
   for (const mode of route.modes) {
     if (['flight', 'train', 'bus', 'hotel'].includes(mode)) {
-      for (const offer of pool(mode)) candidates.push({ mode, offers: [offer], price: offer.price, durationHours: offer.durationHours });
+      for (const offer of await pool(mode)) candidates.push({ mode, offers: [offer], price: offer.price, durationHours: offer.durationHours });
     } else if (COMBO_TRANSPORT_MODE[mode]) {
       const tMode = COMBO_TRANSPORT_MODE[mode];
-      for (const combo of buildCombos(pool(tMode), pool('hotel'))) {
+      for (const combo of buildCombos(await pool(tMode), await pool('hotel'))) {
         candidates.push({ mode, offers: [combo.transport, combo.hotel], price: combo.price, durationHours: combo.transport.durationHours });
       }
     } else if (OR_COMBO_MODES[mode]) {
       const [modeA, modeB] = OR_COMBO_MODES[mode];
-      for (const offer of [...pool(modeA), ...pool(modeB)]) {
+      for (const offer of [...(await pool(modeA)), ...(await pool(modeB))]) {
         candidates.push({ mode, offers: [offer], price: offer.price, durationHours: offer.durationHours });
       }
     }

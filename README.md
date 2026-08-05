@@ -62,13 +62,15 @@ auf einem Dashboard die besten aktuellen Optionen pro Strecke zeigt.
 - **🔍 Suche** - interaktive Deal-Plattform-artige Suche direkt im Browser:
   10 Modus-Reiter (Flug/Bahn/Bus/Hotel/Kombis), jeweils nur mit den dazu
   passenden Feldern (z.B. kein "Von" im Hotel-Tab), Ergebnisse erscheinen
-  sofort - ganz ohne Server, weil `docs/app.js` dieselbe Mock-Provider- und
-  Ranking-Logik (inkl. Komfort-Score und Hotel-/Transport-Filtern) wie
-  `traveldeals/` clientseitig in JavaScript nachbildet.
-  Kein Fehlerpreis/Preisfall hier, weil das eine echte Preishistorie über die
-  Zeit braucht, die eine zustandslose Browser-Suche nicht hat. Am Ende lässt
-  sich die Suche als YAML-Block für `config/routes.yaml` kopieren, um sie in
-  echte, dauerhafte Alerts zu verwandeln.
+  sofort, weil `docs/app.js` dieselbe Mock-Provider- und Ranking-Logik
+  (inkl. Komfort-Score und Hotel-/Transport-Filtern) wie `traveldeals/`
+  clientseitig in JavaScript nachbildet. Für Flüge lässt sich das auf echte
+  Travelpayouts-Preise umstellen, siehe "Live-Suche mit echten Preisen"
+  unten - ohne dieses (optionale) Setup läuft alles auf Mock-Daten, ganz
+  ohne Server. Kein Fehlerpreis/Preisfall hier, weil das eine echte
+  Preishistorie über die Zeit braucht, die eine Browser-Suche nicht hat.
+  Am Ende lässt sich die Suche als YAML-Block für `config/routes.yaml`
+  kopieren, um sie in echte, dauerhafte Alerts zu verwandeln.
 - **🔔 Meine Alerts** - das bisherige Dashboard: liest `docs/data/deals.json`,
   das Ergebnis des letzten `traveldeals.cli check`-Laufs (lokal oder per
   GitHub-Actions-Cron), inklusive Fehlerpreis-/Preisfall-Erkennung, weil das
@@ -96,9 +98,12 @@ traveldeals/
 docs/
   index.html        Tabs "Suche" (live) und "Meine Alerts" (Cron-Ergebnis)
   app.js            JS-Port von Mock-Providern + Ranking fürs Suche-Tab,
-                     plus Fetch-Logik fürs Alerts-Tab
+                     plus Fetch-Logik fürs Alerts-Tab und optional den
+                     Live-Preis-Proxy (PROXY_URL)
 data/               Preishistorie (wird vom Cronjob committet)
 .github/workflows/  Scheduled Job, der `check` laufen lässt
+worker/             Optionaler Cloudflare-Worker-Proxy, versteckt den
+                     Travelpayouts-Token fürs Suche-Tab (siehe unten)
 ```
 
 **Warum Mock-Daten?** Echte Preisvergleiche brauchen pro Modus eine reale
@@ -153,6 +158,51 @@ funktioniert weiterhin und `cli.py` nutzt es automatisch, falls
 `AMADEUS_API_KEY`/`AMADEUS_API_SECRET` gesetzt sind - aber neu kommt man an
 solche Zugangsdaten nur noch über ein Enterprise-Konto, nicht per
 Selfservice-Anmeldung.
+
+## Live-Suche mit echten Preisen (Cloudflare-Worker-Proxy)
+
+Der **Suche**-Tab läuft komplett im Browser der Besucher:innen (`docs/app.js`)
+- er kann deshalb nie den echten Travelpayouts-Token selbst halten, sonst
+könnte ihn jeder über die Browser-Devtools auslesen. Ohne weiteres Setup
+bleibt die freie A-nach-B-Suche deshalb auf Mock-Daten.
+
+Um dort trotzdem echte Preise für beliebige Strecken zu bekommen, gibt es
+`worker/` - einen minimalen, kostenlosen Cloudflare-Worker-Proxy, der den
+Token serverseitig versteckt und Anfragen an `v1/prices/cheap` weiterreicht:
+
+1. Kostenloses Konto auf [dash.cloudflare.com](https://dash.cloudflare.com).
+2. Im Ordner `worker/`:
+   ```bash
+   npm install
+   npx wrangler login
+   npx wrangler secret put TRAVELPAYOUTS_TOKEN   # denselben Token wie oben einfügen
+   npx wrangler deploy
+   ```
+3. Die ausgegebene `*.workers.dev`-URL in `docs/app.js` in die Konstante
+   `PROXY_URL` eintragen (Zeile mit `const PROXY_URL = '';`) und committen.
+
+Ohne gesetzte `PROXY_URL` - oder wenn der Proxy mal nicht erreichbar ist -
+fällt die Suche automatisch auf Mock-Daten zurück, es gibt also keinen
+kaputten Zustand dazwischen.
+
+**Warum ein eigener Proxy und nicht direkt der Cronjob/die Watchlist?**
+Die Watchlist (`ROUTES_YAML_CONTENT`) ist für Strecken, die du dauerhaft im
+Hintergrund beobachten willst (mit Preishistorie, Fehlerpreis-Erkennung,
+Telegram/E-Mail-Alerts). Der Proxy ist für spontanes Suchen "wonach mir
+gerade ist" - beides nutzt denselben Travelpayouts-Token, aber für zwei
+unterschiedliche Zwecke.
+
+**Quota-Schutz:** Weil die Suche-Seite öffentlich ist, cached der Worker
+Antworten für dieselbe Strecke+Datum+Währung serverseitig ca. 1 Stunde
+(Cloudflare Cache API), damit nicht jeder Seitenbesuch einzeln aufs
+Travelpayouts-Kontingent geht. Für zusätzlichen Schutz gegen Missbrauch
+kann man im Cloudflare-Dashboard optional eine Rate-Limiting-Regel
+hinzufügen (im kostenlosen Plan enthalten).
+
+**Grenzen:** Die Flugdauer-Schätzung für Direktflüge (`docs/app.js`,
+`estimateDirectFlightDurationHours`) ist derselbe Ansatz wie auf der
+Python-Seite (`providers/geo.py`) - bei Umstiegen bleibt die Dauer bewusst
+unbekannt, siehe "Was die Daten wirklich sind" oben.
 
 ## Setup
 
