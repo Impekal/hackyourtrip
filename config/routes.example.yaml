@@ -41,6 +41,8 @@ routes:
       require_wifi_onboard: false
       require_power_outlets: false
       min_punctuality_pct: null
+      preferred_depart_time: null   # "HH:MM", z.B. "09:00" - null = egal, jede Uhrzeit ok
+      depart_time_flex_minutes: 0   # Zeitfenster +/- um preferred_depart_time (nur falls gesetzt)
     low_cost_airlines_ok: true
     notes: "Herbstferien, Datum ist flexibel"
 

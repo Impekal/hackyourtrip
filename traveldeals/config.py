@@ -69,6 +69,8 @@ def _parse_route(raw: dict) -> RoutePreference:
             require_wifi_onboard=bool(transport_raw.get("require_wifi_onboard", False)),
             require_power_outlets=bool(transport_raw.get("require_power_outlets", False)),
             min_punctuality_pct=transport_raw.get("min_punctuality_pct"),
+            preferred_depart_time=transport_raw.get("preferred_depart_time"),
+            depart_time_flex_minutes=int(transport_raw.get("depart_time_flex_minutes", 0)),
         ),
         low_cost_airlines_ok=bool(raw.get("low_cost_airlines_ok", True)),
         notes=raw.get("notes", ""),

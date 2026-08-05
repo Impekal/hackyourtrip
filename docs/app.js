@@ -453,11 +453,26 @@ function meetsHotelPrefs(o, p) {
   if (p.requirePoolOrFitness && !o.poolOrFitness) return false;
   return true;
 }
+function minutesSinceMidnight(hhmm) {
+  const [h, m] = hhmm.split(':').map(Number);
+  return h * 60 + m;
+}
+function circularMinutesDiff(a, b) {
+  const diff = Math.abs(a - b) % 1440;
+  return Math.min(diff, 1440 - diff);
+}
+function offerTimeOfDay(offer) {
+  return offer.depart.getHours() * 60 + offer.depart.getMinutes();
+}
 function meetsTransportPrefs(o, p) {
   if (p.directOnly && o.stops > 0) return false;
   if (p.requireWifiOnboard && !o.wifiOnboard) return false;
   if (p.requirePowerOutlets && !o.powerOutlets) return false;
   if (p.minPunctuality != null && (o.punctualityPct ?? 0) < p.minPunctuality) return false;
+  if (p.preferredDepartTime) {
+    const diff = circularMinutesDiff(offerTimeOfDay(o), minutesSinceMidnight(p.preferredDepartTime));
+    if (diff > (p.departTimeFlexMinutes || 0)) return false;
+  }
   return true;
 }
 
@@ -545,7 +560,11 @@ async function runSearch(route) {
     const samePool = pools[primary.mode] || [];
 
     if (['flight', 'train', 'bus'].includes(primary.mode)) {
-      const sameDayLater = samePool.filter(o =>
+      // Only compare against offers that also satisfy the route's own
+      // transport constraints (esp. the depart-time window) - otherwise
+      // this could suggest a time the user already said doesn't work.
+      const eligiblePool = samePool.filter(o => meetsTransportPrefs(o, route.transportPrefs));
+      const sameDayLater = eligiblePool.filter(o =>
         isoDay(o.depart) === isoDay(primary.depart) && o.depart > primary.depart && o.price < primary.price
       );
       if (sameDayLater.length) {
@@ -652,6 +671,9 @@ function readRouteFromForm() {
       requireWifiOnboard: document.getElementById('requireWifiOnboard').checked,
       requirePowerOutlets: document.getElementById('requirePowerOutlets').checked,
       minPunctuality: numOrNull('minPunctuality'),
+      preferredDepartTime: document.getElementById('preferredDepartTime').value || null,
+      departTimeFlexMinutes: Number(document.getElementById('departTimeFlexHours').value || 0) * 60
+                           + Number(document.getElementById('departTimeFlexMinutes').value || 0),
     },
   };
 }
@@ -721,6 +743,8 @@ function buildYamlSnippet(route) {
       require_wifi_onboard: ${tp.requireWifiOnboard}
       require_power_outlets: ${tp.requirePowerOutlets}
       min_punctuality_pct: ${tp.minPunctuality ?? 'null'}
+      preferred_depart_time: ${tp.preferredDepartTime ? `"${tp.preferredDepartTime}"` : 'null'}
+      depart_time_flex_minutes: ${tp.departTimeFlexMinutes || 0}
     low_cost_airlines_ok: ${route.lowCostOk}
 `;
 }

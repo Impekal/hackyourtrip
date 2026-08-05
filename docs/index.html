@@ -270,6 +270,18 @@
             <label for="minPunctuality">Mindest-Pünktlichkeit %</label>
             <input type="number" id="minPunctuality" min="0" max="100" placeholder="egal">
           </div>
+          <div class="field">
+            <label for="preferredDepartTime">Bevorzugte Abfahrtszeit</label>
+            <input type="time" id="preferredDepartTime">
+          </div>
+          <div class="field">
+            <label for="departTimeFlexHours">Zeitfenster ± Std.</label>
+            <input type="number" id="departTimeFlexHours" min="0" value="0">
+          </div>
+          <div class="field">
+            <label for="departTimeFlexMinutes">± Min.</label>
+            <input type="number" id="departTimeFlexMinutes" min="0" max="59" value="0">
+          </div>
         </div>
         <div class="checks" style="margin-top:0.7rem">
           <label><input type="checkbox" id="directOnly"> Nur Direktverbindungen</label>

@@ -209,3 +209,51 @@ def test_best_value_prefers_more_comfortable_hotel_at_similar_price(tmp_path):
     route = make_route(modes=[Mode.HOTEL], priority=Priority.BEST_VALUE)
     result = engine.search(route)
     assert result[0].total_price == 105
+
+
+def test_preferred_depart_time_filters_offers_outside_the_window(tmp_path):
+    offers = [
+        Offer(mode=Mode.FLIGHT, provider="p", booking_site="A", price=100, currency="EUR",
+              depart_time="2026-09-10T09:00:00", arrive_time="2026-09-10T11:00:00", duration_hours=2),
+        Offer(mode=Mode.FLIGHT, provider="p", booking_site="B", price=80, currency="EUR",
+              depart_time="2026-09-10T21:00:00", arrive_time="2026-09-10T23:00:00", duration_hours=2),
+    ]
+    engine = make_engine({Mode.FLIGHT: FakeProvider(Mode.FLIGHT, offers)}, tmp_path)
+    route = make_route(transport=TransportPref(preferred_depart_time="09:00", depart_time_flex_minutes=60))
+    result = engine.search(route)
+    assert len(result) == 1
+    assert result[0].total_price == 100  # the cheaper 21:00 offer is outside the +/-60min window
+
+
+def test_preferred_depart_time_window_wraps_around_midnight(tmp_path):
+    offers = [
+        Offer(mode=Mode.FLIGHT, provider="p", booking_site="A", price=100, currency="EUR",
+              depart_time="2026-09-10T23:45:00", arrive_time="2026-09-11T01:45:00", duration_hours=2),
+    ]
+    engine = make_engine({Mode.FLIGHT: FakeProvider(Mode.FLIGHT, offers)}, tmp_path)
+    route = make_route(transport=TransportPref(preferred_depart_time="00:15", depart_time_flex_minutes=60))
+    result = engine.search(route)
+    assert len(result) == 1  # 23:45 is only 30min from 00:15 across midnight
+
+
+def test_later_departure_hint_never_suggests_a_time_outside_the_window(tmp_path):
+    offers = [
+        Offer(mode=Mode.FLIGHT, provider="p", booking_site="A", price=100, currency="EUR",
+              depart_time="2026-09-10T09:00:00", arrive_time="2026-09-10T11:00:00", duration_hours=2),
+        Offer(mode=Mode.FLIGHT, provider="p", booking_site="B", price=80, currency="EUR",
+              depart_time="2026-09-10T09:30:00", arrive_time="2026-09-10T11:30:00", duration_hours=2),
+        # much cheaper, but well outside the user's +/-60min window - must
+        # never be suggested even though it would otherwise be the obvious
+        # "leave later, save more" pick.
+        Offer(mode=Mode.FLIGHT, provider="p", booking_site="C", price=20, currency="EUR",
+              depart_time="2026-09-10T21:00:00", arrive_time="2026-09-10T23:00:00", duration_hours=2),
+    ]
+    engine = make_engine({Mode.FLIGHT: FakeProvider(Mode.FLIGHT, offers)}, tmp_path)
+    # FASTEST with equal durations keeps the 09:00/100 offer on top (stable
+    # sort), so the later-departure hint has something to compare against.
+    route = make_route(transport=TransportPref(preferred_depart_time="09:00", depart_time_flex_minutes=60),
+                        priority=Priority.FASTEST)
+    result = engine.search(route)
+    assert result[0].total_price == 100
+    assert not any("21:00" in r for r in result[0].recommendations)
+    assert any("09:30" in r and "20" in r for r in result[0].recommendations)

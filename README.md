@@ -35,7 +35,13 @@ auf einem Dashboard die besten aktuellen Optionen pro Strecke zeigt.
   ins `best_value`-Ranking ein (siehe unten).
 - **Transport-Kriterien** (`TransportPref`): nur Direktverbindungen, WLAN an
   Bord, Steckdosen, Mindest-Pünktlichkeit, Beinfreiheit (mode-abhängig
-  normalisiert) - ebenfalls Filter *und* Komfort-Score.
+  normalisiert) - ebenfalls Filter *und* Komfort-Score. Zusätzlich zur
+  Tage-Flexibilität (`flex_days_before/after`, welche *Tage* infrage kommen)
+  gibt es bei Bahn/Bus/Flug eine **Uhrzeit-Flexibilität**: bevorzugte
+  Abfahrtszeit + Zeitfenster in Stunden/Minuten (z.B. "09:00 ± 90 Minuten"),
+  zirkulär über Mitternacht hinweg berechnet. Angebote außerhalb des
+  Fensters werden herausgefiltert - auch die "später fahren spart X€"-
+  Empfehlung schlägt nie eine Zeit außerhalb dieses Fensters vor.
 - **Komfort-Score im `best_value`-Ranking:** `best_value` ist nicht mehr nur
   Preis/Dauer, sondern `50% Preis + 25% Dauer + 25% Komfort` (Gewichte in
   `engine.py` anpassbar) - eine 5€ teurere, aber deutlich komfortablere

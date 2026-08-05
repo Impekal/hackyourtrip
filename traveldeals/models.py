@@ -82,6 +82,11 @@ class TransportPref:
     require_wifi_onboard: bool = False
     require_power_outlets: bool = False
     min_punctuality_pct: Optional[float] = None
+    # Time-of-day window, independent of flex_days_before/after (which
+    # widens the set of candidate *dates*): "I want to leave around 09:00,
+    # +/- 90 minutes is fine" - None means no time-of-day preference at all.
+    preferred_depart_time: Optional[str] = None  # "HH:MM"
+    depart_time_flex_minutes: int = 0
 
 
 @dataclass

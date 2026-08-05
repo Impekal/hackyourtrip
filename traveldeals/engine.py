@@ -110,6 +110,18 @@ def _meets_hotel_constraints(offer: Offer, pref: HotelPref) -> bool:
     return True
 
 
+def _minutes_since_midnight(hhmm: str) -> int:
+    hours, minutes = hhmm.split(":")[:2]
+    return int(hours) * 60 + int(minutes)
+
+
+def _circular_minutes_diff(a: int, b: int) -> int:
+    """Distance between two times-of-day on a 24h clock, wrapping at
+    midnight - so a 23:30 preference with 90min flex still matches 00:30."""
+    diff = abs(a - b) % 1440
+    return min(diff, 1440 - diff)
+
+
 def _meets_transport_constraints(offer: Offer, pref: TransportPref) -> bool:
     if pref.direct_only and offer.stops > 0:
         return False
@@ -119,6 +131,11 @@ def _meets_transport_constraints(offer: Offer, pref: TransportPref) -> bool:
         return False
     if pref.min_punctuality_pct is not None and (offer.punctuality_pct or 0) < pref.min_punctuality_pct:
         return False
+    if pref.preferred_depart_time is not None:
+        offer_minutes = _minutes_since_midnight(offer.depart_time[11:16])
+        preferred_minutes = _minutes_since_midnight(pref.preferred_depart_time)
+        if _circular_minutes_diff(offer_minutes, preferred_minutes) > pref.depart_time_flex_minutes:
+            return False
     return True
 
 
@@ -246,8 +263,13 @@ class DealEngine:
                                    route: RoutePreference) -> None:
         if offer.mode not in (Mode.FLIGHT, Mode.TRAIN, Mode.BUS):
             return
+        # Only compare against offers that also satisfy the route's own
+        # transport constraints (esp. the depart-time window) - otherwise
+        # this could suggest a time the user already said doesn't work for
+        # them, which would contradict their own stated flexibility.
+        eligible_pool = [o for o in pool if _meets_transport_constraints(o, route.transport)]
         same_day_later = [
-            o for o in pool
+            o for o in eligible_pool
             if o.depart_time[:10] == offer.depart_time[:10]
             and o.depart_time > offer.depart_time
             and o.price < offer.price
