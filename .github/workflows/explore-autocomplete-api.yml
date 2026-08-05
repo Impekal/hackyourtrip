@@ -1,0 +1,25 @@
+name: Explore Travelpayouts autocomplete API (temporary)
+
+# One-off: verify the shape of Travelpayouts' public places-autocomplete
+# endpoint from a runner with real internet access (the dev sandbox has
+# none). Not wired into anything - delete once the shape is confirmed.
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  explore:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Query autocomplete.travelpayouts.com for a few terms
+        run: |
+          for term in Berlin London "New York" Paris; do
+            echo "=== term: $term ==="
+            curl -sS -w '\nHTTP_STATUS:%{http_code}\n' \
+              --get "https://autocomplete.travelpayouts.com/places2" \
+              --data-urlencode "term=$term" \
+              --data-urlencode "locale=de" \
+              --data-urlencode "types[]=city" \
+              --data-urlencode "types[]=airport"
+            echo
+          done
