@@ -28,9 +28,14 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: worker
+          # GEMINI_API_KEY is listed only when the repo secret actually
+          # exists: wrangler-action fails the whole deploy for any secret it
+          # is told to upload but can't find, and the AI recommendation is
+          # meant to be optional. The blank line when it's unset is dropped
+          # by getMultilineInput.
           secrets: |
             TRAVELPAYOUTS_TOKEN
-            GEMINI_API_KEY
+            ${{ secrets.GEMINI_API_KEY != '' && 'GEMINI_API_KEY' || '' }}
         env:
           TRAVELPAYOUTS_TOKEN: ${{ secrets.TRAVELPAYOUTS_TOKEN }}
           # Optional: only needed for the "KI-Empfehlung" button. Without it
@@ -42,6 +47,18 @@ jobs:
       # this itself, so it's worth having a real check run somewhere that can.
       - name: Smoke test the deployed worker
         run: |
-          URL="https://hackyourtrip-proxy.iamanamelessman.workers.dev/cheap?origin=BER&destination=BCN&depart_date=$(date -d '+30 days' +%F)&currency=eur"
-          echo "GET $URL"
-          curl -sS -w '\nHTTP_STATUS:%{http_code}\n' "$URL"
+          BASE="https://hackyourtrip-proxy.iamanamelessman.workers.dev"
+          MONTH="$(date -d '+30 days' +%Y-%m)"
+
+          echo "=== /cheap (prices_for_dates, whole month) ==="
+          curl -sS "$BASE/cheap?origin=BER&destination=BCN&departure_at=$MONTH&currency=eur&limit=1000&sorting=price&one_way=true" \
+            | python3 -c "import json,sys; d=json.load(sys.stdin); print('offers:', len(d.get('data',[])))"
+
+          echo "=== /latest (second index) ==="
+          curl -sS "$BASE/latest?origin=BER&destination=BCN&currency=eur&limit=1000&period_type=month&beginning_of_period=$MONTH-01&one_way=true" \
+            | python3 -c "import json,sys; d=json.load(sys.stdin); print('offers:', len(d.get('data',[])))"
+
+          echo "=== /ai (optional - 501 here just means GEMINI_API_KEY isn't set) ==="
+          curl -sS -o /dev/null -w 'HTTP_STATUS:%{http_code}\n' \
+            -X POST -H 'Content-Type: application/json' \
+            -d '{"prompt":"Antworte nur mit: ok"}' "$BASE/ai"
