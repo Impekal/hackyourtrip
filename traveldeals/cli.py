@@ -21,6 +21,7 @@ from traveldeals.notifiers.console import ConsoleNotifier
 from traveldeals.notifiers.email_notifier import EmailNotifier
 from traveldeals.notifiers.telegram import TelegramNotifier
 from traveldeals.pricehistory import PriceHistory
+from traveldeals.providers.amadeus import AmadeusFlightProvider
 from traveldeals.providers.base import Provider
 from traveldeals.providers.mock import (MockBusProvider, MockFlightProvider,
                                          MockHotelProvider, MockTrainProvider)
@@ -32,10 +33,13 @@ DEFAULT_DASHBOARD_JSON = REPO_ROOT / "docs" / "data" / "deals.json"
 
 
 def build_providers() -> dict[Mode, Provider]:
-    # v1: all mock. Swap entries here for traveldeals.providers.real.* once
-    # the corresponding API credentials exist (see providers/real.py).
+    # Flight uses the real Amadeus adapter once AMADEUS_API_KEY/SECRET are
+    # set (see providers/amadeus.py); train/bus/hotel are still mock.py
+    # until their real adapters (providers/real.py) get implemented.
+    amadeus = AmadeusFlightProvider()
+    flight_provider = amadeus if amadeus.configured else MockFlightProvider()
     return {
-        Mode.FLIGHT: MockFlightProvider(),
+        Mode.FLIGHT: flight_provider,
         Mode.TRAIN: MockTrainProvider(),
         Mode.BUS: MockBusProvider(),
         Mode.HOTEL: MockHotelProvider(),

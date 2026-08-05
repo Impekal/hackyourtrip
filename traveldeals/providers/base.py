@@ -8,8 +8,18 @@ engine, notifiers, or dashboard needs to change.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from datetime import date, timedelta
 
 from traveldeals.models import Mode, Offer, RoutePreference
+
+
+def date_candidates(route: RoutePreference) -> list[date]:
+    """Every day a route's flex window covers - shared by any provider that
+    needs to enumerate candidate travel/check-in dates (mock and real alike)."""
+    start = route.depart_date_from - timedelta(days=route.flex_days_before)
+    end = route.depart_date_until + timedelta(days=route.flex_days_after)
+    days = (end - start).days
+    return [start + timedelta(days=i) for i in range(days + 1)]
 
 
 class Provider(ABC):

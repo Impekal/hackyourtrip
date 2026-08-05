@@ -19,7 +19,10 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r requirements-dev.txt
+
+      - name: Run tests
+        run: pytest -q
 
       # Das Repo ist öffentlich, config/routes.yaml daher bewusst nicht
       # eingecheckt (siehe .gitignore). Stattdessen liegt der Inhalt als
@@ -36,6 +39,8 @@ jobs:
 
       - name: Run deal check
         env:
+          AMADEUS_API_KEY: ${{ secrets.AMADEUS_API_KEY }}
+          AMADEUS_API_SECRET: ${{ secrets.AMADEUS_API_SECRET }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           SMTP_HOST: ${{ secrets.SMTP_HOST }}

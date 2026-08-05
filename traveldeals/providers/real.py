@@ -1,10 +1,10 @@
-"""Extension points for real data sources.
+"""Extension points for real data sources that aren't wired up yet.
 
-Not implemented yet - v1 runs entirely on mock.py. Each class below is where
-a real integration plugs in later; config.py will swap the mock class for
-the matching real one here once credentials exist. Kept as explicit stubs
-(rather than omitted) so the shape of "what needs an API key" is visible
-from day one.
+v1 runs these as mock.py; providers/amadeus.py has since become the first
+fully-implemented real adapter (see that module) - config.py/cli.py swap it
+in for MockFlightProvider once AMADEUS_API_KEY/SECRET are set. The classes
+below are still stubs, kept explicit (rather than omitted) so the shape of
+"what needs an API key" is visible from day one.
 """
 from __future__ import annotations
 
@@ -12,26 +12,6 @@ import os
 
 from traveldeals.models import Mode, Offer, RoutePreference
 from traveldeals.providers.base import Provider
-
-
-class AmadeusFlightProvider(Provider):
-    """Flights via the Amadeus Self-Service Flight Offers Search API.
-    Free tier exists (test environment, limited quota); needs
-    AMADEUS_API_KEY / AMADEUS_API_SECRET. https://developers.amadeus.com
-    """
-    mode = Mode.FLIGHT
-
-    def __init__(self):
-        self.api_key = os.environ.get("AMADEUS_API_KEY")
-        self.api_secret = os.environ.get("AMADEUS_API_SECRET")
-
-    def search(self, route: RoutePreference) -> list[Offer]:
-        if not (self.api_key and self.api_secret):
-            return []
-        raise NotImplementedError(
-            "AMADEUS_API_KEY is set but the Amadeus adapter isn't wired up "
-            "yet - implement OAuth2 token fetch + GET /v2/shopping/flight-offers here."
-        )
 
 
 class DeutscheBahnProvider(Provider):

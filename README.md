@@ -4,11 +4,13 @@ Bot/Webapp, der Flug-, Bahn-, Bus- und Hotel-Angebote vergleicht, dich per
 Telegram/E-Mail auf Preisverfall und mögliche Fehlerpreise hinweist und dir
 auf einem Dashboard die besten aktuellen Optionen pro Strecke zeigt.
 
-> **Stand v1:** Alle Preisdaten kommen aus **Mock-Providern** (siehe
-> "Warum Mock-Daten?" unten) - die komplette Pipeline (Einstellungen, Ranking,
-> Empfehlungen, Alerts, Dashboard, Cronjob) funktioniert bereits Ende-zu-Ende,
-> nur eben noch mit erfundenen Preisen statt echten. Der nächste Schritt ist,
-> Provider einzeln durch echte APIs zu ersetzen (Roadmap unten).
+> **Stand v1:** Flug läuft auf **echten Preisen über die Amadeus Self-Service
+> API**, sobald `AMADEUS_API_KEY`/`AMADEUS_API_SECRET` gesetzt sind (siehe
+> "Amadeus einrichten" unten); ohne diese Zugangsdaten - und Bahn/Bus/Hotel
+> immer - läuft es auf **Mock-Providern** (siehe "Warum Mock-Daten?"). Die
+> komplette Pipeline (Einstellungen, Ranking, Empfehlungen, Alerts, Dashboard,
+> Cronjob) funktioniert so oder so Ende-zu-Ende. Nächster Schritt: Bahn/Bus/
+> Hotel ebenfalls durch echte APIs ersetzen (Roadmap unten).
 
 ## Was der Bot kann
 
@@ -75,9 +77,10 @@ traveldeals/
   models.py         RoutePreference, Offer, TripOption, Enums
   config.py         lädt config/routes.yaml
   providers/
-    base.py         Provider-Interface (search(route) -> list[Offer])
+    base.py         Provider-Interface (search(route) -> list[Offer]) + date_candidates()
     mock.py         deterministische Fake-Angebote (v1, siehe unten)
-    real.py         Stubs für Amadeus/DB/FlixBus/Booking - noch nicht implementiert
+    amadeus.py      echter Flug-Provider (Amadeus Self-Service API, OAuth2)
+    real.py         Stubs für DB/FlixBus/Booking - noch nicht implementiert
   engine.py         DealEngine: sammelt Angebote, baut Kombis, filtert
                      (Budget/Dauer/Low-Cost), rankt (cheapest/fastest/
                      best_value), hängt Empfehlungen an
@@ -95,13 +98,34 @@ data/               Preishistorie (wird vom Cronjob committet)
 
 **Warum Mock-Daten?** Echte Preisvergleiche brauchen pro Modus eine reale
 Datenquelle, und die sind fast alle kostenpflichtig oder erfordern ein
-Partner-Konto (siehe Roadmap). Damit trotzdem sofort die komplette Logik -
-Einstellungen, Ranking nach `cheapest`/`fastest`/`best_value`, alle
-Empfehlungs-Regeln, Alert-Versand, Dashboard, Cronjob - steht und getestet
-werden kann, generiert `providers/mock.py` deterministische, aber plausible
-Angebote (inkl. gelegentlich einem künstlichen "Fehlerpreis" zur Demo). Jeder
-Mock-Provider hat in `providers/real.py` ein Gegenstück, das nur noch die
-echte API anbinden muss - die Schnittstelle (`Provider.search`) bleibt gleich.
+Partner-Konto (siehe Roadmap) - Flug ist die Ausnahme, siehe unten. Damit
+trotzdem sofort die komplette Logik - Einstellungen, Ranking nach
+`cheapest`/`fastest`/`best_value`, alle Empfehlungs-Regeln, Alert-Versand,
+Dashboard, Cronjob - steht und getestet werden kann, generiert
+`providers/mock.py` deterministische, aber plausible Angebote (inkl.
+gelegentlich einem künstlichen "Fehlerpreis" zur Demo). Jeder verbleibende
+Mock-Provider (Bahn/Bus/Hotel) hat in `providers/real.py` ein Gegenstück, das
+nur noch die echte API anbinden muss - die Schnittstelle (`Provider.search`)
+bleibt gleich.
+
+## Amadeus einrichten (echte Flugpreise)
+
+1. Kostenloses Konto auf [developers.amadeus.com](https://developers.amadeus.com),
+   "My Self-Service Workspace" -> "Create new app" -> API Key + API Secret kopieren.
+2. Lokal: in `.env` (aus `.env.example` kopiert) `AMADEUS_API_KEY`/
+   `AMADEUS_API_SECRET` eintragen.
+3. Für den GitHub-Actions-Cron: beide als Repo-Secrets hinterlegen (Settings
+   -> Secrets and variables -> Actions) - `check-deals.yml` reicht sie automatisch durch.
+4. Ohne diese beiden Werte läuft `traveldeals.providers.amadeus.AmadeusFlightProvider.search()`
+   einfach mit `[]` weiter (kein Fehler) und `cli.py` fällt automatisch auf
+   `MockFlightProvider` zurück - kein Code-Umbau nötig, um zwischen beiden zu wechseln.
+
+**Wichtig zur Test-Umgebung:** Der kostenlose Amadeus-Zugang läuft gegen
+`test.api.amadeus.com` - das liefert Amadeus' eigene Beispiel-/Cache-Daten,
+keine live gebuchten Tagespreise, und hat ein begrenztes Anfrage-Kontingent
+pro Monat. `AmadeusFlightProvider` deckelt deshalb die Anzahl abgefragter
+Tage pro Route (`MAX_DATES_QUERIED = 5`) - bei einem breiten Flex-Fenster
+werden nicht alle Tage einzeln angefragt.
 
 ## Setup
 
@@ -150,11 +174,12 @@ Dashboard aktuell bleibt und die Preishistorie über die Zeit wächst.
 
 ## Roadmap: echte Datenquellen anbinden
 
-Ziel ist, `providers/mock.py` Modus für Modus durch `providers/real.py` zu
+Ziel ist, `providers/mock.py` Modus für Modus durch echte Adapter zu
 ersetzen (Interface bleibt gleich, s.o.):
 
-- **Flug:** [Amadeus Self-Service API](https://developers.amadeus.com)
-  (kostenloses Test-Kontingent, danach nutzungsbasiert) oder Kiwi Tequila API.
+- **Flug:** ✅ erledigt - `providers/amadeus.py` (Amadeus Self-Service API,
+  siehe "Amadeus einrichten" oben). Möglicher nächster Schritt: zusätzlich
+  Kiwi Tequila API als zweite Quelle für mehr Abdeckung/Vergleich.
 - **Bahn:** kein offenes Preis-API von der DB; `db-vendo-client` (Community,
   inoffiziell) oder ein kommerzieller Distributor wie Trainline Partner API.
 - **Bus:** FlixBus hat kein offenes Self-Serve-API, nur ein Partnerprogramm.

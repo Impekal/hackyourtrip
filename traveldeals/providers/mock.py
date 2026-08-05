@@ -18,18 +18,11 @@ import random
 from datetime import date, datetime, timedelta
 
 from traveldeals.models import Mode, Offer, RoutePreference
-from traveldeals.providers.base import Provider
+from traveldeals.providers.base import Provider, date_candidates as _date_candidates
 
 
 def _seed_for(route: RoutePreference, mode: Mode, as_of: date) -> int:
     return hash((route.id, mode.value, as_of.isoformat())) & 0xFFFFFFFF
-
-
-def _date_candidates(route: RoutePreference) -> list[date]:
-    start = route.depart_date_from - timedelta(days=route.flex_days_before)
-    end = route.depart_date_until + timedelta(days=route.flex_days_after)
-    days = (end - start).days
-    return [start + timedelta(days=i) for i in range(max(days, 1) + 1)]
 
 
 def _transport_comfort_fields(rnd: random.Random, mode: Mode, stops_weights: list[float]) -> dict:
