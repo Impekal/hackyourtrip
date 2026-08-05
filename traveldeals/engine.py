@@ -32,6 +32,12 @@ BEST_VALUE_COMFORT_WEIGHT = 0.25
 PRICE_DROP_RATIO = 0.85
 ERROR_FARE_RATIO = 0.5
 
+# "Deals only" without any price history: an option counts as a deal when
+# it's at least this much below the median of the same search. Needs a
+# minimum number of candidates for a median to mean anything at all.
+BELOW_MEDIAN_DEAL_RATIO = 0.85
+MIN_CANDIDATES_FOR_MEDIAN_DEAL = 4
+
 # a checked-bag fee worth at least this fraction of the total price is worth
 # surfacing as a "go carry-on-only" recommendation.
 BAGGAGE_SAVINGS_THRESHOLD = 0.15
@@ -210,14 +216,23 @@ class DealEngine:
                     candidates.append(self._single_offer_option(mode, offer))
 
         candidates = [c for c in candidates if self._meets_hard_constraints(c, route)]
+        _flag_below_median(candidates)
         for c in candidates:
             c.score = self._score(c, route.priority, candidates, route)
         candidates.sort(key=lambda c: c.score)
-        top = candidates[:top_n]
 
+        if route.deals_only:
+            # is_error_fare/is_price_drop come from the price history and are
+            # only set during _annotate, so annotate the whole (already
+            # ranked) list first and filter afterwards - otherwise
+            # "only deals" could only ever see the below-median signal.
+            for option in candidates:
+                self._annotate(option, route, offer_pools)
+            return [c for c in candidates if c.is_deal][:top_n]
+
+        top = candidates[:top_n]
         for option in top:
             self._annotate(option, route, offer_pools)
-
         return top
 
     # -- building candidates -------------------------------------------------
@@ -305,6 +320,8 @@ class DealEngine:
         elif is_drop:
             option.is_price_drop = True
             option.recommendations.insert(0, "📉 Preis ist gefallen gegenüber dem bisherigen Median.")
+        elif option.is_below_median:
+            option.recommendations.insert(0, "🏷️ Deutlich günstiger als der Durchschnitt dieser Suche.")
         self.price_history.record(route_key, transport_offer.mode.value, option.total_price, option.currency, self.as_of)
 
     def _add_later_departure_hint(self, option: TripOption, offer: Offer, pool: list[Offer],
@@ -359,6 +376,27 @@ class DealEngine:
                 "💱 Entspricht ca. " + " / ".join(equivalents) +
                 " – ob eine Buchung in anderer Landeswährung günstiger ist, prüft v1 noch nicht automatisch."
             )
+
+
+def _flag_below_median(candidates: list[TripOption]) -> None:
+    """Mark options notably cheaper than the median of this same search.
+
+    Unlike is_price_drop/is_error_fare this needs no accumulated history, so
+    it's the only "is this actually a deal?" signal available on a first
+    run - and the only one the in-browser search can ever compute. Compared
+    per mode, since a bus and a flight are not the same market.
+    """
+    by_mode: dict[Mode, list[TripOption]] = {}
+    for c in candidates:
+        by_mode.setdefault(c.mode, []).append(c)
+    for group in by_mode.values():
+        if len(group) < MIN_CANDIDATES_FOR_MEDIAN_DEAL:
+            continue  # too few to say what "normal" even is
+        prices = sorted(c.total_price for c in group)
+        mid = len(prices) // 2
+        median = prices[mid] if len(prices) % 2 else (prices[mid - 1] + prices[mid]) / 2
+        for c in group:
+            c.is_below_median = c.total_price <= median * BELOW_MEDIAN_DEAL_RATIO
 
 
 def _date_deviation_days(option: TripOption, route: RoutePreference | None) -> int:

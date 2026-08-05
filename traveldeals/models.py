@@ -161,6 +161,11 @@ class RoutePreference:
     # has no transport leg at all.
     round_trip: bool = False
     return_date: Optional[date] = None
+    # True = only show offers that actually look like a deal (see
+    # engine._is_deal): flagged as a price drop/error fare by the price
+    # history, or notably below the median of what this search found.
+    # False = show everything, deal or not.
+    deals_only: bool = False
     notes: str = ""
 
 
@@ -247,7 +252,14 @@ class TripOption:
     score: float
     is_error_fare: bool = False
     is_price_drop: bool = False
+    # Notably cheaper than the median of this same search - the only "deal"
+    # signal available before any price history exists.
+    is_below_median: bool = False
     recommendations: list[str] = field(default_factory=list)
+
+    @property
+    def is_deal(self) -> bool:
+        return self.is_error_fare or self.is_price_drop or self.is_below_median
 
     @property
     def booking_sites(self) -> list[str]:

@@ -623,6 +623,13 @@ function convert(amount, from, to, rates) {
 // searches look nearly empty once the providers started returning dozens of
 // offers - the cap, not the data, was the bottleneck.
 const MAX_RESULTS_SHOWN = 40;
+// "Nur Deals": an option counts as a deal when it's at least this much
+// below the median of the same search. The in-browser search has no price
+// history (that lives in the "Meine Alerts" tab), so this batch-relative
+// comparison is the only deal signal available here. Mirrors
+// BELOW_MEDIAN_DEAL_RATIO / MIN_CANDIDATES_FOR_MEDIAN_DEAL in engine.py.
+const BELOW_MEDIAN_DEAL_RATIO = 0.85;
+const MIN_CANDIDATES_FOR_MEDIAN_DEAL = 4;
 const BEST_VALUE_PRICE_WEIGHT = 0.5;
 const BEST_VALUE_DURATION_WEIGHT = 0.25;
 const BEST_VALUE_COMFORT_WEIGHT = 0.25;
@@ -704,6 +711,21 @@ function normalize(value, all) {
   return hi === lo ? 0 : (value - lo) / (hi - lo);
 }
 
+// Mirrors engine.py's _flag_below_median: mark options notably cheaper than
+// the median of this same search, compared per mode (a bus and a flight are
+// not the same market).
+function flagBelowMedian(candidates) {
+  const byMode = {};
+  for (const c of candidates) (byMode[c.mode] ??= []).push(c);
+  for (const group of Object.values(byMode)) {
+    if (group.length < MIN_CANDIDATES_FOR_MEDIAN_DEAL) continue;
+    const prices = group.map(c => c.price).sort((a, b) => a - b);
+    const mid = Math.floor(prices.length / 2);
+    const median = prices.length % 2 ? prices[mid] : (prices[mid - 1] + prices[mid]) / 2;
+    for (const c of group) c.isBelowMedian = c.price <= median * BELOW_MEDIAN_DEAL_RATIO;
+  }
+}
+
 // Mirrors engine.py's _date_deviation_days: how far the departure sits
 // outside the *exactly* requested window, ignoring the flex padding (that
 // padding widens the search, but 'exact_date' ranks un-padded dates first).
@@ -768,6 +790,9 @@ async function runSearch(route) {
     }
     return true;
   });
+
+  flagBelowMedian(candidates);
+  if (route.dealsOnly) candidates = candidates.filter(c => c.isBelowMedian);
 
   const prices = candidates.map(c => c.price);
   const durations = candidates.map(c => c.durationHours);
@@ -1054,6 +1079,7 @@ function readRouteFromForm() {
     bahncard: document.getElementById('bahncard').value,
     deutschlandticket: document.getElementById('deutschlandticket').checked,
     lowCostOk: document.getElementById('lowCostOk').checked,
+    dealsOnly: document.getElementById('dealsOnly').value === 'deals',
     roundTrip: cfg.roundTrip && document.getElementById('roundTrip').checked,
     returnDate: (cfg.roundTrip && document.getElementById('roundTrip').checked && document.getElementById('returnDate').value)
       ? new Date(document.getElementById('returnDate').value) : null,
@@ -1080,9 +1106,12 @@ function readRouteFromForm() {
 function renderResults(route, options, usedRealFlightData) {
   const label = route.origin ? `${route.origin} → ${route.destination}` : route.destination;
   const sourceLabel = usedRealFlightData ? 'echte Travelpayouts-Preise' : 'Mock-Daten, Stand heute';
-  searchMetaEl.textContent = `${options.length} Angebote gefunden für ${label} (${sourceLabel})`;
+  const dealsLabel = route.dealsOnly ? ', nur Deals' : '';
+  searchMetaEl.textContent = `${options.length} Angebote gefunden für ${label} (${sourceLabel}${dealsLabel})`;
   if (!options.length) {
-    searchResultsEl.innerHTML = '<p class="empty">Keine Angebote in diesem Budget/Zeitrahmen/Filter gefunden - Filter lockern und erneut suchen.</p>';
+    searchResultsEl.innerHTML = route.dealsOnly
+      ? '<p class="empty">Keine Angebote, die deutlich unter dem Durchschnitt dieser Suche liegen - auf "Alle Angebote" umstellen oder das Zeitfenster (Flex-Tage) erweitern.</p>'
+      : '<p class="empty">Keine Angebote in diesem Budget/Zeitrahmen/Filter gefunden - Filter lockern und erneut suchen.</p>';
     return;
   }
   searchResultsEl.innerHTML = `
@@ -1092,6 +1121,7 @@ function renderResults(route, options, usedRealFlightData) {
           <span class="rank mono">${i + 1}</span>
           <div class="price-row">
             <span class="price mono">${opt.price.toFixed(2)} ${route.currency}</span>
+            ${opt.isBelowMedian ? '<span class="badge good">Deal</span>' : ''}
           </div>
           <span class="subline mono">${opt.mode} · ${fmtShort(opt.offers[0].depart)}${opt.offers[0].returnDepart ? ` · zurück ${fmtShort(opt.offers[0].returnDepart)}` : ''} · ${opt.durationHours}h · ${opt.offers.map(o => bookingSiteHtml(o.bookingSite, o.url)).join(', ')}</span>
           <div class="chips">${opt.offers.flatMap(offerChips).map(c => `<span class="chip">${c}</span>`).join('')}</div>
@@ -1143,6 +1173,7 @@ ${HOTEL_AMENITY_REQUIREMENTS.map(([prefFlag, , yamlKey]) => `      ${yamlKey}: $
       preferred_depart_time: ${tp.preferredDepartTime ? `"${tp.preferredDepartTime}"` : 'null'}
       depart_time_flex_minutes: ${tp.departTimeFlexMinutes || 0}
     low_cost_airlines_ok: ${route.lowCostOk}
+    deals_only: ${route.dealsOnly || false}
     round_trip: ${route.roundTrip || false}
     return_date: ${route.roundTrip && route.returnDate ? fmt(route.returnDate) : 'null'}
 `;

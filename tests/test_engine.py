@@ -126,6 +126,50 @@ def test_exact_date_priority_falls_back_to_price_within_the_window(tmp_path):
     assert result[0].booking_sites[0] == "cheap"
 
 
+def _flight(price, day="10", site="X"):
+    return Offer(mode=Mode.FLIGHT, provider="p", booking_site=site, price=price, currency="EUR",
+                 depart_time=f"2026-09-{day}T09:00:00", arrive_time=f"2026-09-{day}T11:00:00",
+                 duration_hours=2)
+
+
+def test_deals_only_keeps_just_the_notably_cheap_offers(tmp_path):
+    # median of 100/100/100/100/50 is 100 -> only the 50 clears the
+    # below-median threshold
+    offers = [_flight(100, site=f"n{i}") for i in range(4)] + [_flight(50, site="deal")]
+    engine = make_engine({Mode.FLIGHT: FakeProvider(Mode.FLIGHT, offers)}, tmp_path)
+    result = engine.search(make_route(deals_only=True))
+    assert [o.booking_sites[0] for o in result] == ["deal"]
+    assert result[0].is_deal
+
+
+def test_deals_only_off_returns_everything(tmp_path):
+    offers = [_flight(100, site=f"n{i}") for i in range(4)] + [_flight(50, site="deal")]
+    engine = make_engine({Mode.FLIGHT: FakeProvider(Mode.FLIGHT, offers)}, tmp_path)
+    assert len(engine.search(make_route(deals_only=False))) == 5
+
+
+def test_deals_only_can_come_up_empty_rather_than_inventing_deals(tmp_path):
+    # all the same price -> nothing is below median, so "only deals" is
+    # honestly empty instead of silently showing normal fares
+    offers = [_flight(100, site=f"n{i}") for i in range(5)]
+    engine = make_engine({Mode.FLIGHT: FakeProvider(Mode.FLIGHT, offers)}, tmp_path)
+    assert engine.search(make_route(deals_only=True)) == []
+
+
+def test_below_median_needs_enough_candidates_to_be_meaningful(tmp_path):
+    # with only 2 offers a "median" says nothing, so neither is flagged
+    offers = [_flight(100, site="a"), _flight(50, site="b")]
+    engine = make_engine({Mode.FLIGHT: FakeProvider(Mode.FLIGHT, offers)}, tmp_path)
+    assert all(not o.is_below_median for o in engine.search(make_route()))
+
+
+def test_below_median_deal_is_explained_in_recommendations(tmp_path):
+    offers = [_flight(100, site=f"n{i}") for i in range(4)] + [_flight(50, site="deal")]
+    engine = make_engine({Mode.FLIGHT: FakeProvider(Mode.FLIGHT, offers)}, tmp_path)
+    deal = engine.search(make_route(priority=Priority.CHEAPEST))[0]
+    assert any("günstiger als der Durchschnitt" in r for r in deal.recommendations)
+
+
 def test_baggage_hint_when_checked_bag_fee_significant(tmp_path):
     offers = [
         Offer(mode=Mode.FLIGHT, provider="p", booking_site="A", price=100, currency="EUR",
