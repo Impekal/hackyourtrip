@@ -261,7 +261,7 @@ function mockHotelOffers(route) {
  * gracefully (empty string, network error, non-2xx response, or an empty
  * result all just fall back to mockFlightOffers()).
  * ===================================================================== */
-const PROXY_URL = ''; // e.g. 'https://hackyourtrip-proxy.<you>.workers.dev'
+const PROXY_URL = 'https://hackyourtrip-proxy.iamanamelessman.workers.dev';
 const REAL_FLIGHT_MAX_DATES = 5; // mirrors traveldeals/providers/travelpayouts.py
 
 // Mirrors traveldeals/providers/geo.py: distance-based duration estimate,
