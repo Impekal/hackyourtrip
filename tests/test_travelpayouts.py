@@ -64,13 +64,39 @@ def test_maps_response_to_offer_model():
     assert offer.currency == "EUR"
     assert offer.depart_time == "2026-09-10T09:00:00"  # trailing Z stripped
     assert offer.stops == 0
-    assert offer.duration_hours == 0.0
     assert offer.booking_site == "Aviasales (FR1234)"
     # auth header actually sent
     _, _, headers, params = session.calls[0]
     assert headers["X-Access-Token"] == "tok"
     assert params["origin"] == "BER"
     assert params["destination"] == "BCN"
+
+
+def test_direct_offer_gets_distance_based_duration_estimate():
+    session = FakeSession(get_responses=[FakeResponse(SAMPLE_PAYLOAD)])  # transfers: 0, BER->BCN
+    provider = TravelpayoutsFlightProvider(token="tok", session=session)
+    offer = provider.search(make_route())[0]
+    assert 1.0 < offer.duration_hours < 4.0  # BER-BCN is ~1900km, sanity range
+    assert offer.arrive_time != offer.depart_time
+
+
+def test_connecting_offer_keeps_duration_unknown():
+    payload = {**SAMPLE_PAYLOAD, "data": {"BCN": {**SAMPLE_PAYLOAD["data"]["BCN"], "transfers": 1}}}
+    session = FakeSession(get_responses=[FakeResponse(payload)])
+    provider = TravelpayoutsFlightProvider(token="tok", session=session)
+    offer = provider.search(make_route())[0]
+    assert offer.stops == 1
+    assert offer.duration_hours == 0.0  # layover length is unknowable from distance alone
+    assert offer.arrive_time == offer.depart_time
+
+
+def test_unknown_airport_falls_back_to_unknown_duration():
+    payload = {**SAMPLE_PAYLOAD, "data": {"XYZ": {**SAMPLE_PAYLOAD["data"]["BCN"], "transfers": 0}}}
+    session = FakeSession(get_responses=[FakeResponse(payload)])
+    provider = TravelpayoutsFlightProvider(token="tok", session=session)
+    route = make_route(origin="ZZZ", destination="YYY")  # not in the airport table
+    offer = provider.search(route)[0]
+    assert offer.duration_hours == 0.0
 
 
 def test_unsuccessful_response_returns_empty_list():

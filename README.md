@@ -129,10 +129,23 @@ bleibt gleich.
 günstigsten kürzlich für diese Strecke gefundenen Ticketpreis (von Aviasales
 zwischengespeichert) - echte Preise, aber kein Live-Suchergebnis für exakt
 heute. Er liefert außerdem **keine** Ankunftszeit/Flugdauer, nur Preis,
-Airline, Abflugzeit und Anzahl Umstiege - `duration_hours` wird deshalb auf
-`0.0` gesetzt; die Engine behandelt das genau wie bei Hotel-Angeboten (siehe
-`engine._meets_hard_constraints`) - "maximale Reisezeit" greift dann einfach
-nicht, statt falsch zu filtern.
+Airline, Abflugzeit und Anzahl Umstiege (`transfers`).
+
+Für die Reisezeit gilt deshalb (`providers/geo.py`):
+- **Direktflug (`transfers: 0`):** Dauer wird aus der Großkreis-Distanz
+  zwischen den beiden Flughäfen geschätzt (Distanz ÷ 750 km/h + 30 Min.
+  Zuschlag für Rollen/Start/Landung) - eine Näherung, aber ohne Umstieg
+  gibt es nichts, was diese Schätzung verfälschen könnte.
+- **Verbindung mit Umstieg (`transfers >= 1`):** Dauer bleibt bewusst
+  unbekannt (`0.0`) - wie lange ein Umstieg dauert, hat nichts mit der
+  Distanz Start-Ziel zu tun, eine Schätzung wäre nur eine erfundene Zahl
+  mit Anschein von Genauigkeit.
+- In beiden Fällen unbekannter Flughafen (nicht in der Tabelle in
+  `geo.py`): ebenfalls `0.0`.
+
+Die Engine behandelt `duration_hours == 0.0` genau wie bei Hotel-Angeboten
+(siehe `engine._meets_hard_constraints`) - "maximale Reisezeit" greift dann
+einfach nicht, statt falsch zu filtern.
 
 **Warum nicht Amadeus?** Die kostenlose Amadeus-Self-Service-API wurde am
 17. Juli 2026 abgeschaltet (nur noch Enterprise-Verträge). `providers/amadeus.py`
@@ -192,12 +205,17 @@ Ziel ist, `providers/mock.py` Modus für Modus durch echte Adapter zu
 ersetzen (Interface bleibt gleich, s.o.):
 
 - **Flug:** ✅ erledigt - `providers/travelpayouts.py` (siehe "Travelpayouts
-  einrichten" oben), `providers/amadeus.py` als Alternative für Enterprise-
-  Zugänge. Möglicher nächster Schritt: eine Quelle mit echter Flugdauer/
-  Ankunftszeit ergänzen (Travelpayouts liefert das nicht), z.B. Duffel im
-  Test-Modus (kostenlos, aber Fake-Sandbox-Daten) oder ein Kiwi-Tequila-
-  Partnerzugang (mittlerweile nur noch auf Anfrage, kein offenes Selfservice
-  mehr).
+  einrichten" oben; Direktflug-Dauer wird über `providers/geo.py` geschätzt,
+  Umstiege bleiben unbekannt statt geraten), `providers/amadeus.py` als
+  Alternative für Enterprise-Zugänge. Möglicher nächster Schritt: echte
+  Dauer auch für Verbindungen mit Umstieg bekommen - Travelpayouts hat dafür
+  laut Doku einen GraphQL-Endpunkt mit `trip_duration`-Feld
+  (`api.travelpayouts.com/graphql/v1/query`, `prices_one_way`-Query), dessen
+  genaues Schema sich aber nicht zuverlässig verifizieren ließ (Doku-Seite
+  blockiert automatisiertes Abrufen) - deshalb hier nicht spekulativ gegen
+  ein ungetestetes Schema implementiert. Alternativ: Duffel im Test-Modus
+  (kostenlos, aber Fake-Sandbox-Daten) oder ein Kiwi-Tequila-Partnerzugang
+  (mittlerweile nur noch auf Anfrage, kein offenes Selfservice mehr).
 - **Bahn:** kein offenes Preis-API von der DB; `db-vendo-client` (Community,
   inoffiziell) oder ein kommerzieller Distributor wie Trainline Partner API.
 - **Bus:** FlixBus hat kein offenes Self-Serve-API, nur ein Partnerprogramm.
