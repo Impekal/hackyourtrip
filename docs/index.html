@@ -340,15 +340,70 @@
             <label for="maxDistanceKm">Max. Entfernung (km)</label>
             <input type="number" id="maxDistanceKm" min="0" step="0.5" placeholder="egal">
           </div>
+          <div class="field">
+            <label for="minMealPlan">Verpflegung mind.</label>
+            <select id="minMealPlan">
+              <option value="" selected>egal</option>
+              <option value="breakfast">Frühstück</option>
+              <option value="half_board">Halbpension</option>
+              <option value="full_board">Vollpension</option>
+              <option value="all_inclusive">All Inclusive</option>
+            </select>
+          </div>
         </div>
-        <div class="checks" style="margin-top:0.7rem">
+
+        <label style="display:block; margin-top:0.8rem;">Unterkunftsart (leer = egal)</label>
+        <div class="checks" id="hotelPropertyTypes" style="margin-top:0.3rem">
+          <label><input type="checkbox" value="hotel"> Hotel</label>
+          <label><input type="checkbox" value="apartment"> Apartment</label>
+          <label><input type="checkbox" value="hostel"> Hostel</label>
+          <label><input type="checkbox" value="resort"> Resort</label>
+          <label><input type="checkbox" value="bnb"> B&amp;B</label>
+          <label><input type="checkbox" value="guesthouse"> Gästehaus</label>
+          <label><input type="checkbox" value="villa"> Villa</label>
+        </div>
+
+        <label style="display:block; margin-top:0.8rem;">Ausstattung</label>
+        <div class="checks" style="margin-top:0.3rem">
           <label><input type="checkbox" id="requireWifi"> WLAN</label>
-          <label><input type="checkbox" id="requireBreakfast"> Frühstück inkl.</label>
           <label><input type="checkbox" id="requireFreeCancellation"> Kostenlose Stornierung</label>
           <label><input type="checkbox" id="requireParking"> Parkplatz</label>
           <label><input type="checkbox" id="requireAirConditioning"> Klimaanlage</label>
+          <label><input type="checkbox" id="requireElevator"> Aufzug</label>
+          <label><input type="checkbox" id="requireKitchen"> Küche</label>
+          <label><input type="checkbox" id="requireBalconyOrTerrace"> Balkon/Terrasse</label>
+          <label><input type="checkbox" id="requireNonSmoking"> Nichtraucher</label>
+          <label><input type="checkbox" id="requireEvCharging"> E-Ladestation</label>
+        </div>
+
+        <label style="display:block; margin-top:0.8rem;">Freizeit &amp; Wellness</label>
+        <div class="checks" style="margin-top:0.3rem">
+          <label><input type="checkbox" id="requirePool"> Pool</label>
+          <label><input type="checkbox" id="requireGym"> Fitnessraum</label>
+          <label><input type="checkbox" id="requireSpa"> Spa</label>
+          <label><input type="checkbox" id="requireSauna"> Sauna</label>
+          <label><input type="checkbox" id="requireHotTub"> Whirlpool</label>
+          <label><input type="checkbox" id="requireBeachfront"> Strandnähe</label>
+          <label><input type="checkbox" id="requireBicycleRental"> Fahrradverleih</label>
+        </div>
+
+        <label style="display:block; margin-top:0.8rem;">Service &amp; Gastro</label>
+        <div class="checks" style="margin-top:0.3rem">
+          <label><input type="checkbox" id="requireRestaurant"> Restaurant</label>
+          <label><input type="checkbox" id="requireBar"> Bar</label>
+          <label><input type="checkbox" id="requireRoomService"> Zimmerservice</label>
+          <label><input type="checkbox" id="require24hFrontDesk"> 24h-Rezeption</label>
+          <label><input type="checkbox" id="requireLaundryService"> Wäscheservice</label>
+          <label><input type="checkbox" id="requireBusinessFacilities"> Business-Ausstattung</label>
+          <label><input type="checkbox" id="requireAirportShuttle"> Flughafentransfer</label>
+        </div>
+
+        <label style="display:block; margin-top:0.8rem;">Familie &amp; Barrierefreiheit</label>
+        <div class="checks" style="margin-top:0.3rem">
           <label><input type="checkbox" id="requirePetsAllowed"> Haustiere erlaubt</label>
-          <label><input type="checkbox" id="requirePoolOrFitness"> Pool/Fitness</label>
+          <label><input type="checkbox" id="requireFamilyRooms"> Familienzimmer</label>
+          <label><input type="checkbox" id="requireBabysitting"> Babysitting</label>
+          <label><input type="checkbox" id="requireDisabledAccess"> Barrierefrei</label>
         </div>
       </fieldset>
 

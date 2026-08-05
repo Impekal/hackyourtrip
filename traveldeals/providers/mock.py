@@ -17,8 +17,23 @@ from __future__ import annotations
 import random
 from datetime import date, datetime, timedelta
 
-from traveldeals.models import Mode, Offer, RoutePreference
+from traveldeals.models import (MEAL_PLAN_TIERS, PROPERTY_TYPES, Mode, Offer,
+                                 RoutePreference)
 from traveldeals.providers.base import Provider, date_candidates as _date_candidates
+
+# Probability each boolean amenity is present on a given mock hotel offer -
+# rough real-world plausibility, not measured data.
+_HOTEL_AMENITY_PROBABILITY = {
+    "pool": 0.35, "gym": 0.40, "spa": 0.15, "restaurant": 0.50, "bar": 0.40,
+    "room_service": 0.30, "front_desk_24h": 0.55, "business_facilities": 0.25,
+    "laundry_service": 0.30, "elevator": 0.60, "balcony_or_terrace": 0.40,
+    "kitchen": 0.30, "beachfront": 0.10, "disabled_access": 0.35,
+    "ev_charging": 0.15, "bicycle_rental": 0.20, "babysitting": 0.12,
+    "sauna": 0.15, "hot_tub": 0.10, "non_smoking": 0.80, "family_rooms": 0.30,
+    "airport_shuttle": 0.20,
+}
+_PROPERTY_TYPE_WEIGHTS = [0.45, 0.25, 0.10, 0.05, 0.08, 0.05, 0.02]  # matches PROPERTY_TYPES order
+_MEAL_PLAN_WEIGHTS = [0.35, 0.35, 0.15, 0.10, 0.05]  # matches MEAL_PLAN_TIERS order
 
 
 def _seed_for(route: RoutePreference, mode: Mode, as_of: date) -> int:
@@ -223,13 +238,14 @@ class MockHotelProvider(Provider):
                     details={"nights": nights, "per_night": per_night},
                     stars=rnd.choices([2, 3, 4, 5], weights=[0.1, 0.35, 0.4, 0.15], k=1)[0],
                     rating=round(rnd.uniform(6.0, 9.8), 1),
+                    property_type=rnd.choices(PROPERTY_TYPES, weights=_PROPERTY_TYPE_WEIGHTS, k=1)[0],
+                    meal_plan=rnd.choices(MEAL_PLAN_TIERS, weights=_MEAL_PLAN_WEIGHTS, k=1)[0],
                     wifi=rnd.random() < 0.85,
-                    breakfast_included=rnd.random() < 0.5,
                     free_cancellation=rnd.random() < 0.6,
                     distance_km=round(rnd.uniform(0.1, 8.0), 1),
                     parking=rnd.random() < 0.4,
                     air_conditioning=rnd.random() < 0.7,
                     pets_allowed=rnd.random() < 0.3,
-                    pool_or_fitness=rnd.random() < 0.35,
+                    **{field: rnd.random() < p for field, p in _HOTEL_AMENITY_PROBABILITY.items()},
                 ))
         return offers

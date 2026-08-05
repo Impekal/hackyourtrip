@@ -164,6 +164,55 @@ const BOOKING_SITES = {
 const BAHNCARD_DISCOUNT = { '25': 0.25, '50': 0.5, '100': 1.0, '': 0.0 };
 const LEGROOM_RANGE = { flight: [66, 96], train: [85, 120], bus: [70, 100] };
 
+// Mirrors traveldeals/models.py's MEAL_PLAN_TIERS/PROPERTY_TYPES and
+// providers/mock.py's amenity-probability table - same order, same weights.
+const MEAL_PLAN_TIERS = ['none', 'breakfast', 'half_board', 'full_board', 'all_inclusive'];
+const MEAL_PLAN_WEIGHTS = [0.35, 0.35, 0.15, 0.10, 0.05];
+const PROPERTY_TYPES = ['hotel', 'apartment', 'hostel', 'resort', 'bnb', 'guesthouse', 'villa'];
+const PROPERTY_TYPE_WEIGHTS = [0.45, 0.25, 0.10, 0.05, 0.08, 0.05, 0.02];
+const HOTEL_AMENITY_PROBABILITY = {
+  pool: 0.35, gym: 0.40, spa: 0.15, restaurant: 0.50, bar: 0.40,
+  roomService: 0.30, frontDesk24h: 0.55, businessFacilities: 0.25,
+  laundryService: 0.30, elevator: 0.60, balconyOrTerrace: 0.40,
+  kitchen: 0.30, beachfront: 0.10, disabledAccess: 0.35,
+  evCharging: 0.15, bicycleRental: 0.20, babysitting: 0.12,
+  sauna: 0.15, hotTub: 0.10, nonSmoking: 0.80, familyRooms: 0.30,
+  airportShuttle: 0.20,
+};
+// Every HotelPref.require_X flag: [formCheckboxId/prefKey, offerField, yamlKey]
+// - mirrors engine.py's _HOTEL_AMENITY_REQUIREMENTS + config.py's
+// _HOTEL_REQUIRE_FIELDS. Single source of truth for meetsHotelPrefs,
+// readRouteFromForm, and buildYamlSnippet.
+const HOTEL_AMENITY_REQUIREMENTS = [
+  ['requireWifi', 'wifi', 'require_wifi'],
+  ['requireFreeCancellation', 'freeCancellation', 'require_free_cancellation'],
+  ['requireParking', 'parking', 'require_parking'],
+  ['requireAirConditioning', 'airConditioning', 'require_air_conditioning'],
+  ['requirePetsAllowed', 'petsAllowed', 'require_pets_allowed'],
+  ['requirePool', 'pool', 'require_pool'],
+  ['requireGym', 'gym', 'require_gym'],
+  ['requireSpa', 'spa', 'require_spa'],
+  ['requireRestaurant', 'restaurant', 'require_restaurant'],
+  ['requireBar', 'bar', 'require_bar'],
+  ['requireRoomService', 'roomService', 'require_room_service'],
+  ['require24hFrontDesk', 'frontDesk24h', 'require_24h_front_desk'],
+  ['requireBusinessFacilities', 'businessFacilities', 'require_business_facilities'],
+  ['requireLaundryService', 'laundryService', 'require_laundry_service'],
+  ['requireElevator', 'elevator', 'require_elevator'],
+  ['requireBalconyOrTerrace', 'balconyOrTerrace', 'require_balcony_or_terrace'],
+  ['requireKitchen', 'kitchen', 'require_kitchen'],
+  ['requireBeachfront', 'beachfront', 'require_beachfront'],
+  ['requireDisabledAccess', 'disabledAccess', 'require_disabled_access'],
+  ['requireEvCharging', 'evCharging', 'require_ev_charging'],
+  ['requireBicycleRental', 'bicycleRental', 'require_bicycle_rental'],
+  ['requireBabysitting', 'babysitting', 'require_babysitting'],
+  ['requireSauna', 'sauna', 'require_sauna'],
+  ['requireHotTub', 'hotTub', 'require_hot_tub'],
+  ['requireNonSmoking', 'nonSmoking', 'require_non_smoking'],
+  ['requireFamilyRooms', 'familyRooms', 'require_family_rooms'],
+  ['requireAirportShuttle', 'airportShuttle', 'require_airport_shuttle'],
+];
+
 // Mirrors traveldeals/providers/mock.py's _round_trip_addon: one combined
 // price for both legs (like the real Travelpayouts API does), plus a
 // synthesized return-leg departure time on route.returnDate.
@@ -271,14 +320,15 @@ function mockHotelOffers(route) {
         nights,
         stars: rngWeighted(rng, [2, 3, 4, 5], [0.1, 0.35, 0.4, 0.15]),
         rating: round1(rngFloat(rng, 6.0, 9.8)),
+        propertyType: rngWeighted(rng, PROPERTY_TYPES, PROPERTY_TYPE_WEIGHTS),
+        mealPlan: rngWeighted(rng, MEAL_PLAN_TIERS, MEAL_PLAN_WEIGHTS),
         wifi: rngBool(rng, 0.85),
-        breakfastIncluded: rngBool(rng, 0.5),
         freeCancellation: rngBool(rng, 0.6),
         distanceKm: round1(rngFloat(rng, 0.1, 8.0)),
         parking: rngBool(rng, 0.4),
         airConditioning: rngBool(rng, 0.7),
         petsAllowed: rngBool(rng, 0.3),
-        poolOrFitness: rngBool(rng, 0.35),
+        ...Object.fromEntries(Object.entries(HOTEL_AMENITY_PROBABILITY).map(([k, p]) => [k, rngBool(rng, p)])),
       });
     }
   }
@@ -501,13 +551,15 @@ const BEST_VALUE_DURATION_WEIGHT = 0.25;
 const BEST_VALUE_COMFORT_WEIGHT = 0.25;
 const BAGGAGE_SAVINGS_THRESHOLD = 0.15;
 
+const HOTEL_AMENITY_FIELDS = ['wifi', 'freeCancellation', 'parking', 'airConditioning', 'petsAllowed', ...Object.keys(HOTEL_AMENITY_PROBABILITY)];
+
 function hotelComfortScore(o) {
   const starsNorm = ((o.stars ?? 3) - 1) / 4;
   const ratingNorm = (o.rating ?? 7.0) / 10;
-  const amenities = [o.wifi, o.breakfastIncluded, o.freeCancellation, o.parking, o.airConditioning, o.petsAllowed, o.poolOrFitness];
-  const amenityNorm = amenities.filter(Boolean).length / amenities.length;
+  const amenityNorm = HOTEL_AMENITY_FIELDS.filter(f => o[f]).length / HOTEL_AMENITY_FIELDS.length;
   const distanceNorm = 1 - Math.min(o.distanceKm ?? 3.0, 10) / 10;
-  return (starsNorm + ratingNorm + amenityNorm + distanceNorm) / 4;
+  const mealPlanNorm = MEAL_PLAN_TIERS.indexOf(o.mealPlan ?? 'none') / (MEAL_PLAN_TIERS.length - 1);
+  return (starsNorm + ratingNorm + amenityNorm + distanceNorm + mealPlanNorm) / 5;
 }
 function transportComfortScore(o) {
   const [lo, hi] = LEGROOM_RANGE[o.mode] ?? [70, 100];
@@ -527,13 +579,11 @@ function meetsHotelPrefs(o, p) {
   if (p.minStars != null && (o.stars ?? 0) < p.minStars) return false;
   if (p.minRating != null && (o.rating ?? 0) < p.minRating) return false;
   if (p.maxDistanceKm != null && (o.distanceKm ?? 0) > p.maxDistanceKm) return false;
-  if (p.requireWifi && !o.wifi) return false;
-  if (p.requireBreakfast && !o.breakfastIncluded) return false;
-  if (p.requireFreeCancellation && !o.freeCancellation) return false;
-  if (p.requireParking && !o.parking) return false;
-  if (p.requireAirConditioning && !o.airConditioning) return false;
-  if (p.requirePetsAllowed && !o.petsAllowed) return false;
-  if (p.requirePoolOrFitness && !o.poolOrFitness) return false;
+  if (p.propertyTypes && p.propertyTypes.length && !p.propertyTypes.includes(o.propertyType)) return false;
+  if (p.minMealPlan && MEAL_PLAN_TIERS.indexOf(o.mealPlan ?? 'none') < MEAL_PLAN_TIERS.indexOf(p.minMealPlan)) return false;
+  for (const [prefFlag, offerField] of HOTEL_AMENITY_REQUIREMENTS) {
+    if (p[prefFlag] && !o[offerField]) return false;
+  }
   return true;
 }
 function minutesSinceMidnight(hhmm) {
@@ -694,19 +744,33 @@ function bookingSiteHtml(name, url) {
   return isReal ? `<a href="${url}" target="_blank" rel="noopener">${name}</a>` : name;
 }
 
+const MEAL_PLAN_LABELS = { breakfast: 'Frühstück', half_board: 'Halbpension', full_board: 'Vollpension', all_inclusive: 'All Inclusive' };
+const PROPERTY_TYPE_LABELS = { apartment: 'Apartment', hostel: 'Hostel', resort: 'Resort', bnb: 'B&B', guesthouse: 'Gästehaus', villa: 'Villa' };
+const HOTEL_AMENITY_LABELS = {
+  pool: 'Pool', gym: 'Fitnessraum', spa: 'Spa', restaurant: 'Restaurant', bar: 'Bar',
+  roomService: 'Zimmerservice', frontDesk24h: '24h-Rezeption', businessFacilities: 'Business-Ausstattung',
+  laundryService: 'Wäscheservice', elevator: 'Aufzug', balconyOrTerrace: 'Balkon/Terrasse',
+  kitchen: 'Küche', beachfront: 'Strandnähe', disabledAccess: 'Barrierefrei', evCharging: 'E-Ladestation',
+  bicycleRental: 'Fahrradverleih', babysitting: 'Babysitting', sauna: 'Sauna', hotTub: 'Whirlpool',
+  nonSmoking: 'Nichtraucher', familyRooms: 'Familienzimmer', airportShuttle: 'Flughafentransfer',
+};
+
 function offerChips(offer) {
   const chips = [];
   if (offer.mode === 'hotel') {
     if (offer.stars) chips.push('⭐'.repeat(offer.stars));
     if (offer.rating) chips.push(`${offer.rating}/10`);
+    if (PROPERTY_TYPE_LABELS[offer.propertyType]) chips.push(PROPERTY_TYPE_LABELS[offer.propertyType]);
     if (offer.distanceKm != null) chips.push(`${offer.distanceKm} km`);
     if (offer.wifi) chips.push('WLAN');
-    if (offer.breakfastIncluded) chips.push('Frühstück');
+    if (MEAL_PLAN_LABELS[offer.mealPlan]) chips.push(MEAL_PLAN_LABELS[offer.mealPlan]);
     if (offer.freeCancellation) chips.push('kostenlos stornierbar');
     if (offer.parking) chips.push('Parkplatz');
     if (offer.airConditioning) chips.push('Klimaanlage');
     if (offer.petsAllowed) chips.push('Haustiere ok');
-    if (offer.poolOrFitness) chips.push('Pool/Fitness');
+    for (const [field, label] of Object.entries(HOTEL_AMENITY_LABELS)) {
+      if (offer[field]) chips.push(label);
+    }
   } else if (['flight', 'train', 'bus'].includes(offer.mode)) {
     chips.push(offer.stops === 0 ? 'Direkt' : `${offer.stops}x Umstieg`);
     if (offer.punctualityPct != null) chips.push(`${offer.punctualityPct}% pünktlich`);
@@ -892,13 +956,9 @@ function readRouteFromForm() {
       minStars: document.getElementById('minStars').value ? Number(document.getElementById('minStars').value) : null,
       minRating: numOrNull('minRating'),
       maxDistanceKm: numOrNull('maxDistanceKm'),
-      requireWifi: document.getElementById('requireWifi').checked,
-      requireBreakfast: document.getElementById('requireBreakfast').checked,
-      requireFreeCancellation: document.getElementById('requireFreeCancellation').checked,
-      requireParking: document.getElementById('requireParking').checked,
-      requireAirConditioning: document.getElementById('requireAirConditioning').checked,
-      requirePetsAllowed: document.getElementById('requirePetsAllowed').checked,
-      requirePoolOrFitness: document.getElementById('requirePoolOrFitness').checked,
+      propertyTypes: Array.from(document.querySelectorAll('#hotelPropertyTypes input:checked')).map(el => el.value),
+      minMealPlan: document.getElementById('minMealPlan').value || null,
+      ...Object.fromEntries(HOTEL_AMENITY_REQUIREMENTS.map(([prefFlag]) => [prefFlag, document.getElementById(prefFlag).checked])),
     },
     transportPrefs: {
       directOnly: document.getElementById('directOnly').checked,
@@ -966,13 +1026,9 @@ function buildYamlSnippet(route) {
       min_stars: ${hp.minStars ?? 'null'}
       min_rating: ${hp.minRating ?? 'null'}
       max_distance_km: ${hp.maxDistanceKm ?? 'null'}
-      require_wifi: ${hp.requireWifi}
-      require_breakfast: ${hp.requireBreakfast}
-      require_free_cancellation: ${hp.requireFreeCancellation}
-      require_parking: ${hp.requireParking}
-      require_air_conditioning: ${hp.requireAirConditioning}
-      require_pets_allowed: ${hp.requirePetsAllowed}
-      require_pool_or_fitness: ${hp.requirePoolOrFitness}
+      property_types: [${(hp.propertyTypes || []).join(', ')}]
+      min_meal_plan: ${hp.minMealPlan ? `"${hp.minMealPlan}"` : 'null'}
+${HOTEL_AMENITY_REQUIREMENTS.map(([prefFlag, , yamlKey]) => `      ${yamlKey}: ${hp[prefFlag]}`).join('\n')}
     transport:
       direct_only: ${tp.directOnly}
       require_wifi_onboard: ${tp.requireWifiOnboard}

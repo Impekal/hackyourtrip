@@ -29,13 +29,35 @@ routes:
       min_stars: 3
       min_rating: 7.5         # von 10
       max_distance_km: 3      # zu Zentrum/Bahnhof/Flughafen
+      property_types: []      # [] = egal, sonst Teilmenge von: hotel, apartment, hostel, resort, bnb, guesthouse, villa
+      min_meal_plan: null     # null | breakfast | half_board | full_board | all_inclusive
       require_wifi: true
-      require_breakfast: false
       require_free_cancellation: true
       require_parking: false
       require_air_conditioning: false
       require_pets_allowed: false
-      require_pool_or_fitness: false
+      require_pool: false
+      require_gym: false
+      require_spa: false
+      require_restaurant: false
+      require_bar: false
+      require_room_service: false
+      require_24h_front_desk: false
+      require_business_facilities: false
+      require_laundry_service: false
+      require_elevator: false
+      require_balcony_or_terrace: false
+      require_kitchen: false
+      require_beachfront: false
+      require_disabled_access: false
+      require_ev_charging: false
+      require_bicycle_rental: false
+      require_babysitting: false
+      require_sauna: false
+      require_hot_tub: false
+      require_non_smoking: false
+      require_family_rooms: false
+      require_airport_shuttle: false
     transport:                # fuer flight/train/bus und deren Kombis
       direct_only: false
       require_wifi_onboard: false

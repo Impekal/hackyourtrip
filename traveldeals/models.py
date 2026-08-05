@@ -57,21 +57,54 @@ class RailPref:
     deutschlandticket: bool = False
 
 
+# Meal-plan tiers, ordered low to high - min_meal_plan below is satisfied by
+# an offer whose tier index is >= the requested tier's index (an offer with
+# all_inclusive also satisfies a "breakfast" requirement, for example).
+MEAL_PLAN_TIERS = ["none", "breakfast", "half_board", "full_board", "all_inclusive"]
+
+# Free-text-ish but constrained property types - matches the filter Trivago
+# itself exposes; empty list on HotelPref.property_types means "any type".
+PROPERTY_TYPES = ["hotel", "apartment", "hostel", "resort", "bnb", "guesthouse", "villa"]
+
+
 @dataclass
 class HotelPref:
-    """Hard filters for hotel offers - beyond what a typical Trivago search
-    exposes, these get folded into the best_value comfort score too (see
-    engine.py) rather than only used to filter."""
+    """Hard filters for hotel offers - the full amenity set a real Trivago
+    search exposes (not just a handful), which also get folded into the
+    best_value comfort score (see engine.py) rather than only used to
+    filter."""
     min_stars: Optional[int] = None
     min_rating: Optional[float] = None       # 0..10
     max_distance_km: Optional[float] = None  # to city center/station/airport
+    property_types: list[str] = field(default_factory=list)  # subset of PROPERTY_TYPES, [] = any
+    min_meal_plan: Optional[str] = None  # one of MEAL_PLAN_TIERS, None = no requirement
     require_wifi: bool = False
-    require_breakfast: bool = False
     require_free_cancellation: bool = False
     require_parking: bool = False
     require_air_conditioning: bool = False
     require_pets_allowed: bool = False
-    require_pool_or_fitness: bool = False
+    require_pool: bool = False
+    require_gym: bool = False
+    require_spa: bool = False
+    require_restaurant: bool = False
+    require_bar: bool = False
+    require_room_service: bool = False
+    require_24h_front_desk: bool = False
+    require_business_facilities: bool = False
+    require_laundry_service: bool = False
+    require_elevator: bool = False
+    require_balcony_or_terrace: bool = False
+    require_kitchen: bool = False
+    require_beachfront: bool = False
+    require_disabled_access: bool = False
+    require_ev_charging: bool = False
+    require_bicycle_rental: bool = False
+    require_babysitting: bool = False
+    require_sauna: bool = False
+    require_hot_tub: bool = False
+    require_non_smoking: bool = False
+    require_family_rooms: bool = False
+    require_airport_shuttle: bool = False
 
 
 @dataclass
@@ -125,8 +158,8 @@ class Offer:
     Fields below `is_low_cost` are mode-specific and simply unset/default
     for modes they don't apply to: `stops`/`wifi_onboard`/`power_outlets`/
     `legroom_cm`/`punctuality_pct` are transport-only (flight/train/bus);
-    `stars`/`rating`/`breakfast_included`/`free_cancellation`/`distance_km`/
-    `parking`/`air_conditioning`/`pets_allowed`/`pool_or_fitness` are
+    everything under "hotel amenities" below (property_type, meal_plan,
+    free_cancellation, distance_km, and the full amenity flag set) is
     hotel-only. `wifi` is shared (onboard wifi for transport, room wifi for
     hotels) since it's the same concept either way.
     """
@@ -155,13 +188,35 @@ class Offer:
     # hotel amenities
     stars: Optional[int] = None
     rating: Optional[float] = None  # 0..10
-    breakfast_included: bool = False
+    property_type: str = "hotel"    # one of PROPERTY_TYPES
+    meal_plan: str = "none"         # one of MEAL_PLAN_TIERS
     free_cancellation: bool = False
     distance_km: Optional[float] = None
     parking: bool = False
     air_conditioning: bool = False
     pets_allowed: bool = False
-    pool_or_fitness: bool = False
+    pool: bool = False
+    gym: bool = False
+    spa: bool = False
+    restaurant: bool = False
+    bar: bool = False
+    room_service: bool = False
+    front_desk_24h: bool = False
+    business_facilities: bool = False
+    laundry_service: bool = False
+    elevator: bool = False
+    balcony_or_terrace: bool = False
+    kitchen: bool = False
+    beachfront: bool = False
+    disabled_access: bool = False
+    ev_charging: bool = False
+    bicycle_rental: bool = False
+    babysitting: bool = False
+    sauna: bool = False
+    hot_tub: bool = False
+    non_smoking: bool = False
+    family_rooms: bool = False
+    airport_shuttle: bool = False
     wifi: bool = False
 
     details: dict = field(default_factory=dict)

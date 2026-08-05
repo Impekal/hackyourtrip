@@ -16,6 +16,21 @@ import yaml
 from traveldeals.models import (BaggagePref, HotelPref, Mode, Priority,
                                  RailPref, RoutePreference, TransportPref)
 
+# Every HotelPref boolean amenity flag - field name doubles as its YAML key,
+# so a new amenity only needs adding here (+ to the dataclass) rather than
+# another explicit bool(...) line.
+_HOTEL_REQUIRE_FIELDS = [
+    "require_wifi", "require_free_cancellation", "require_parking",
+    "require_air_conditioning", "require_pets_allowed", "require_pool",
+    "require_gym", "require_spa", "require_restaurant", "require_bar",
+    "require_room_service", "require_24h_front_desk", "require_business_facilities",
+    "require_laundry_service", "require_elevator", "require_balcony_or_terrace",
+    "require_kitchen", "require_beachfront", "require_disabled_access",
+    "require_ev_charging", "require_bicycle_rental", "require_babysitting",
+    "require_sauna", "require_hot_tub", "require_non_smoking",
+    "require_family_rooms", "require_airport_shuttle",
+]
+
 
 def _parse_date(value) -> date:
     if isinstance(value, date):
@@ -56,13 +71,9 @@ def _parse_route(raw: dict) -> RoutePreference:
             min_stars=hotel_raw.get("min_stars"),
             min_rating=hotel_raw.get("min_rating"),
             max_distance_km=hotel_raw.get("max_distance_km"),
-            require_wifi=bool(hotel_raw.get("require_wifi", False)),
-            require_breakfast=bool(hotel_raw.get("require_breakfast", False)),
-            require_free_cancellation=bool(hotel_raw.get("require_free_cancellation", False)),
-            require_parking=bool(hotel_raw.get("require_parking", False)),
-            require_air_conditioning=bool(hotel_raw.get("require_air_conditioning", False)),
-            require_pets_allowed=bool(hotel_raw.get("require_pets_allowed", False)),
-            require_pool_or_fitness=bool(hotel_raw.get("require_pool_or_fitness", False)),
+            property_types=list(hotel_raw.get("property_types", []) or []),
+            min_meal_plan=hotel_raw.get("min_meal_plan"),
+            **{f: bool(hotel_raw.get(f, False)) for f in _HOTEL_REQUIRE_FIELDS},
         ),
         transport=TransportPref(
             direct_only=bool(transport_raw.get("direct_only", False)),

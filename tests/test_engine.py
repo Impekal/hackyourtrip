@@ -176,6 +176,56 @@ def test_hotel_required_amenity_filter(tmp_path):
     assert result[0].total_price == 120
 
 
+def test_hotel_min_meal_plan_filter(tmp_path):
+    offers = [
+        Offer(mode=Mode.HOTEL, provider="p", booking_site="Booking.com", price=100, currency="EUR",
+              depart_time="2026-09-10T00:00:00", arrive_time="2026-09-14T00:00:00", duration_hours=96,
+              meal_plan="none"),
+        Offer(mode=Mode.HOTEL, provider="p", booking_site="Booking.com", price=120, currency="EUR",
+              depart_time="2026-09-10T00:00:00", arrive_time="2026-09-14T00:00:00", duration_hours=96,
+              meal_plan="breakfast"),
+        Offer(mode=Mode.HOTEL, provider="p", booking_site="Booking.com", price=140, currency="EUR",
+              depart_time="2026-09-10T00:00:00", arrive_time="2026-09-14T00:00:00", duration_hours=96,
+              meal_plan="all_inclusive"),
+    ]
+    engine = make_engine({Mode.HOTEL: FakeProvider(Mode.HOTEL, offers)}, tmp_path)
+    route = make_route(modes=[Mode.HOTEL], hotel=HotelPref(min_meal_plan="breakfast"))
+    result = engine.search(route)
+    assert {r.total_price for r in result} == {120, 140}
+
+
+def test_hotel_property_type_filter(tmp_path):
+    offers = [
+        Offer(mode=Mode.HOTEL, provider="p", booking_site="Booking.com", price=90, currency="EUR",
+              depart_time="2026-09-10T00:00:00", arrive_time="2026-09-14T00:00:00", duration_hours=96,
+              property_type="hostel"),
+        Offer(mode=Mode.HOTEL, provider="p", booking_site="Booking.com", price=200, currency="EUR",
+              depart_time="2026-09-10T00:00:00", arrive_time="2026-09-14T00:00:00", duration_hours=96,
+              property_type="apartment"),
+    ]
+    engine = make_engine({Mode.HOTEL: FakeProvider(Mode.HOTEL, offers)}, tmp_path)
+    route = make_route(modes=[Mode.HOTEL], hotel=HotelPref(property_types=["apartment", "villa"]))
+    result = engine.search(route)
+    assert len(result) == 1
+    assert result[0].total_price == 200
+
+
+def test_hotel_new_amenity_flags_filter(tmp_path):
+    offers = [
+        Offer(mode=Mode.HOTEL, provider="p", booking_site="Booking.com", price=100, currency="EUR",
+              depart_time="2026-09-10T00:00:00", arrive_time="2026-09-14T00:00:00", duration_hours=96,
+              spa=False, sauna=False),
+        Offer(mode=Mode.HOTEL, provider="p", booking_site="Booking.com", price=160, currency="EUR",
+              depart_time="2026-09-10T00:00:00", arrive_time="2026-09-14T00:00:00", duration_hours=96,
+              spa=True, sauna=True),
+    ]
+    engine = make_engine({Mode.HOTEL: FakeProvider(Mode.HOTEL, offers)}, tmp_path)
+    route = make_route(modes=[Mode.HOTEL], hotel=HotelPref(require_spa=True, require_sauna=True))
+    result = engine.search(route)
+    assert len(result) == 1
+    assert result[0].total_price == 160
+
+
 def test_transport_direct_only_filter(tmp_path):
     offers = [
         Offer(mode=Mode.FLIGHT, provider="p", booking_site="A", price=100, currency="EUR",
@@ -196,8 +246,8 @@ def test_best_value_prefers_more_comfortable_hotel_at_similar_price(tmp_path):
                    stars=2, rating=6.0, wifi=False, distance_km=8.0)
     comfy = Offer(mode=Mode.HOTEL, provider="p", booking_site="Booking.com", price=105, currency="EUR",
                    depart_time="2026-09-10T00:00:00", arrive_time="2026-09-14T00:00:00", duration_hours=96,
-                   stars=5, rating=9.5, wifi=True, breakfast_included=True, free_cancellation=True,
-                   parking=True, air_conditioning=True, pool_or_fitness=True, distance_km=0.2)
+                   stars=5, rating=9.5, wifi=True, meal_plan="breakfast", free_cancellation=True,
+                   parking=True, air_conditioning=True, pool=True, gym=True, distance_km=0.2)
     # a much pricier decoy so basic/comfy both sit near the low end of the
     # price range - with only 2 candidates, min-max normalization would
     # otherwise stretch their small 5 EUR gap to the full 0..1 range and

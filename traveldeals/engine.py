@@ -13,9 +13,9 @@ from __future__ import annotations
 from datetime import date, datetime
 
 from traveldeals.currency import convert, get_rates_per_eur
-from traveldeals.models import (OR_COMBO_MODES, HotelPref, Mode, Offer,
-                                 Priority, RoutePreference, TransportPref,
-                                 TripOption)
+from traveldeals.models import (MEAL_PLAN_TIERS, OR_COMBO_MODES, HotelPref,
+                                 Mode, Offer, Priority, RoutePreference,
+                                 TransportPref, TripOption)
 from traveldeals.pricehistory import PriceHistory
 from traveldeals.providers.base import Provider
 
@@ -52,17 +52,27 @@ _HOTEL_COMBO_TRANSPORT_MODE = {
 }
 
 
+# Every boolean hotel amenity flag on Offer, used both for the comfort score
+# below (coverage ratio) and left for callers who want the full list.
+HOTEL_AMENITY_FIELDS = [
+    "wifi", "free_cancellation", "parking", "air_conditioning", "pets_allowed",
+    "pool", "gym", "spa", "restaurant", "bar", "room_service", "front_desk_24h",
+    "business_facilities", "laundry_service", "elevator", "balcony_or_terrace",
+    "kitchen", "beachfront", "disabled_access", "ev_charging", "bicycle_rental",
+    "babysitting", "sauna", "hot_tub", "non_smoking", "family_rooms", "airport_shuttle",
+]
+
+
 def hotel_comfort_score(offer: Offer) -> float:
     """0..1, higher is better: blends stars, user rating, amenity coverage,
-    and closeness - equal-weighted since there's no principled reason to
-    prefer one over another without user-specific data."""
+    meal plan, and closeness - equal-weighted since there's no principled
+    reason to prefer one over another without user-specific data."""
     stars_norm = ((offer.stars or 3) - 1) / 4
     rating_norm = (offer.rating or 7.0) / 10
-    amenities = [offer.wifi, offer.breakfast_included, offer.free_cancellation,
-                 offer.parking, offer.air_conditioning, offer.pets_allowed, offer.pool_or_fitness]
-    amenity_norm = sum(1 for a in amenities if a) / len(amenities)
+    amenity_norm = sum(1 for f in HOTEL_AMENITY_FIELDS if getattr(offer, f)) / len(HOTEL_AMENITY_FIELDS)
     distance_norm = 1 - min(offer.distance_km or 3.0, 10) / 10
-    return (stars_norm + rating_norm + amenity_norm + distance_norm) / 4
+    meal_plan_norm = MEAL_PLAN_TIERS.index(offer.meal_plan) / (len(MEAL_PLAN_TIERS) - 1)
+    return (stars_norm + rating_norm + amenity_norm + distance_norm + meal_plan_norm) / 5
 
 
 def transport_comfort_score(offer: Offer) -> float:
@@ -86,6 +96,41 @@ def comfort_score(option: TripOption) -> float:
     return sum(scores) / len(scores) if scores else 0.5
 
 
+# Maps each HotelPref.require_X flag to the Offer field it checks - covers
+# every boolean amenity below the core stars/rating/distance/type/meal-plan
+# filters, so adding a new amenity is a one-line addition to this dict
+# instead of another if-statement.
+_HOTEL_AMENITY_REQUIREMENTS = {
+    "require_wifi": "wifi",
+    "require_free_cancellation": "free_cancellation",
+    "require_parking": "parking",
+    "require_air_conditioning": "air_conditioning",
+    "require_pets_allowed": "pets_allowed",
+    "require_pool": "pool",
+    "require_gym": "gym",
+    "require_spa": "spa",
+    "require_restaurant": "restaurant",
+    "require_bar": "bar",
+    "require_room_service": "room_service",
+    "require_24h_front_desk": "front_desk_24h",
+    "require_business_facilities": "business_facilities",
+    "require_laundry_service": "laundry_service",
+    "require_elevator": "elevator",
+    "require_balcony_or_terrace": "balcony_or_terrace",
+    "require_kitchen": "kitchen",
+    "require_beachfront": "beachfront",
+    "require_disabled_access": "disabled_access",
+    "require_ev_charging": "ev_charging",
+    "require_bicycle_rental": "bicycle_rental",
+    "require_babysitting": "babysitting",
+    "require_sauna": "sauna",
+    "require_hot_tub": "hot_tub",
+    "require_non_smoking": "non_smoking",
+    "require_family_rooms": "family_rooms",
+    "require_airport_shuttle": "airport_shuttle",
+}
+
+
 def _meets_hotel_constraints(offer: Offer, pref: HotelPref) -> bool:
     if pref.min_stars is not None and (offer.stars or 0) < pref.min_stars:
         return False
@@ -93,20 +138,13 @@ def _meets_hotel_constraints(offer: Offer, pref: HotelPref) -> bool:
         return False
     if pref.max_distance_km is not None and (offer.distance_km or 0) > pref.max_distance_km:
         return False
-    if pref.require_wifi and not offer.wifi:
+    if pref.property_types and offer.property_type not in pref.property_types:
         return False
-    if pref.require_breakfast and not offer.breakfast_included:
+    if pref.min_meal_plan is not None and MEAL_PLAN_TIERS.index(offer.meal_plan) < MEAL_PLAN_TIERS.index(pref.min_meal_plan):
         return False
-    if pref.require_free_cancellation and not offer.free_cancellation:
-        return False
-    if pref.require_parking and not offer.parking:
-        return False
-    if pref.require_air_conditioning and not offer.air_conditioning:
-        return False
-    if pref.require_pets_allowed and not offer.pets_allowed:
-        return False
-    if pref.require_pool_or_fitness and not offer.pool_or_fitness:
-        return False
+    for pref_flag, offer_field in _HOTEL_AMENITY_REQUIREMENTS.items():
+        if getattr(pref, pref_flag) and not getattr(offer, offer_field):
+            return False
     return True
 
 

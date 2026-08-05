@@ -27,12 +27,18 @@ auf einem Dashboard die besten aktuellen Optionen pro Strecke zeigt.
   Budget, Währung, maximale Reisezeit, Priorität (`cheapest` / `fastest` /
   `best_value`), Gepäck (Handgepäck-only, Anzahl/Gewicht Koffer), Bahn-Extras
   (BahnCard 25/50/100, Deutschlandticket), ob Low-Cost-Airlines ok sind.
-- **Hotel-Kriterien** (mehr als eine typische Trivago-Suche zeigt, siehe
-  `HotelPref` in `traveldeals/models.py`): Min. Sterne, Mindestbewertung,
-  max. Entfernung zu Zentrum/Bahnhof/Flughafen, WLAN, Frühstück inkl.,
-  kostenlose Stornierung, Parkplatz, Klimaanlage, Haustiere erlaubt,
-  Pool/Fitness - fließen nicht nur als Filter, sondern auch als Komfort-Score
-  ins `best_value`-Ranking ein (siehe unten).
+- **Hotel-Kriterien** (das volle Trivago-Filterset, siehe `HotelPref` in
+  `traveldeals/models.py`): Min. Sterne, Mindestbewertung, max. Entfernung
+  zu Zentrum/Bahnhof/Flughafen, Unterkunftsart (Hotel/Apartment/Hostel/
+  Resort/B&B/Gästehaus/Villa), Verpflegungsstufe (Frühstück/Halb-/
+  Vollpension/All-Inclusive), plus 27 einzelne Ausstattungsmerkmale (WLAN,
+  Parkplatz, Klimaanlage, Pool, Fitnessraum, Spa, Sauna, Whirlpool,
+  Restaurant, Bar, Zimmerservice, 24h-Rezeption, Wäscheservice,
+  Business-Ausstattung, Flughafentransfer, Aufzug, Balkon/Terrasse, Küche,
+  Strandnähe, Barrierefreiheit, E-Ladestation, Fahrradverleih, Babysitting,
+  Nichtraucher, Familienzimmer, Haustiere erlaubt, kostenlose Stornierung) -
+  fließen nicht nur als Filter, sondern auch als Komfort-Score ins
+  `best_value`-Ranking ein (siehe unten).
 - **Transport-Kriterien** (`TransportPref`): nur Direktverbindungen, WLAN an
   Bord, Steckdosen, Mindest-Pünktlichkeit, Beinfreiheit (mode-abhängig
   normalisiert) - ebenfalls Filter *und* Komfort-Score. Zusätzlich zur
