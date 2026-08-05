@@ -174,18 +174,44 @@ bleibt die freie A-nach-B-Suche deshalb auf Mock-Daten.
 
 Um dort trotzdem echte Preise für beliebige Strecken zu bekommen, gibt es
 `worker/` - einen minimalen, kostenlosen Cloudflare-Worker-Proxy, der den
-Token serverseitig versteckt und Anfragen an `v1/prices/cheap` weiterreicht:
+Token serverseitig versteckt und Anfragen an `v1/prices/cheap` weiterreicht.
+
+### Deploy ohne CLI/Terminal (empfohlen)
+
+`.github/workflows/deploy-worker.yml` deployt den Worker automatisch bei
+jedem Push - du musst nur zwei Werte aus dem Cloudflare-Dashboard kopieren,
+genau wie bei den anderen Secrets oben:
 
 1. Kostenloses Konto auf [dash.cloudflare.com](https://dash.cloudflare.com).
-2. Im Ordner `worker/`:
-   ```bash
-   npm install
-   npx wrangler login
-   npx wrangler secret put TRAVELPAYOUTS_TOKEN   # denselben Token wie oben einfügen
-   npx wrangler deploy
-   ```
-3. Die ausgegebene `*.workers.dev`-URL in `docs/app.js` in die Konstante
-   `PROXY_URL` eintragen (Zeile mit `const PROXY_URL = '';`) und committen.
+2. **API-Token erstellen:** Profil-Icon (oben rechts) -> *My Profile* ->
+   Tab *API Tokens* -> *Create Token* -> Vorlage **"Edit Cloudflare
+   Workers"** -> *Continue to summary* -> *Create Token* -> Wert kopieren
+   (wird nur einmal angezeigt).
+3. **Account-ID kopieren:** *Workers & Pages* im linken Menü -> die
+   Account-ID steht rechts auf der Übersichtsseite.
+4. Beide Werte als Repo-Secrets hinterlegen (Settings -> Secrets and
+   variables -> Actions): `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`.
+   `TRAVELPAYOUTS_TOKEN` hast du schon (wird automatisch wiederverwendet,
+   um den Worker-internen Token zu setzen - nichts doppelt eintragen).
+5. Push nach `main` (oder Actions-Tab -> *Deploy proxy worker* -> *Run
+   workflow*) - die Action deployt den Worker und setzt sein
+   `TRAVELPAYOUTS_TOKEN`-Secret automatisch.
+6. Im Log dieses Workflow-Laufs steht die `*.workers.dev`-URL - die einmalig
+   in `docs/app.js` in die Konstante `PROXY_URL` eintragen (Zeile mit
+   `const PROXY_URL = '';`) und committen.
+
+### Alternative: Deploy per CLI
+
+```bash
+cd worker/
+npm install
+npx wrangler login
+npx wrangler secret put TRAVELPAYOUTS_TOKEN   # denselben Token wie oben einfügen
+npx wrangler deploy
+```
+Ausgegebene URL wie oben in `PROXY_URL` eintragen.
+
+---
 
 Ohne gesetzte `PROXY_URL` - oder wenn der Proxy mal nicht erreichbar ist -
 fällt die Suche automatisch auf Mock-Daten zurück, es gibt also keinen

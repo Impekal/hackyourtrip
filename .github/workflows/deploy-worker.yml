@@ -1,0 +1,33 @@
+name: Deploy proxy worker
+
+# Deploys worker/ to Cloudflare - no local CLI needed. Requires two repo
+# secrets from the Cloudflare dashboard (Settings -> Secrets and variables ->
+# Actions): CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID. Reuses the
+# existing TRAVELPAYOUTS_TOKEN secret (already set up for check-deals.yml) to
+# configure the Worker's own copy of the token - nothing to duplicate.
+# See README "Live-Suche mit echten Preisen" for the full walkthrough.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "worker/**"
+      - ".github/workflows/deploy-worker.yml"
+  workflow_dispatch: {}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy Worker and set its TRAVELPAYOUTS_TOKEN secret
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: worker
+          secrets: |
+            TRAVELPAYOUTS_TOKEN
+        env:
+          TRAVELPAYOUTS_TOKEN: ${{ secrets.TRAVELPAYOUTS_TOKEN }}
