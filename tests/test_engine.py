@@ -83,6 +83,49 @@ def test_low_cost_excluded_when_not_allowed(tmp_path):
     assert result == []
 
 
+def test_most_expensive_priority_reverses_price_order(tmp_path):
+    offers = [
+        Offer(mode=Mode.FLIGHT, provider="p", booking_site="A", price=150, currency="EUR",
+              depart_time="2026-09-10T09:00:00", arrive_time="2026-09-10T11:00:00", duration_hours=2),
+        Offer(mode=Mode.FLIGHT, provider="p", booking_site="B", price=90, currency="EUR",
+              depart_time="2026-09-10T14:00:00", arrive_time="2026-09-10T17:00:00", duration_hours=3),
+    ]
+    engine = make_engine({Mode.FLIGHT: FakeProvider(Mode.FLIGHT, offers)}, tmp_path)
+    result = engine.search(make_route(priority=Priority.MOST_EXPENSIVE))
+    assert [o.total_price for o in result] == [150, 90]
+
+
+def test_exact_date_priority_ranks_requested_dates_first(tmp_path):
+    offers = [
+        # cheapest, but 3 days off the requested date - must NOT win here
+        Offer(mode=Mode.FLIGHT, provider="p", booking_site="cheap-but-off", price=50, currency="EUR",
+              depart_time="2026-09-13T09:00:00", arrive_time="2026-09-13T11:00:00", duration_hours=2),
+        Offer(mode=Mode.FLIGHT, provider="p", booking_site="exact", price=200, currency="EUR",
+              depart_time="2026-09-10T09:00:00", arrive_time="2026-09-10T11:00:00", duration_hours=2),
+        Offer(mode=Mode.FLIGHT, provider="p", booking_site="one-day-off", price=80, currency="EUR",
+              depart_time="2026-09-11T09:00:00", arrive_time="2026-09-11T11:00:00", duration_hours=2),
+    ]
+    engine = make_engine({Mode.FLIGHT: FakeProvider(Mode.FLIGHT, offers)}, tmp_path)
+    route = make_route(priority=Priority.EXACT_DATE, flex_days_after=5)
+    result = engine.search(route)
+    assert [o.booking_sites[0] for o in result] == ["exact", "one-day-off", "cheap-but-off"]
+
+
+def test_exact_date_priority_falls_back_to_price_within_the_window(tmp_path):
+    offers = [
+        Offer(mode=Mode.FLIGHT, provider="p", booking_site="pricey", price=300, currency="EUR",
+              depart_time="2026-09-10T09:00:00", arrive_time="2026-09-10T11:00:00", duration_hours=2),
+        Offer(mode=Mode.FLIGHT, provider="p", booking_site="cheap", price=100, currency="EUR",
+              depart_time="2026-09-11T09:00:00", arrive_time="2026-09-11T11:00:00", duration_hours=2),
+    ]
+    engine = make_engine({Mode.FLIGHT: FakeProvider(Mode.FLIGHT, offers)}, tmp_path)
+    # both days are inside the requested window -> zero deviation for both,
+    # so price decides rather than provider order
+    route = make_route(priority=Priority.EXACT_DATE, depart_date_until=date(2026, 9, 11))
+    result = engine.search(route)
+    assert result[0].booking_sites[0] == "cheap"
+
+
 def test_baggage_hint_when_checked_bag_fee_significant(tmp_path):
     offers = [
         Offer(mode=Mode.FLIGHT, provider="p", booking_site="A", price=100, currency="EUR",

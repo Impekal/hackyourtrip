@@ -227,11 +227,13 @@
           <input type="number" id="maxDuration" min="0" step="0.5" placeholder="ohne Limit">
         </div>
         <div class="field">
-          <label for="priority">Priorität</label>
+          <label for="priority">Sortieren nach</label>
           <select id="priority">
-            <option value="cheapest">Günstigster</option>
-            <option value="fastest">Schnellster</option>
             <option value="best_value" selected>Bestes Verhältnis</option>
+            <option value="cheapest">Preis aufsteigend</option>
+            <option value="most_expensive">Preis absteigend</option>
+            <option value="fastest">Dauer (schnellste zuerst)</option>
+            <option value="exact_date">Präzision (exaktes Datum zuerst)</option>
           </select>
         </div>
         <div class="field" data-group="nightsGroup">

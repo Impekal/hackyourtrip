@@ -13,9 +13,13 @@ from typing import Optional
 
 
 class Priority(str, Enum):
+    """How results get ranked. Everything here is a *sort order*: the engine
+    always scores lower-is-better, so e.g. MOST_EXPENSIVE negates the price."""
     CHEAPEST = "cheapest"
+    MOST_EXPENSIVE = "most_expensive"   # price descending
     FASTEST = "fastest"
-    BEST_VALUE = "best_value"  # weighted price/duration/comfort tradeoff
+    EXACT_DATE = "exact_date"           # least deviation from the wanted date first
+    BEST_VALUE = "best_value"           # weighted price/duration/comfort tradeoff
 
 
 class Mode(str, Enum):

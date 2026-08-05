@@ -209,7 +209,7 @@ class DealEngine:
 
         candidates = [c for c in candidates if self._meets_hard_constraints(c, route)]
         for c in candidates:
-            c.score = self._score(c, route.priority, candidates)
+            c.score = self._score(c, route.priority, candidates, route)
         candidates.sort(key=lambda c: c.score)
         top = candidates[:top_n]
 
@@ -262,11 +262,19 @@ class DealEngine:
                 return False
         return True
 
-    def _score(self, option: TripOption, priority: Priority, all_candidates: list[TripOption]) -> float:
+    def _score(self, option: TripOption, priority: Priority, all_candidates: list[TripOption],
+                route: RoutePreference | None = None) -> float:
         if priority == Priority.CHEAPEST:
             return option.total_price
+        if priority == Priority.MOST_EXPENSIVE:
+            return -option.total_price  # engine sorts ascending, so negate
         if priority == Priority.FASTEST:
             return option.total_duration_hours
+        if priority == Priority.EXACT_DATE:
+            # Days away from the requested window (0 = exactly on a wanted
+            # date). Price breaks ties so the ordering stays deterministic
+            # instead of depending on provider order.
+            return _date_deviation_days(option, route) * 100_000 + option.total_price
         prices = [c.total_price for c in all_candidates]
         durations = [c.total_duration_hours for c in all_candidates]
         price_norm = _normalize(option.total_price, prices)
@@ -349,6 +357,24 @@ class DealEngine:
                 "💱 Entspricht ca. " + " / ".join(equivalents) +
                 " – ob eine Buchung in anderer Landeswährung günstiger ist, prüft v1 noch nicht automatisch."
             )
+
+
+def _date_deviation_days(option: TripOption, route: RoutePreference | None) -> int:
+    """How many days the option's departure sits outside the *exactly*
+    requested window (depart_date_from..depart_date_until), ignoring the
+    flex_days_before/after padding - that padding widens what gets searched,
+    but with EXACT_DATE the user wants the un-padded dates ranked first."""
+    if route is None:
+        return 0
+    try:
+        departure = date.fromisoformat(option.offers[0].depart_time[:10])
+    except (ValueError, IndexError):
+        return 0
+    if departure < route.depart_date_from:
+        return (route.depart_date_from - departure).days
+    if departure > route.depart_date_until:
+        return (departure - route.depart_date_until).days
+    return 0
 
 
 def _normalize(value: float, all_values: list[float]) -> float:

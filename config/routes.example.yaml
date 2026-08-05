@@ -14,7 +14,7 @@ routes:
     budget: 400               # Gesamtbudget in `currency`, leer = kein Limit
     currency: EUR
     max_duration_hours: 5     # maximale Reisezeit, leer = kein Limit
-    priority: best_value      # cheapest | fastest | best_value
+    priority: best_value      # Sortierung: best_value | cheapest | most_expensive | fastest | exact_date
     modes:
       - flight
       - flight_hotel

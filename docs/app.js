@@ -637,6 +637,21 @@ function normalize(value, all) {
   return hi === lo ? 0 : (value - lo) / (hi - lo);
 }
 
+// Mirrors engine.py's _date_deviation_days: how far the departure sits
+// outside the *exactly* requested window, ignoring the flex padding (that
+// padding widens the search, but 'exact_date' ranks un-padded dates first).
+function dateDeviationDays(candidate, route) {
+  const depart = candidate.offers[0]?.depart;
+  if (!depart) return 0;
+  const day = new Date(depart.getFullYear(), depart.getMonth(), depart.getDate());
+  const from = new Date(route.departFrom.getFullYear(), route.departFrom.getMonth(), route.departFrom.getDate());
+  const until = new Date(route.departUntil.getFullYear(), route.departUntil.getMonth(), route.departUntil.getDate());
+  const dayMs = 86400000;
+  if (day < from) return Math.round((from - day) / dayMs);
+  if (day > until) return Math.round((day - until) / dayMs);
+  return 0;
+}
+
 const COMBO_TRANSPORT_MODE = { flight_hotel: 'flight', train_hotel: 'train', bus_hotel: 'bus' };
 const OR_COMBO_MODES = { train_or_bus: ['train', 'bus'], flight_or_train: ['flight', 'train'], flight_or_bus: ['flight', 'bus'] };
 
@@ -691,7 +706,12 @@ async function runSearch(route) {
   const durations = candidates.map(c => c.durationHours);
   for (const c of candidates) {
     if (route.priority === 'cheapest') c.score = c.price;
+    else if (route.priority === 'most_expensive') c.score = -c.price;  // sorted ascending, so negate
     else if (route.priority === 'fastest') c.score = c.durationHours;
+    else if (route.priority === 'exact_date') {
+      // Days outside the exactly requested window first; price breaks ties.
+      c.score = dateDeviationDays(c, route) * 100000 + c.price;
+    }
     else {
       const discomfort = 1 - comfortScore(c);
       c.score = BEST_VALUE_PRICE_WEIGHT * normalize(c.price, prices)
