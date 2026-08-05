@@ -1,11 +1,10 @@
 name: Explore Travelpayouts prices endpoints for more results (temporary)
 
-# One-off: check whether omitting depart_date (calendar-style response) or
-# using v2/prices/latest gives more offers per call than our current
-# one-date-per-call v1/prices/cheap loop - verifying from a runner with
-# real internet access, since the dev sandbox has none. Uses the same
-# TRAVELPAYOUTS_TOKEN secret already configured for check-deals.yml.
-# Delete once the shapes are confirmed.
+# One-off: v2/prices/latest already proved far richer than our current
+# v1/prices/cheap loop (10 offers/call incl. real gate names vs 1). This
+# round pins down how to target a *specific* date window and how many
+# offers we can actually get per call. Runner has real internet; the dev
+# sandbox does not. Delete once confirmed.
 
 on:
   workflow_dispatch: {}
@@ -14,38 +13,70 @@ jobs:
   explore:
     runs-on: ubuntu-latest
     steps:
-      - name: v1/prices/cheap WITHOUT depart_date (potential calendar shape)
-        run: |
-          curl -sS -w '\nHTTP_STATUS:%{http_code}\n' \
-            -H "X-Access-Token: ${{ secrets.TRAVELPAYOUTS_TOKEN }}" \
-            --get "https://api.travelpayouts.com/v1/prices/cheap" \
-            --data-urlencode "origin=BER" \
-            --data-urlencode "destination=BCN" \
-            --data-urlencode "currency=eur"
-          echo
-
-      - name: v2/prices/latest (documented as multiple recent tickets, not just cheapest)
+      - name: latest, period_type=month + beginning_of_period, high limit
         run: |
           curl -sS -w '\nHTTP_STATUS:%{http_code}\n' \
             -H "X-Access-Token: ${{ secrets.TRAVELPAYOUTS_TOKEN }}" \
             --get "https://api.travelpayouts.com/v2/prices/latest" \
-            --data-urlencode "origin=BER" \
-            --data-urlencode "destination=BCN" \
-            --data-urlencode "currency=eur" \
-            --data-urlencode "limit=30" \
-            --data-urlencode "period_type=year" \
-            --data-urlencode "one_way=false" \
-            --data-urlencode "sorting=price"
+            --data-urlencode "origin=BER" --data-urlencode "destination=BCN" \
+            --data-urlencode "currency=eur" --data-urlencode "limit=1000" \
+            --data-urlencode "period_type=month" \
+            --data-urlencode "beginning_of_period=2026-09-01" \
+            --data-urlencode "one_way=true" --data-urlencode "sorting=price" \
+            | python3 -c "import json,sys; d=json.load(sys.stdin); print('COUNT:', len(d.get('data',[]))); print('SAMPLE:', json.dumps(d.get('data',[])[:2], indent=1)); print('DATES:', sorted({r['depart_date'] for r in d.get('data',[])})[:40])"
           echo
 
-      - name: v1/prices/month-matrix (calendar of cheapest fares across a month)
+      - name: latest, one_way=false same window (round trip)
         run: |
           curl -sS -w '\nHTTP_STATUS:%{http_code}\n' \
             -H "X-Access-Token: ${{ secrets.TRAVELPAYOUTS_TOKEN }}" \
-            --get "https://api.travelpayouts.com/v1/prices/month-matrix" \
-            --data-urlencode "origin=BER" \
-            --data-urlencode "destination=BCN" \
-            --data-urlencode "currency=eur" \
-            --data-urlencode "show_to_affiliates=true" \
-            --data-urlencode "month=2026-09-01"
+            --get "https://api.travelpayouts.com/v2/prices/latest" \
+            --data-urlencode "origin=BER" --data-urlencode "destination=BCN" \
+            --data-urlencode "currency=eur" --data-urlencode "limit=1000" \
+            --data-urlencode "period_type=month" \
+            --data-urlencode "beginning_of_period=2026-09-01" \
+            --data-urlencode "one_way=false" --data-urlencode "sorting=price" \
+            | python3 -c "import json,sys; d=json.load(sys.stdin); print('COUNT:', len(d.get('data',[]))); print('DATES:', sorted({r['depart_date'] for r in d.get('data',[])})[:40])"
+          echo
+
+      - name: v2/prices/month-matrix (correct v2 path)
+        run: |
+          curl -sS -w '\nHTTP_STATUS:%{http_code}\n' \
+            -H "X-Access-Token: ${{ secrets.TRAVELPAYOUTS_TOKEN }}" \
+            --get "https://api.travelpayouts.com/v2/prices/month-matrix" \
+            --data-urlencode "origin=BER" --data-urlencode "destination=BCN" \
+            --data-urlencode "currency=eur" --data-urlencode "month=2026-09-01" \
+            --data-urlencode "show_to_affiliates=false" | head -c 1500
+          echo
+
+      - name: v1/prices/calendar (cheapest per day across a month)
+        run: |
+          curl -sS -w '\nHTTP_STATUS:%{http_code}\n' \
+            -H "X-Access-Token: ${{ secrets.TRAVELPAYOUTS_TOKEN }}" \
+            --get "https://api.travelpayouts.com/v1/prices/calendar" \
+            --data-urlencode "origin=BER" --data-urlencode "destination=BCN" \
+            --data-urlencode "currency=eur" --data-urlencode "depart_date=2026-09" \
+            --data-urlencode "calendar_type=departure_date" | head -c 1500
+          echo
+
+      - name: aviasales v3 prices_for_dates (newest documented endpoint)
+        run: |
+          curl -sS -w '\nHTTP_STATUS:%{http_code}\n' \
+            -H "X-Access-Token: ${{ secrets.TRAVELPAYOUTS_TOKEN }}" \
+            --get "https://api.travelpayouts.com/aviasales/v3/prices_for_dates" \
+            --data-urlencode "origin=BER" --data-urlencode "destination=BCN" \
+            --data-urlencode "departure_at=2026-09" --data-urlencode "currency=eur" \
+            --data-urlencode "limit=1000" --data-urlencode "sorting=price" \
+            --data-urlencode "one_way=true" \
+            | python3 -c "import json,sys; d=json.load(sys.stdin); print('COUNT:', len(d.get('data',[]))); print('SAMPLE:', json.dumps(d.get('data',[])[:3], indent=1))"
+          echo
+
+      - name: aviasales v3 grouped_prices (cheapest per day, grouped)
+        run: |
+          curl -sS -w '\nHTTP_STATUS:%{http_code}\n' \
+            -H "X-Access-Token: ${{ secrets.TRAVELPAYOUTS_TOKEN }}" \
+            --get "https://api.travelpayouts.com/aviasales/v3/grouped_prices" \
+            --data-urlencode "origin=BER" --data-urlencode "destination=BCN" \
+            --data-urlencode "departure_at=2026-09" --data-urlencode "currency=eur" \
+            --data-urlencode "group_by=departure_at" | head -c 2000
           echo
