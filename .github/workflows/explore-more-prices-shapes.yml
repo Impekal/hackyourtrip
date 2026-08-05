@@ -14,8 +14,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: latest, period_type=month + beginning_of_period, high limit
+        continue-on-error: true
         run: |
-          curl -sS -w '\nHTTP_STATUS:%{http_code}\n' \
+          curl -sS \
             -H "X-Access-Token: ${{ secrets.TRAVELPAYOUTS_TOKEN }}" \
             --get "https://api.travelpayouts.com/v2/prices/latest" \
             --data-urlencode "origin=BER" --data-urlencode "destination=BCN" \
@@ -27,8 +28,9 @@ jobs:
           echo
 
       - name: latest, one_way=false same window (round trip)
+        continue-on-error: true
         run: |
-          curl -sS -w '\nHTTP_STATUS:%{http_code}\n' \
+          curl -sS \
             -H "X-Access-Token: ${{ secrets.TRAVELPAYOUTS_TOKEN }}" \
             --get "https://api.travelpayouts.com/v2/prices/latest" \
             --data-urlencode "origin=BER" --data-urlencode "destination=BCN" \
@@ -40,8 +42,9 @@ jobs:
           echo
 
       - name: v2/prices/month-matrix (correct v2 path)
+        continue-on-error: true
         run: |
-          curl -sS -w '\nHTTP_STATUS:%{http_code}\n' \
+          curl -sS \
             -H "X-Access-Token: ${{ secrets.TRAVELPAYOUTS_TOKEN }}" \
             --get "https://api.travelpayouts.com/v2/prices/month-matrix" \
             --data-urlencode "origin=BER" --data-urlencode "destination=BCN" \
@@ -50,8 +53,9 @@ jobs:
           echo
 
       - name: v1/prices/calendar (cheapest per day across a month)
+        continue-on-error: true
         run: |
-          curl -sS -w '\nHTTP_STATUS:%{http_code}\n' \
+          curl -sS \
             -H "X-Access-Token: ${{ secrets.TRAVELPAYOUTS_TOKEN }}" \
             --get "https://api.travelpayouts.com/v1/prices/calendar" \
             --data-urlencode "origin=BER" --data-urlencode "destination=BCN" \
@@ -60,8 +64,9 @@ jobs:
           echo
 
       - name: aviasales v3 prices_for_dates (newest documented endpoint)
+        continue-on-error: true
         run: |
-          curl -sS -w '\nHTTP_STATUS:%{http_code}\n' \
+          curl -sS \
             -H "X-Access-Token: ${{ secrets.TRAVELPAYOUTS_TOKEN }}" \
             --get "https://api.travelpayouts.com/aviasales/v3/prices_for_dates" \
             --data-urlencode "origin=BER" --data-urlencode "destination=BCN" \
@@ -72,8 +77,9 @@ jobs:
           echo
 
       - name: aviasales v3 grouped_prices (cheapest per day, grouped)
+        continue-on-error: true
         run: |
-          curl -sS -w '\nHTTP_STATUS:%{http_code}\n' \
+          curl -sS \
             -H "X-Access-Token: ${{ secrets.TRAVELPAYOUTS_TOKEN }}" \
             --get "https://api.travelpayouts.com/aviasales/v3/grouped_prices" \
             --data-urlencode "origin=BER" --data-urlencode "destination=BCN" \
