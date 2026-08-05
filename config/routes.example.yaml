@@ -44,6 +44,8 @@ routes:
       preferred_depart_time: null   # "HH:MM", z.B. "09:00" - null = egal, jede Uhrzeit ok
       depart_time_flex_minutes: 0   # Zeitfenster +/- um preferred_depart_time (nur falls gesetzt)
     low_cost_airlines_ok: true
+    round_trip: true          # hin und zurück (nur relevant fuer flight/train/bus + deren Kombis)
+    return_date: 2026-09-17   # nur gelesen wenn round_trip: true
     notes: "Herbstferien, Datum ist flexibel"
 
   - id: koeln-hamburg-bahn-oder-bus

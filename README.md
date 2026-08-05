@@ -42,6 +42,13 @@ auf einem Dashboard die besten aktuellen Optionen pro Strecke zeigt.
   zirkulär über Mitternacht hinweg berechnet. Angebote außerhalb des
   Fensters werden herausgefiltert - auch die "später fahren spart X€"-
   Empfehlung schlägt nie eine Zeit außerhalb dieses Fensters vor.
+- **Hin- und Rückreise:** bei Flug/Bahn/Bus (und deren "was ist besser"-Kombis)
+  lässt sich zwischen Nur-Hinfahrt und Hin+Rück wählen (`round_trip` +
+  `return_date` in `RoutePreference`). Bei echten Travelpayouts-Daten liefert
+  die API dafür einen kombinierten Gesamtpreis für beide Strecken (kein
+  client-seitiges Aufsummieren nötig); die Mock-Provider bilden das mit einer
+  synthetisierten Rückreise nach demselben Prinzip nach. Reine Hotel-Modi
+  brauchen das nicht (Checkin+Nächte bilden die Aufenthaltsdauer schon ab).
 - **Komfort-Score im `best_value`-Ranking:** `best_value` ist nicht mehr nur
   Preis/Dauer, sondern `50% Preis + 25% Dauer + 25% Komfort` (Gewichte in
   `engine.py` anpassbar) - eine 5€ teurere, aber deutlich komfortablere

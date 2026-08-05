@@ -108,6 +108,11 @@ class TravelpayoutsFlightProvider(Provider):
             "depart_date": day.isoformat(),
             "currency": route.currency.lower(),
         }
+        if route.round_trip and route.return_date:
+            # The API returns one combined round-trip price (not per-leg) once
+            # return_date is set - see the price field in _to_offer, no extra
+            # summing needed on our side.
+            params["return_date"] = route.return_date.isoformat()
         resp = self.session.get(SEARCH_URL, headers={"X-Access-Token": self.token}, params=params, timeout=15)
         resp.raise_for_status()
         payload = resp.json()
@@ -135,6 +140,7 @@ class TravelpayoutsFlightProvider(Provider):
             duration_hours = 0.0
             arrive_time = depart_time
 
+        return_at = raw.get("return_at")
         return Offer(
             mode=Mode.FLIGHT,
             provider="travelpayouts",
@@ -144,6 +150,7 @@ class TravelpayoutsFlightProvider(Provider):
             depart_time=depart_time,
             arrive_time=arrive_time,
             duration_hours=duration_hours,
-            url=_build_booking_url(route, depart_time, raw.get("return_at")),
+            url=_build_booking_url(route, depart_time, return_at),
             stops=stops,
+            return_depart_time=return_at[:19] if return_at else None,
         )

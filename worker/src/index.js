@@ -66,12 +66,16 @@ export default {
     const origin = incoming.searchParams.get("origin") || "";
     const destination = incoming.searchParams.get("destination") || "";
     const departDate = incoming.searchParams.get("depart_date") || "";
+    const returnDate = incoming.searchParams.get("return_date") || "";
     const currency = (incoming.searchParams.get("currency") || "eur").toLowerCase();
 
     if (!isValidIataLike(origin) || !isValidIataLike(destination) || !isValidDate(departDate)) {
       return jsonResponse({
         error: "origin/destination must be 2-4 letter airport codes, depart_date must be YYYY-MM-DD.",
       }, 400, allowedOrigin);
+    }
+    if (returnDate && !isValidDate(returnDate)) {
+      return jsonResponse({ error: "return_date must be YYYY-MM-DD." }, 400, allowedOrigin);
     }
 
     const cache = caches.default;
@@ -83,6 +87,7 @@ export default {
     upstream.searchParams.set("origin", origin.toUpperCase());
     upstream.searchParams.set("destination", destination.toUpperCase());
     upstream.searchParams.set("depart_date", departDate);
+    if (returnDate) upstream.searchParams.set("return_date", returnDate);
     upstream.searchParams.set("currency", currency);
 
     let upstreamResponse;

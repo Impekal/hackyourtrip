@@ -73,6 +73,8 @@ def _parse_route(raw: dict) -> RoutePreference:
             depart_time_flex_minutes=int(transport_raw.get("depart_time_flex_minutes", 0)),
         ),
         low_cost_airlines_ok=bool(raw.get("low_cost_airlines_ok", True)),
+        round_trip=bool(raw.get("round_trip", False)),
+        return_date=_parse_date(raw["return_date"]) if raw.get("return_date") else None,
         notes=raw.get("notes", ""),
     )
 

@@ -110,6 +110,11 @@ class RoutePreference:
     hotel: HotelPref = field(default_factory=HotelPref)
     transport: TransportPref = field(default_factory=TransportPref)
     low_cost_airlines_ok: bool = True
+    # Only meaningful for flight/train/bus (and their OR-combos) - *_hotel
+    # combos already have an implicit return via checkin+nights, and Hotel
+    # has no transport leg at all.
+    round_trip: bool = False
+    return_date: Optional[date] = None
     notes: str = ""
 
 
@@ -136,6 +141,9 @@ class Offer:
     url: str = ""
     checked_bag_fee: float = 0.0  # cost to add the user's requested checked bag(s)
     is_low_cost: bool = False
+    # Set only for round-trip offers: `price` is then the combined total for
+    # both legs, and this is the return leg's departure time.
+    return_depart_time: Optional[str] = None
 
     # transport comfort
     stops: int = 0

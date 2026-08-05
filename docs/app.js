@@ -28,16 +28,16 @@ tabAlerts.addEventListener('click', () => activateMainTab('alerts'));
  * Naechte/Hotel-Kriterien.
  * ===================================================================== */
 const MODE_TAB_CONFIG = {
-  flight:          { origin: true,  nights: false, duration: true,  flight: true,  train: false, hotel: false, transportExtra: true,  modes: ['flight'] },
-  train:           { origin: true,  nights: false, duration: true,  flight: false, train: true,  hotel: false, transportExtra: true,  modes: ['train'] },
-  bus:             { origin: true,  nights: false, duration: true,  flight: false, train: false, hotel: false, transportExtra: true,  modes: ['bus'] },
-  hotel:           { origin: false, nights: true,  duration: false, flight: false, train: false, hotel: true,  transportExtra: false, modes: ['hotel'] },
-  train_or_bus:    { origin: true,  nights: false, duration: true,  flight: false, train: true,  hotel: false, transportExtra: true,  modes: ['train_or_bus'] },
-  flight_or_train: { origin: true,  nights: false, duration: true,  flight: true,  train: true,  hotel: false, transportExtra: true,  modes: ['flight_or_train'] },
-  flight_or_bus:   { origin: true,  nights: false, duration: true,  flight: true,  train: false, hotel: false, transportExtra: true,  modes: ['flight_or_bus'] },
-  flight_hotel:    { origin: true,  nights: true,  duration: true,  flight: true,  train: false, hotel: true,  transportExtra: true,  modes: ['flight_hotel'] },
-  train_hotel:     { origin: true,  nights: true,  duration: true,  flight: false, train: true,  hotel: true,  transportExtra: true,  modes: ['train_hotel'] },
-  bus_hotel:       { origin: true,  nights: true,  duration: true,  flight: false, train: false, hotel: true,  transportExtra: true,  modes: ['bus_hotel'] },
+  flight:          { origin: true,  nights: false, duration: true,  flight: true,  train: false, hotel: false, transportExtra: true,  roundTrip: true,  modes: ['flight'] },
+  train:           { origin: true,  nights: false, duration: true,  flight: false, train: true,  hotel: false, transportExtra: true,  roundTrip: true,  modes: ['train'] },
+  bus:             { origin: true,  nights: false, duration: true,  flight: false, train: false, hotel: false, transportExtra: true,  roundTrip: true,  modes: ['bus'] },
+  hotel:           { origin: false, nights: true,  duration: false, flight: false, train: false, hotel: true,  transportExtra: false, roundTrip: false, modes: ['hotel'] },
+  train_or_bus:    { origin: true,  nights: false, duration: true,  flight: false, train: true,  hotel: false, transportExtra: true,  roundTrip: true,  modes: ['train_or_bus'] },
+  flight_or_train: { origin: true,  nights: false, duration: true,  flight: true,  train: true,  hotel: false, transportExtra: true,  roundTrip: true,  modes: ['flight_or_train'] },
+  flight_or_bus:   { origin: true,  nights: false, duration: true,  flight: true,  train: false, hotel: false, transportExtra: true,  roundTrip: true,  modes: ['flight_or_bus'] },
+  flight_hotel:    { origin: true,  nights: true,  duration: true,  flight: true,  train: false, hotel: true,  transportExtra: true,  roundTrip: false, modes: ['flight_hotel'] },
+  train_hotel:     { origin: true,  nights: true,  duration: true,  flight: false, train: true,  hotel: true,  transportExtra: true,  roundTrip: false, modes: ['train_hotel'] },
+  bus_hotel:       { origin: true,  nights: true,  duration: true,  flight: false, train: false, hotel: true,  transportExtra: true,  roundTrip: false, modes: ['bus_hotel'] },
 };
 
 let activeMode = 'flight';
@@ -48,12 +48,13 @@ function applyModeVisibility(mode) {
   const groupVisible = {
     originGroup: cfg.origin, nightsGroup: cfg.nights, durationGroup: cfg.duration,
     flightGroup: cfg.flight, trainGroup: cfg.train, hotelGroup: cfg.hotel,
-    transportExtraGroup: cfg.transportExtra,
+    transportExtraGroup: cfg.transportExtra, roundTripGroup: cfg.roundTrip,
   };
   for (const [group, visible] of Object.entries(groupVisible)) {
     document.querySelectorAll(`[data-group="${group}"]`).forEach(el => { el.hidden = !visible; });
   }
   document.getElementById('origin').required = cfg.origin;
+  updateReturnDateVisibility();
   const isHotelOnly = mode === 'hotel';
   document.getElementById('destinationLabel').textContent = isHotelOnly ? 'Ort' : 'Nach';
   document.getElementById('departFromLabel').textContent = cfg.hotel && !cfg.origin ? 'Anreise ab' : 'Datum von';
@@ -67,6 +68,14 @@ modeTabsEl.addEventListener('click', (ev) => {
   modeTabsEl.querySelectorAll('.modetab').forEach(b => b.classList.toggle('active', b === btn));
   applyModeVisibility(activeMode);
 });
+
+function updateReturnDateVisibility() {
+  const cfg = MODE_TAB_CONFIG[activeMode];
+  const roundTripEl = document.getElementById('roundTrip');
+  const returnDateGroup = document.querySelector('[data-group="returnDateGroup"]');
+  if (returnDateGroup) returnDateGroup.hidden = !(cfg.roundTrip && roundTripEl && roundTripEl.checked);
+}
+document.getElementById('roundTrip')?.addEventListener('change', updateReturnDateVisibility);
 applyModeVisibility(activeMode);
 
 /* =========================================================================
@@ -143,6 +152,17 @@ const BOOKING_SITES = {
 const BAHNCARD_DISCOUNT = { '25': 0.25, '50': 0.5, '100': 1.0, '': 0.0 };
 const LEGROOM_RANGE = { flight: [66, 96], train: [85, 120], bus: [70, 100] };
 
+// Mirrors traveldeals/providers/mock.py's _round_trip_addon: one combined
+// price for both legs (like the real Travelpayouts API does), plus a
+// synthesized return-leg departure time on route.returnDate.
+function roundTripAddon(rng, route, outboundPrice, departHourPool) {
+  if (!(route.roundTrip && route.returnDate)) return [outboundPrice, null];
+  const returnPrice = round2(outboundPrice * rngFloat(rng, 0.8, 1.2));
+  const hour = rngChoice(rng, departHourPool);
+  const returnDt = atHour(route.returnDate, hour, rngChoice(rng, [0, 15, 30, 45]));
+  return [round2(outboundPrice + returnPrice), returnDt];
+}
+
 function transportComfortFields(rng, mode, stopWeights) {
   const [lo, hi] = LEGROOM_RANGE[mode];
   return {
@@ -167,10 +187,11 @@ function mockFlightOffers(route) {
       const isLowCost = rngBool(rng, 0.5);
       const bagFee = isLowCost ? round2(rngFloat(rng, 25, 55)) : 0;
       const depart = atHour(day, hour, rngChoice(rng, [0, 15, 30, 45]));
+      const [finalPrice, returnDepart] = roundTripAddon(rng, route, price, hours);
       offers.push({
         mode: 'flight', bookingSite: rngChoice(rng, BOOKING_SITES.flight),
-        price, currency: route.currency, depart, durationHours: duration,
-        bagFee, isLowCost, ...transportComfortFields(rng, 'flight', [0.55, 0.35, 0.10]),
+        price: finalPrice, currency: route.currency, depart, durationHours: duration,
+        bagFee, isLowCost, returnDepart, ...transportComfortFields(rng, 'flight', [0.55, 0.35, 0.10]),
       });
     }
   }
@@ -188,10 +209,12 @@ function mockTrainOffers(route) {
       const price = round2(basePrice * rngFloat(rng, 0.8, 1.3) * (1 - discount));
       const duration = round1(rngFloat(rng, 2.0, 7.0));
       const depart = atHour(day, hour, rngChoice(rng, [0, 15, 30, 45]));
+      const basePrice2 = route.bahncard === '100' ? 0 : price;
+      const [finalPrice, returnDepart] = roundTripAddon(rng, route, basePrice2, hours);
       offers.push({
         mode: 'train', bookingSite: rngChoice(rng, BOOKING_SITES.train),
-        price: route.bahncard === '100' ? 0 : price, currency: route.currency,
-        depart, durationHours: duration, bagFee: 0, isLowCost: false,
+        price: finalPrice, currency: route.currency,
+        depart, durationHours: duration, bagFee: 0, isLowCost: false, returnDepart,
         ...transportComfortFields(rng, 'train', [0.75, 0.20, 0.05]),
       });
     }
@@ -209,10 +232,11 @@ function mockBusOffers(route) {
       const price = round2(basePrice * rngFloat(rng, 0.8, 1.2));
       const duration = round1(rngFloat(rng, 3.0, 11.0));
       const depart = atHour(day, hour, rngChoice(rng, [0, 30]));
+      const [finalPrice, returnDepart] = roundTripAddon(rng, route, price, hours);
       offers.push({
         mode: 'bus', bookingSite: rngChoice(rng, BOOKING_SITES.bus),
-        price, currency: route.currency, depart, durationHours: duration,
-        bagFee: 0, isLowCost: false,
+        price: finalPrice, currency: route.currency, depart, durationHours: duration,
+        bagFee: 0, isLowCost: false, returnDepart,
         ...transportComfortFields(rng, 'bus', [0.65, 0.30, 0.05]),
       });
     }
@@ -396,20 +420,23 @@ function travelpayoutsRawToOffer(raw, currency, route) {
     bagFee: 0, isLowCost: false, stops,
     wifiOnboard: false, powerOutlets: false, legroomCm: null, punctualityPct: null,
     url: buildBookingUrl(route, departIso, raw.return_at),
+    returnDepart: raw.return_at ? new Date(raw.return_at.slice(0, 19)) : null,
   };
 }
 
 async function fetchRealFlightOffers(route) {
   if (!PROXY_URL) return null; // not configured - caller falls back to mock
   const offers = [];
+  const returnDateStr = (route.roundTrip && route.returnDate) ? isoDay(route.returnDate) : '';
   for (const day of dayCandidates(route).slice(0, REAL_FLIGHT_MAX_DATES)) {
     const dateStr = isoDay(day);
-    const cacheKey = `hyt:${route.origin}:${route.destination}:${dateStr}:${route.currency}`;
+    const cacheKey = `hyt:${route.origin}:${route.destination}:${dateStr}:${returnDateStr}:${route.currency}`;
     let payload = sessionCacheGet(cacheKey);
     if (!payload) {
       try {
         const url = `${PROXY_URL.replace(/\/$/, '')}/cheap?origin=${encodeURIComponent(route.origin)}`
           + `&destination=${encodeURIComponent(route.destination)}&depart_date=${dateStr}`
+          + (returnDateStr ? `&return_date=${returnDateStr}` : '')
           + `&currency=${route.currency.toLowerCase()}`;
         const resp = await fetch(url);
         if (!resp.ok) continue;
@@ -712,6 +739,9 @@ function readRouteFromForm() {
     bahncard: document.getElementById('bahncard').value,
     deutschlandticket: document.getElementById('deutschlandticket').checked,
     lowCostOk: document.getElementById('lowCostOk').checked,
+    roundTrip: cfg.roundTrip && document.getElementById('roundTrip').checked,
+    returnDate: (cfg.roundTrip && document.getElementById('roundTrip').checked && document.getElementById('returnDate').value)
+      ? new Date(document.getElementById('returnDate').value) : null,
     hotelPrefs: {
       minStars: document.getElementById('minStars').value ? Number(document.getElementById('minStars').value) : null,
       minRating: numOrNull('minRating'),
@@ -752,7 +782,7 @@ function renderResults(route, options, usedRealFlightData) {
           <div class="price-row">
             <span class="price mono">${opt.price.toFixed(2)} ${route.currency}</span>
           </div>
-          <span class="subline mono">${opt.mode} · ${fmtShort(opt.offers[0].depart)} · ${opt.durationHours}h · ${opt.offers.map(o => bookingSiteHtml(o.bookingSite, o.url)).join(', ')}</span>
+          <span class="subline mono">${opt.mode} · ${fmtShort(opt.offers[0].depart)}${opt.offers[0].returnDepart ? ` · zurück ${fmtShort(opt.offers[0].returnDepart)}` : ''} · ${opt.durationHours}h · ${opt.offers.map(o => bookingSiteHtml(o.bookingSite, o.url)).join(', ')}</span>
           <div class="chips">${opt.offers.flatMap(offerChips).map(c => `<span class="chip">${c}</span>`).join('')}</div>
           ${opt.recommendations.length ? `<ul class="recs">${opt.recommendations.map(r => `<li>${r}</li>`).join('')}</ul>` : ''}
         </div>
@@ -805,6 +835,8 @@ function buildYamlSnippet(route) {
       preferred_depart_time: ${tp.preferredDepartTime ? `"${tp.preferredDepartTime}"` : 'null'}
       depart_time_flex_minutes: ${tp.departTimeFlexMinutes || 0}
     low_cost_airlines_ok: ${route.lowCostOk}
+    round_trip: ${route.roundTrip || false}
+    return_date: ${route.roundTrip && route.returnDate ? fmt(route.returnDate) : 'null'}
 `;
 }
 
@@ -862,7 +894,7 @@ async function loadAlerts() {
             ${opt.is_error_fare ? '<span class="badge alert">Fehlerpreis</span>' : ''}
             ${opt.is_price_drop ? '<span class="badge good">Preis gefallen</span>' : ''}
           </div>
-          <span class="subline mono">${opt.mode} · ${opt.total_duration_hours > 0 ? opt.total_duration_hours + 'h' : 'Dauer unbekannt'} · ${opt.offers.map(o => bookingSiteHtml(o.booking_site, o.url)).join(', ')}</span>
+          <span class="subline mono">${opt.mode} · ${opt.total_duration_hours > 0 ? opt.total_duration_hours + 'h' : 'Dauer unbekannt'}${opt.offers[0].return_depart_time ? ` · zurück ${opt.offers[0].return_depart_time.slice(0, 16).replace('T', ' ')}` : ''} · ${opt.offers.map(o => bookingSiteHtml(o.booking_site, o.url)).join(', ')}</span>
           ${opt.recommendations.length ? `<ul class="recs">${opt.recommendations.map(r => `<li>${r}</li>`).join('')}</ul>` : ''}
         </div>
       `).join('')}
@@ -876,4 +908,5 @@ async function loadAlerts() {
   const until = addDays(new Date(), 34);
   document.getElementById('departFrom').value = isoDay(from);
   document.getElementById('departUntil').value = isoDay(until);
+  document.getElementById('returnDate').value = isoDay(addDays(until, 4));
 })();

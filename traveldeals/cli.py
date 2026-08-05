@@ -85,6 +85,7 @@ def _option_to_dict(option: TripOption) -> dict:
                 "mode": o.mode.value, "provider": o.provider, "booking_site": o.booking_site,
                 "price": o.price, "currency": o.currency, "depart_time": o.depart_time,
                 "arrive_time": o.arrive_time, "duration_hours": o.duration_hours, "url": o.url,
+                "return_depart_time": o.return_depart_time,
             }
             for o in option.offers
         ],

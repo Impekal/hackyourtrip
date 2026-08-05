@@ -181,6 +181,37 @@ def test_duration_to_used_even_when_offer_has_a_connection():
     assert offer.duration_hours == 2.75
 
 
+def test_round_trip_route_sends_return_date_param():
+    session = FakeSession(get_responses=[FakeResponse(NESTED_SAMPLE_PAYLOAD)])
+    provider = TravelpayoutsFlightProvider(token="tok", session=session)
+    route = make_route(round_trip=True, return_date=date(2026, 9, 17))
+    provider.search(route)
+    _, _, _, params = session.calls[0]
+    assert params["return_date"] == "2026-09-17"
+
+
+def test_one_way_route_omits_return_date_param():
+    session = FakeSession(get_responses=[FakeResponse(NESTED_SAMPLE_PAYLOAD)])
+    provider = TravelpayoutsFlightProvider(token="tok", session=session)
+    provider.search(make_route(round_trip=False))
+    _, _, _, params = session.calls[0]
+    assert "return_date" not in params
+
+
+def test_return_depart_time_populated_from_return_at():
+    session = FakeSession(get_responses=[FakeResponse(NESTED_SAMPLE_PAYLOAD)])
+    provider = TravelpayoutsFlightProvider(token="tok", session=session)
+    offer = provider.search(make_route(round_trip=True, return_date=date(2026, 9, 17)))[0]
+    assert offer.return_depart_time == "2026-09-07T22:15:00"  # tz offset stripped, like depart_time
+
+
+def test_return_depart_time_is_none_without_return_at():
+    session = FakeSession(get_responses=[FakeResponse(SAMPLE_PAYLOAD)])  # no return_at field
+    provider = TravelpayoutsFlightProvider(token="tok", session=session)
+    offer = provider.search(make_route())[0]
+    assert offer.return_depart_time is None
+
+
 def test_request_exception_on_one_day_does_not_crash_whole_search():
     class FlakySession(FakeSession):
         def get(self, url, headers=None, params=None, timeout=None):
