@@ -333,14 +333,39 @@ function sessionCacheSet(key, value) {
   try { sessionStorage.setItem(key, JSON.stringify(value)); } catch (e) { /* private mode etc. - fine to skip caching */ }
 }
 
-function travelpayoutsRawToOffer(raw, currency) {
-  const departIso = raw.departure_at.replace(/Z$/, '');
+function flattenTravelpayoutsOffers(data) {
+  // The real API observed in production nests one level deeper than the
+  // documented example - keyed by an arbitrary index ("0") instead of the
+  // offer fields sitting directly under the destination code. Handle both
+  // shapes rather than assuming which one a given response uses.
+  const offers = [];
+  for (const value of Object.values(data || {})) {
+    if (!value || typeof value !== 'object') continue;
+    if ('price' in value) {
+      offers.push(value);
+    } else {
+      offers.push(...Object.values(value).filter(v => v && typeof v === 'object' && 'price' in v));
+    }
+  }
+  return offers;
+}
+
+function travelpayoutsRawToOffer(raw, currency, route) {
+  // Strip a trailing "Z" or "+HH:MM"/"-HH:MM" offset - keeps the naive
+  // local-time convention the mock providers use (new Date(y,m,d,h,...)).
+  const departIso = raw.departure_at.slice(0, 19);
   const depart = new Date(departIso);
   const stops = Number(raw.transfers ?? 0);
   let durationHours = 0;
   let arrive = depart;
-  if (stops === 0) {
-    const estimate = estimateDirectFlightDurationHours(raw.origin, raw.destination);
+  if (raw.duration_to != null) {
+    // Real data (observed in practice, though not in the official docs
+    // example) beats a distance guess - and unlike our own estimate, it
+    // isn't limited to non-stop offers.
+    durationHours = round2(raw.duration_to / 60);
+    arrive = new Date(depart.getTime() + raw.duration_to * 60000);
+  } else if (stops === 0) {
+    const estimate = estimateDirectFlightDurationHours(route.origin, route.destination);
     if (estimate !== null) {
       durationHours = estimate;
       arrive = new Date(depart.getTime() + estimate * 3600000);
@@ -377,8 +402,8 @@ async function fetchRealFlightOffers(route) {
     }
     if (!payload || payload.success === false) continue;
     const currency = (payload.currency || route.currency).toUpperCase();
-    for (const raw of Object.values(payload.data || {})) {
-      offers.push(travelpayoutsRawToOffer(raw, currency));
+    for (const raw of flattenTravelpayoutsOffers(payload.data)) {
+      offers.push(travelpayoutsRawToOffer(raw, currency, route));
     }
   }
   return offers;
@@ -499,11 +524,17 @@ const OR_COMBO_MODES = { train_or_bus: ['train', 'bus'], flight_or_train: ['flig
 
 async function runSearch(route) {
   const pools = {};
+  let usedRealFlightData = false;
   async function pool(mode) {
     if (pools[mode]) return pools[mode];
     if (mode === 'flight') {
       const real = await fetchRealFlightOffers(route);
-      pools[mode] = (real && real.length) ? real : mockFlightOffers(route);
+      if (real && real.length) {
+        pools[mode] = real;
+        usedRealFlightData = true;
+      } else {
+        pools[mode] = mockFlightOffers(route);
+      }
     } else {
       pools[mode] = { train: mockTrainOffers, bus: mockBusOffers, hotel: mockHotelOffers }[mode](route);
     }
@@ -591,7 +622,7 @@ async function runSearch(route) {
       }
     }
   }
-  return top;
+  return { options: top, usedRealFlightData };
 }
 
 function fmtHM(date) { return date.toTimeString().slice(0, 5); }
@@ -678,9 +709,10 @@ function readRouteFromForm() {
   };
 }
 
-function renderResults(route, options) {
+function renderResults(route, options, usedRealFlightData) {
   const label = route.origin ? `${route.origin} → ${route.destination}` : route.destination;
-  searchMetaEl.textContent = `${options.length} Angebote gefunden für ${label} (Mock-Daten, Stand heute)`;
+  const sourceLabel = usedRealFlightData ? 'echte Travelpayouts-Preise' : 'Mock-Daten, Stand heute';
+  searchMetaEl.textContent = `${options.length} Angebote gefunden für ${label} (${sourceLabel})`;
   if (!options.length) {
     searchResultsEl.innerHTML = '<p class="empty">Keine Angebote in diesem Budget/Zeitrahmen/Filter gefunden - Filter lockern und erneut suchen.</p>';
     return;
@@ -754,8 +786,8 @@ searchForm.addEventListener('submit', async (ev) => {
   const route = readRouteFromForm();
   searchMetaEl.textContent = 'suche…';
   searchResultsEl.innerHTML = '';
-  const options = await runSearch(route);
-  renderResults(route, options);
+  const { options, usedRealFlightData } = await runSearch(route);
+  renderResults(route, options, usedRealFlightData);
   trackYaml.value = buildYamlSnippet(route);
   trackBox.hidden = false;
 });

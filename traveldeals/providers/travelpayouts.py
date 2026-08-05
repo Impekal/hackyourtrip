@@ -8,23 +8,28 @@ https://support.travelpayouts.com/hc/en-us/articles/203956163
 
 This is a cached "cheapest fare recently found" lookup, not a live GDS
 search - exactly the "best price seen for this route" signal a deal-alert
-bot wants, arguably a better fit here than a live search API. Trade-off:
-the response gives price/airline/stops/departure time but no arrival time
-or flight duration.
+bot wants, arguably a better fit here than a live search API.
 
-For non-stop offers (transfers == 0), duration is estimated from the
-great-circle distance between the two airports (see providers/geo.py) - a
-reasonable approximation when there's no layover to account for. For
-connecting offers, the layover length has nothing to do with that distance,
-so duration stays unknown (0.0) rather than guess - the engine already
-treats a duration of 0 the same way it treats hotel offers
-(max_duration_hours never rejects them, see engine._meets_hard_constraints),
-so this degrades gracefully rather than needing special-casing.
+Response shape has been inconsistent between the documented example and what
+the live API actually returns: docs show `data: {DEST: {price, ...}}` (flat),
+but real responses observed in production are one level deeper -
+`data: {DEST: {"0": {price, ...}}}`, keyed by an arbitrary index. `_flatten_offers`
+below handles both without assuming which one a given response uses.
+
+Duration: when the live response includes `duration_to` (minutes, observed
+in practice though not in the official docs snippet), that's used directly -
+real data beats a distance guess, and unlike our own estimate it isn't
+limited to non-stop offers. Only when it's absent do non-stop offers
+(`transfers == 0`) fall back to the great-circle-distance estimate in
+providers/geo.py; offers with a layover and no `duration_to` stay at
+duration_hours=0.0 (unknown) rather than guess - the engine already treats
+that the same way it treats hotel offers (max_duration_hours never rejects
+them, see engine._meets_hard_constraints).
 
 (Travelpayouts also has a GraphQL endpoint whose docs mention a
-`trip_duration` field covering connections too, which would remove this
-limitation - not implemented here because its exact query schema couldn't
-be verified against real docs/testing; see README roadmap.)
+`trip_duration` field, which might be a steadier way to get this - not
+implemented here because its exact query schema couldn't be verified
+against real docs/testing; see README roadmap.)
 """
 from __future__ import annotations
 
@@ -39,6 +44,18 @@ from traveldeals.providers.geo import estimate_direct_flight_duration_hours
 
 SEARCH_URL = "https://api.travelpayouts.com/v1/prices/cheap"
 MAX_DATES_QUERIED = 5
+
+
+def _flatten_offers(data: dict) -> list[dict]:
+    offers = []
+    for value in data.values():
+        if not isinstance(value, dict):
+            continue
+        if "price" in value:
+            offers.append(value)
+        else:
+            offers.extend(v for v in value.values() if isinstance(v, dict) and "price" in v)
+    return offers
 
 
 class TravelpayoutsFlightProvider(Provider):
@@ -76,20 +93,26 @@ class TravelpayoutsFlightProvider(Provider):
         if not payload.get("success"):
             return []
         currency = payload.get("currency", route.currency).upper()
-        return [self._to_offer(raw, currency, route) for raw in payload.get("data", {}).values()]
+        return [self._to_offer(raw, currency, route) for raw in _flatten_offers(payload.get("data", {}))]
 
     def _to_offer(self, raw: dict, currency: str, route: RoutePreference) -> Offer:
-        depart_time = raw["departure_at"].rstrip("Z")
+        # Strip a trailing "Z" or "+HH:MM"/"-HH:MM" offset - keeps the naive
+        # local-time convention used everywhere else in this codebase
+        # (mock.py never produces timezone-aware strings either).
+        depart_time = raw["departure_at"][:19]
         label = f"{raw.get('airline', '?')}{raw.get('flight_number', '')}"
         stops = int(raw.get("transfers", 0))
 
-        duration_hours = 0.0
-        arrive_time = depart_time
-        if stops == 0:
-            estimate = estimate_direct_flight_duration_hours(route.origin, route.destination)
-            if estimate is not None:
-                duration_hours = estimate
-                arrive_time = (datetime.fromisoformat(depart_time) + timedelta(hours=estimate)).isoformat()
+        duration_minutes = raw.get("duration_to")
+        if duration_minutes is not None:
+            duration_hours = round(duration_minutes / 60, 2)
+            arrive_time = (datetime.fromisoformat(depart_time) + timedelta(minutes=duration_minutes)).isoformat()
+        elif stops == 0 and (estimate := estimate_direct_flight_duration_hours(route.origin, route.destination)) is not None:
+            duration_hours = estimate
+            arrive_time = (datetime.fromisoformat(depart_time) + timedelta(hours=estimate)).isoformat()
+        else:
+            duration_hours = 0.0
+            arrive_time = depart_time
 
         return Offer(
             mode=Mode.FLIGHT,

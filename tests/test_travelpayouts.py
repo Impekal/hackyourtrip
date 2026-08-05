@@ -105,6 +105,60 @@ def test_unsuccessful_response_returns_empty_list():
     assert provider.search(make_route()) == []
 
 
+NESTED_SAMPLE_PAYLOAD = {
+    # The real API observed in production nests one level deeper than the
+    # documented example (SAMPLE_PAYLOAD above) - keyed by an arbitrary index
+    # ("0") instead of the offer fields sitting directly under the
+    # destination code. This must not silently produce zero offers.
+    "success": True,
+    "currency": "eur",
+    "data": {
+        "BCN": {
+            "0": {
+                "airline": "VY", "flight_number": 1883, "price": 122,
+                "departure_at": "2026-09-04T13:50:00+02:00",
+                "return_at": "2026-09-07T22:15:00+02:00",
+                "expires_at": "2026-08-05T21:33:54Z",
+                "duration": 825, "duration_to": 165, "duration_back": 225,
+            }
+        }
+    },
+}
+
+
+def test_maps_real_nested_response_shape():
+    session = FakeSession(get_responses=[FakeResponse(NESTED_SAMPLE_PAYLOAD)])
+    provider = TravelpayoutsFlightProvider(token="tok", session=session)
+    offers = provider.search(make_route())
+    assert len(offers) == 1
+    offer = offers[0]
+    assert offer.price == 122
+    assert offer.depart_time == "2026-09-04T13:50:00"  # UTC offset stripped, not just "Z"
+    assert offer.booking_site == "Aviasales (VY1883)"
+
+
+def test_duration_to_is_used_directly_when_present():
+    session = FakeSession(get_responses=[FakeResponse(NESTED_SAMPLE_PAYLOAD)])
+    provider = TravelpayoutsFlightProvider(token="tok", session=session)
+    offer = provider.search(make_route())[0]
+    assert offer.duration_hours == 2.75  # 165 minutes
+    assert offer.arrive_time == "2026-09-04T16:35:00"
+
+
+def test_duration_to_used_even_when_offer_has_a_connection():
+    # duration_to is real data (unlike our own distance guess), so it should
+    # be trusted even for offers with a layover, where the geo-estimate
+    # fallback deliberately refuses to guess.
+    payload = {**NESTED_SAMPLE_PAYLOAD, "data": {"BCN": {"0": {
+        **NESTED_SAMPLE_PAYLOAD["data"]["BCN"]["0"], "transfers": 1,
+    }}}}
+    session = FakeSession(get_responses=[FakeResponse(payload)])
+    provider = TravelpayoutsFlightProvider(token="tok", session=session)
+    offer = provider.search(make_route())[0]
+    assert offer.stops == 1
+    assert offer.duration_hours == 2.75
+
+
 def test_request_exception_on_one_day_does_not_crash_whole_search():
     class FlakySession(FakeSession):
         def get(self, url, headers=None, params=None, timeout=None):
