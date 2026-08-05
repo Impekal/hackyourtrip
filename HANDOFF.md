@@ -173,11 +173,25 @@ Ergebnis) fällt alles graceful auf Mock-Daten zurück.
   `flagBelowMedian`, je Verkehrsmittel, mind. 4 Kandidaten). Der
   `deals_only`-Filter darf bewusst leer ausgehen, statt normale Preise als
   Deals auszugeben.
-- **Gemini kann keine Flüge suchen.** Die KI-Empfehlung (`POST /ai` im
+- **Die KI kann keine Flüge suchen.** Die KI-Empfehlung (`POST /ai` im
   Worker) bekommt ausschließlich die bereits gefundenen Angebote und wird
   im Prompt angewiesen, nichts zu erfinden. Wenn jemand "mehr Ergebnisse"
   will, ist die Antwort die Monatsabfrage oben oder mehr Flex-Tage - nicht
   die KI.
+- **Drei KI-Anbieter, einer genügt**: `AI_PROVIDERS` in
+  `worker/src/index.js` - Gemini, Groq, Mistral, in dieser Priorität; es
+  gewinnt der erste, dessen Key gesetzt ist. Hintergrund: Google sperrt
+  manchen Konten die Key-Erstellung ganz ("Sie sind derzeit nicht
+  berechtigt, API Key zu erstellen"), Groq/Mistral brauchen weder
+  Cloud-Projekt noch Zahlungsdaten. Groq und Mistral teilen sich den
+  OpenAI-Chat-Request; Gemini hat ein eigenes Format. Modellnamen sind über
+  die Variable `AI_MODEL` überschreibbar - die Defaults sind **nicht** gegen
+  die echten APIs verifiziert (aus der Sandbox nicht möglich, und es lag
+  kein Key vor), deshalb dieser Ausweg ohne Codeänderung.
+- **Worker-Tests**: `cd worker && npm test` (`worker/test/ai.test.mjs`,
+  reines Node, keine Dependencies) - stubbt `fetch` und prüft alle drei
+  Anbieter plus die Fehlerpfade. Läuft nicht in der pytest-Suite mit, also
+  bei Änderungen am `/ai`-Endpunkt extra ausführen.
 - **Von/Nach-Autocomplete-Quelle hängt vom aktiven Modus ab**
   (`MODE_TAB_CONFIG[mode].placeSource`: `'flight'` = echte
   Travelpayouts-Places-API mit IATA-Code als Wert, `'city'` = dieselbe API
@@ -283,8 +297,9 @@ Zweite Runde User-Feedback, ebenfalls abgeschlossen:
 7. **Sortierung**: `most_expensive` und `exact_date` ergänzt, Feld heisst
    jetzt "Sortieren nach".
 8. **Deals-Filter** (`deals_only`) inkl. Median-Heuristik ohne Historie.
-9. **KI-Empfehlung mit Gemini** über `POST /ai` im Worker, optionales
-   `GEMINI_API_KEY`-Secret.
+9. **KI-Empfehlung** über `POST /ai` im Worker. Erst nur Gemini; nachdem
+   Google dem Konto des Nutzers die Key-Erstellung verweigert hat, auf drei
+   Anbieter erweitert (Gemini/Groq/Mistral, siehe Konventionen oben).
 
 Keine offenen Aufgaben. Volle Testsuite (80 Tests) grün, JS- und
 Worker-Syntax geprüft, alle Features per Playwright gegen einen lokalen
