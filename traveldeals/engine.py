@@ -328,11 +328,15 @@ class DealEngine:
             return
         bags = max(route.baggage.checked_bags, 1)
         savings = round(offer.checked_bag_fee * bags, 2)
-        if savings / option.total_price >= BAGGAGE_SAVINGS_THRESHOLD:
-            option.recommendations.append(
-                f"🎒 Nur Handgepäck (bis {route.baggage.carry_on_max_kg}kg) statt {bags}x Koffer "
-                f"({route.baggage.checked_bag_kg}kg) spart {savings} {offer.currency}."
-            )
+        if savings / option.total_price < BAGGAGE_SAVINGS_THRESHOLD:
+            return
+        # Either weight can be "egal" (None) - then just leave that detail out
+        # of the sentence rather than printing "None kg".
+        carry_on = f" (bis {route.baggage.carry_on_max_kg}kg)" if route.baggage.carry_on_max_kg is not None else ""
+        checked = f" ({route.baggage.checked_bag_kg}kg)" if route.baggage.checked_bag_kg is not None else ""
+        option.recommendations.append(
+            f"🎒 Nur Handgepäck{carry_on} statt {bags}x Koffer{checked} spart {savings} {offer.currency}."
+        )
 
     def _add_currency_info(self, option: TripOption, route: RoutePreference) -> None:
         involves_flight_or_hotel = any(o.mode in (Mode.FLIGHT, Mode.HOTEL) for o in option.offers)

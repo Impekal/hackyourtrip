@@ -48,11 +48,15 @@ class BaggagePref:
     """Checked bags and carry-on tracked separately, each with their own
     weight-per-piece and count - matches how airlines actually price/allow
     baggage (a fixed checked-bag allowance plus a much smaller cabin
-    allowance), rather than a single carry-on-only yes/no toggle."""
+    allowance), rather than a single carry-on-only yes/no toggle.
+
+    Both *_kg fields are Optional: None means "egal" (no preference stated),
+    distinct from checked_bags/carry_on_count == 0 which means "none of
+    these needed at all"."""
     checked_bags: int = 0
-    checked_bag_kg: int = 23
+    checked_bag_kg: Optional[float] = 23
     carry_on_count: int = 1
-    carry_on_max_kg: float = 8.0
+    carry_on_max_kg: Optional[float] = 8.0
 
 
 @dataclass

@@ -20,9 +20,9 @@ routes:
       - flight_hotel
     baggage:
       checked_bags: 1
-      checked_bag_kg: 23      # kg pro aufgegebenem Koffer
+      checked_bag_kg: 23      # kg pro aufgegebenem Koffer, null = egal
       carry_on_count: 1
-      carry_on_max_kg: 8      # Handgepäck-Limit in kg pro Stück
+      carry_on_max_kg: 8      # Handgepäck-Limit in kg pro Stück, null = egal
     rail:
       bahncard: null          # "25" | "50" | "100" | null
       deutschlandticket: false

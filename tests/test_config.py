@@ -63,6 +63,29 @@ routes:
     assert baggage.carry_on_max_kg == 10.0
 
 
+def test_baggage_weights_can_be_egal(tmp_path: Path):
+    yaml_content = """
+routes:
+  - id: r1
+    origin: BER
+    destination: BCN
+    depart_date_from: 2026-09-10
+    depart_date_until: 2026-09-10
+    baggage:
+      checked_bags: 1
+      checked_bag_kg: null
+      carry_on_count: 1
+      carry_on_max_kg: null
+"""
+    path = tmp_path / "routes.yaml"
+    path.write_text(yaml_content)
+    baggage = load_routes(path)[0].baggage
+    # null = "egal", explicitly different from 0 (which would mean "no weight")
+    assert baggage.checked_bag_kg is None
+    assert baggage.carry_on_max_kg is None
+    assert baggage.checked_bags == 1
+
+
 def test_baggage_defaults_without_baggage_section(tmp_path: Path):
     yaml_content = """
 routes:

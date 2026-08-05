@@ -90,6 +90,16 @@ function updateReturnDateVisibility() {
 document.getElementById('roundTrip')?.addEventListener('change', updateReturnDateVisibility);
 applyModeVisibility(activeMode);
 
+// "Gewicht egal" greys out the matching kg field, so it's obvious the number
+// no longer counts (readRouteFromForm sends null for it either way).
+for (const [anyId, fieldId] of [['checkedBagKgAny', 'checkedBagKg'], ['carryOnMaxKgAny', 'carryOnMaxKg']]) {
+  const anyEl = document.getElementById(anyId);
+  const fieldEl = document.getElementById(fieldId);
+  const sync = () => { fieldEl.disabled = anyEl.checked; fieldEl.style.opacity = anyEl.checked ? 0.5 : 1; };
+  anyEl.addEventListener('change', sync);
+  sync();
+}
+
 /* =========================================================================
  * Seeded RNG - the live "Suche" tab has no server, so every result has to
  * come from something deterministic-per-day running in the visitor's own
@@ -718,7 +728,11 @@ async function runSearch(route) {
       const bags = Math.max(route.checkedBags, 1);
       const savings = round2(primary.bagFee * bags);
       if (savings / c.price >= BAGGAGE_SAVINGS_THRESHOLD) {
-        c.recommendations.push(`🎒 Nur Handgepäck (bis ${route.carryOnMaxKg}kg) statt ${bags}x Koffer (${route.checkedBagKg}kg) spart ${savings} ${primary.currency}.`);
+        // Either weight can be "egal" (null) - then leave that detail out of
+        // the sentence rather than printing "null kg".
+        const carryOn = route.carryOnMaxKg != null ? ` (bis ${route.carryOnMaxKg}kg)` : '';
+        const checked = route.checkedBagKg != null ? ` (${route.checkedBagKg}kg)` : '';
+        c.recommendations.push(`🎒 Nur Handgepäck${carryOn} statt ${bags}x Koffer${checked} spart ${savings} ${primary.currency}.`);
       }
     }
 
@@ -944,9 +958,12 @@ function readRouteFromForm() {
     maxDuration: numOrNull('maxDuration'),
     priority: document.getElementById('priority').value,
     checkedBags: Number(document.getElementById('checkedBags').value || 0),
-    checkedBagKg: Number(document.getElementById('checkedBagKg').value || 23),
+    // null = "egal": no weight preference stated, distinct from 0 kg.
+    checkedBagKg: document.getElementById('checkedBagKgAny').checked
+      ? null : Number(document.getElementById('checkedBagKg').value || 23),
     carryOnCount: Number(document.getElementById('carryOnCount').value || 1),
-    carryOnMaxKg: Number(document.getElementById('carryOnMaxKg').value || 8),
+    carryOnMaxKg: document.getElementById('carryOnMaxKgAny').checked
+      ? null : Number(document.getElementById('carryOnMaxKg').value || 8),
     bahncard: document.getElementById('bahncard').value,
     deutschlandticket: document.getElementById('deutschlandticket').checked,
     lowCostOk: document.getElementById('lowCostOk').checked,
@@ -1018,9 +1035,9 @@ function buildYamlSnippet(route) {
     modes: [${route.modes.join(', ')}]
     baggage:
       checked_bags: ${route.checkedBags}
-      checked_bag_kg: ${route.checkedBagKg}
+      checked_bag_kg: ${route.checkedBagKg ?? 'null'}
       carry_on_count: ${route.carryOnCount}
-      carry_on_max_kg: ${route.carryOnMaxKg}
+      carry_on_max_kg: ${route.carryOnMaxKg ?? 'null'}
     rail:
       bahncard: ${route.bahncard ? `"${route.bahncard}"` : 'null'}
       deutschlandticket: ${route.deutschlandticket}

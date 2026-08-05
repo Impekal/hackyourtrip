@@ -38,6 +38,12 @@ def _parse_date(value) -> date:
     return date.fromisoformat(str(value))
 
 
+def _optional_float(value) -> float | None:
+    """None (explicit `null` in YAML, or an "egal" checkbox client-side)
+    means no baggage-weight preference stated - distinct from 0."""
+    return None if value is None else float(value)
+
+
 def _parse_route(raw: dict) -> RoutePreference:
     baggage_raw = raw.get("baggage", {}) or {}
     rail_raw = raw.get("rail", {}) or {}
@@ -60,9 +66,9 @@ def _parse_route(raw: dict) -> RoutePreference:
         modes=[Mode(m) for m in raw.get("modes", ["flight"])],
         baggage=BaggagePref(
             checked_bags=int(baggage_raw.get("checked_bags", 0)),
-            checked_bag_kg=int(baggage_raw.get("checked_bag_kg", 23)),
+            checked_bag_kg=_optional_float(baggage_raw.get("checked_bag_kg", 23)),
             carry_on_count=int(baggage_raw.get("carry_on_count", 1)),
-            carry_on_max_kg=float(baggage_raw.get("carry_on_max_kg", 8.0)),
+            carry_on_max_kg=_optional_float(baggage_raw.get("carry_on_max_kg", 8.0)),
         ),
         rail=RailPref(
             bahncard=rail_raw.get("bahncard"),

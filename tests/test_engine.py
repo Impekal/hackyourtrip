@@ -95,6 +95,19 @@ def test_baggage_hint_when_checked_bag_fee_significant(tmp_path):
     assert any("Handgepäck" in r and "8kg" in r for r in result[0].recommendations)
 
 
+def test_baggage_hint_omits_weights_when_set_to_egal(tmp_path):
+    offers = [
+        Offer(mode=Mode.FLIGHT, provider="p", booking_site="A", price=100, currency="EUR",
+              depart_time="2026-09-10T09:00:00", arrive_time="2026-09-10T11:00:00", duration_hours=2,
+              checked_bag_fee=30),
+    ]
+    engine = make_engine({Mode.FLIGHT: FakeProvider(Mode.FLIGHT, offers)}, tmp_path)
+    route = make_route(baggage=BaggagePref(checked_bags=1, checked_bag_kg=None, carry_on_max_kg=None))
+    hint = next(r for r in engine.search(route)[0].recommendations if "Handgepäck" in r)
+    assert "None" not in hint  # "egal" must not leak a literal None into the text
+    assert "kg" not in hint
+
+
 def test_flight_hotel_combo_pairs_same_day_cheapest_hotel(tmp_path):
     flight = Offer(mode=Mode.FLIGHT, provider="p", booking_site="A", price=100, currency="EUR",
                     depart_time="2026-09-10T09:00:00", arrive_time="2026-09-10T11:00:00", duration_hours=2)
