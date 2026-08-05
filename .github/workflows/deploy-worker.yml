@@ -30,8 +30,12 @@ jobs:
           workingDirectory: worker
           secrets: |
             TRAVELPAYOUTS_TOKEN
+            GEMINI_API_KEY
         env:
           TRAVELPAYOUTS_TOKEN: ${{ secrets.TRAVELPAYOUTS_TOKEN }}
+          # Optional: only needed for the "KI-Empfehlung" button. Without it
+          # the /ai endpoint reports itself unconfigured and the UI says so.
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
 
       # Sanity check the live endpoint right after deploy - this repo's own
       # sandbox dev environment can't reach the public internet to verify

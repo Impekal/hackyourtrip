@@ -61,6 +61,37 @@ auf einem Dashboard die besten aktuellen Optionen pro Strecke zeigt.
   client-seitiges Aufsummieren nötig); die Mock-Provider bilden das mit einer
   synthetisierten Rückreise nach demselben Prinzip nach. Reine Hotel-Modi
   brauchen das nicht (Checkin+Nächte bilden die Aufenthaltsdauer schon ab).
+- **Sortierung frei wählbar:** bestes Verhältnis, Preis aufsteigend, Preis
+  absteigend, Dauer, oder Präzision (`exact_date` - Angebote am exakt
+  gewünschten Datum zuerst, dann die aus dem Flex-Fenster, Preis als
+  Tie-Breaker).
+- **Deals-Filter:** entweder alle Angebote oder nur die, die wirklich nach
+  einem Deal aussehen (`deals_only`). Als Deal gilt: von der Preishistorie
+  als Preisverfall/Fehlerpreis markiert - oder, solange keine Historie
+  existiert, mindestens 15% unter dem Median derselben Suche (je
+  Verkehrsmittel verglichen). Bewusst so gebaut, dass der Filter auch leer
+  bleiben darf, statt normale Preise zu Deals zu erklären.
+- **Möglichst viele Flüge scannen:** die Flugsuche fragt pro *Monat* ab
+  statt pro Tag und filtert clientseitig auf das Flex-Fenster. Grund: gegen
+  die Live-API gemessen liefert eine Abfrage für ein konkretes Datum genau
+  1 Angebot, eine Monatsabfrage 27-44. Zusätzlich werden zwei Indizes
+  gemischt (`aviasales/v3/prices_for_dates` + `v2/prices/latest`), die teils
+  unterschiedliche Verbindungen kennen. **Ehrliche Einordnung:** das ist der
+  volle Umfang der kostenlosen Travelpayouts-Stufe - ein Cache zuletzt
+  gefundener Preise, keine Live-GDS-Suche. Skyscanner/Momondo/Opodo fragen
+  Airline-Systeme direkt live ab; das ist mit kostenlosen Zugängen nicht
+  erreichbar. Wer mehr Ergebnisse will, erhöht die Flex-Tage - das erweitert
+  das Fenster, ohne zusätzliche API-Anfragen zu kosten.
+- **KI-Empfehlung (Gemini), optional:** Button unter der Suche schickt die
+  gefundenen Angebote plus die eigenen Kriterien an Gemini und bekommt eine
+  begründete Empfehlung zurück. Läuft über denselben Cloudflare-Worker wie
+  die Preisabfrage (ein Gemini-Key kann genauso wenig im Browser-JS liegen
+  wie ein API-Token) und braucht das zusätzliche Repo-Secret
+  `GEMINI_API_KEY`; ohne das Secret blendet die Oberfläche einen Hinweis ein
+  statt zu scheitern. **Wichtig:** Gemini analysiert und empfiehlt nur die
+  bereits gefundenen Angebote - es kann selbst keine Flüge suchen und darf
+  laut Prompt auch keine erfinden. Mehr Ergebnisse kommen von der
+  Monatsabfrage oben, nicht von der KI.
 - **Komfort-Score im `best_value`-Ranking:** `best_value` ist nicht mehr nur
   Preis/Dauer, sondern `50% Preis + 25% Dauer + 25% Komfort` (Gewichte in
   `engine.py` anpassbar) - eine 5€ teurere, aber deutlich komfortablere
@@ -219,6 +250,26 @@ genau wie bei den anderen Secrets oben:
    in `docs/app.js` in die Konstante `PROXY_URL` eintragen (Zeile mit
    `const PROXY_URL = '';`) und committen.
 
+### KI-Empfehlung (Gemini) aktivieren - optional
+
+Der Worker kann zusätzlich eine KI-Empfehlung liefern (`POST /ai`). Dafür:
+
+1. Kostenlosen API-Key auf [aistudio.google.com](https://aistudio.google.com/apikey)
+   erstellen ("Get API key" -> *Create API key*).
+2. Als Repo-Secret `GEMINI_API_KEY` hinterlegen (Settings -> Secrets and
+   variables -> Actions).
+3. Worker neu deployen (Actions-Tab -> *Deploy proxy worker* -> *Run
+   workflow*) - der Key wird dabei automatisch als Worker-Secret gesetzt.
+
+Ohne dieses Secret funktioniert alles andere normal weiter; der Button
+zeigt dann nur einen Hinweis, dass die KI-Empfehlung nicht eingerichtet ist.
+Der Key liegt ausschließlich im Worker, nie im Browser-JS.
+
+Was die KI macht und was nicht: sie bekommt die *bereits gefundenen*
+Angebote plus die eingestellten Kriterien und begründet eine Auswahl. Sie
+sucht selbst keine Flüge und darf laut Prompt keine erfinden - mehr
+Ergebnisse kommen von der Monatsabfrage der Preis-APIs, nicht von Gemini.
+
 ### Alternative: Deploy per CLI
 
 ```bash
@@ -226,6 +277,7 @@ cd worker/
 npm install
 npx wrangler login
 npx wrangler secret put TRAVELPAYOUTS_TOKEN   # denselben Token wie oben einfügen
+npx wrangler secret put GEMINI_API_KEY        # optional, nur für die KI-Empfehlung
 npx wrangler deploy
 ```
 Ausgegebene URL wie oben in `PROXY_URL` eintragen.

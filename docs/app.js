@@ -1179,13 +1179,101 @@ ${HOTEL_AMENITY_REQUIREMENTS.map(([prefFlag, , yamlKey]) => `      ${yamlKey}: $
 `;
 }
 
+/* =========================================================================
+ * Optional KI-Empfehlung (Gemini), via the same Worker proxy that hides the
+ * Travelpayouts token - a Gemini key can't live in browser JS either.
+ *
+ * Scope, deliberately: Gemini only ever sees the offers this search already
+ * found. It cannot look up flights itself, so it explains and recommends
+ * rather than searching - the actual "find more flights" work is the
+ * month-wise provider querying, not this.
+ * ===================================================================== */
+const aiBox = document.getElementById('aiBox');
+const aiButton = document.getElementById('aiButton');
+const aiResultEl = document.getElementById('aiResult');
+let lastSearch = null;
+
+function buildAiPrompt(route, options) {
+  const criteria = [
+    `Strecke: ${route.origin || '-'} nach ${route.destination}`,
+    `Modus: ${route.mode}`,
+    `Reisedatum: ${isoDay(route.departFrom)}${route.roundTrip && route.returnDate ? `, zurück ${isoDay(route.returnDate)}` : ' (nur Hinreise)'}`,
+    `Flexibilität: ${route.flexBefore} Tage davor, ${route.flexAfter} Tage danach`,
+    route.budget != null ? `Budget: ${route.budget} ${route.currency}` : 'Budget: kein Limit',
+    route.maxDuration != null ? `Max. Reisezeit: ${route.maxDuration}h` : 'Max. Reisezeit: kein Limit',
+    `Sortierung: ${route.priority}`,
+    route.dealsOnly ? 'Nur Deals/Aktionen' : 'Alle Angebote',
+    route.transportPrefs.directOnly ? 'Nur Direktverbindungen' : null,
+    route.transportPrefs.preferredDepartTime
+      ? `Bevorzugte Abfahrt: ${route.transportPrefs.preferredDepartTime} (±${route.transportPrefs.departTimeFlexMinutes} Min.)`
+      : null,
+  ].filter(Boolean).join('\n');
+
+  const offers = options.slice(0, 15).map((o, i) => {
+    const p = o.offers[0];
+    return `${i + 1}. ${o.price.toFixed(2)} ${route.currency} | ${o.mode} | ab ${fmtShort(p.depart)}`
+      + `${p.returnDepart ? ` | zurück ${fmtShort(p.returnDepart)}` : ''}`
+      + ` | ${o.durationHours > 0 ? o.durationHours + 'h' : 'Dauer unbekannt'}`
+      + ` | ${p.stops === 0 ? 'direkt' : p.stops + 'x Umstieg'}`
+      + ` | ${o.offers.map(x => x.bookingSite).join(' + ')}`
+      + `${o.isBelowMedian ? ' | DEAL' : ''}`;
+  }).join('\n');
+
+  return `Du bist ein nüchterner Reise-Berater. Unten stehen die Kriterien einer Suche und die dazu gefundenen Angebote.
+
+Kriterien:
+${criteria}
+
+Gefundene Angebote:
+${offers}
+
+Aufgabe: Empfiehl auf Deutsch 2-3 dieser Angebote und begründe kurz, warum sie zu den Kriterien passen (Preis, Dauer, Umstiege, Datum). Nenne jeweils die Nummer aus der Liste. Weise auf echte Nachteile hin, falls es welche gibt. Wenn ein Kompromiss lohnt (z.B. ein Tag später deutlich günstiger), sag das.
+
+Wichtig: Bewerte ausschließlich die oben gelisteten Angebote. Erfinde keine Flüge, Preise oder Airlines. Maximal 200 Wörter, keine Einleitung.`;
+}
+
+async function requestAiRecommendation() {
+  if (!lastSearch || !lastSearch.options.length) return;
+  aiButton.disabled = true;
+  aiResultEl.hidden = false;
+  aiResultEl.textContent = 'Gemini denkt nach…';
+  try {
+    const resp = await fetch(`${PROXY_URL.replace(/\/$/, '')}/ai`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: buildAiPrompt(lastSearch.route, lastSearch.options) }),
+    });
+    const payload = await resp.json().catch(() => null);
+    if (resp.status === 501) {
+      // Key not set up - say so plainly instead of pretending it failed.
+      aiResultEl.textContent = 'KI-Empfehlung ist nicht eingerichtet: im Cloudflare-Worker fehlt das Secret GEMINI_API_KEY (siehe README).';
+    } else if (!resp.ok || !payload?.text) {
+      aiResultEl.textContent = `KI-Empfehlung nicht möglich: ${payload?.error || `HTTP ${resp.status}`}`;
+    } else {
+      aiResultEl.textContent = payload.text;
+    }
+  } catch (e) {
+    aiResultEl.textContent = `KI-Empfehlung nicht erreichbar: ${e.message}`;
+  } finally {
+    aiButton.disabled = false;
+  }
+}
+aiButton.addEventListener('click', requestAiRecommendation);
+
 searchForm.addEventListener('submit', async (ev) => {
   ev.preventDefault();
   const route = readRouteFromForm();
   searchMetaEl.textContent = 'suche…';
   searchResultsEl.innerHTML = '';
+  aiBox.hidden = true;
+  aiResultEl.hidden = true;
+  aiResultEl.textContent = '';
   const { options, usedRealFlightData } = await runSearch(route);
   renderResults(route, options, usedRealFlightData);
+  lastSearch = { route, options };
+  // Nothing to reason about without results, and no point offering it when
+  // there's no proxy to reach Gemini through.
+  aiBox.hidden = !(PROXY_URL && options.length);
   trackYaml.value = buildYamlSnippet(route);
   trackBox.hidden = false;
 });

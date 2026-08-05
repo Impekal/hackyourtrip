@@ -134,6 +134,11 @@
   .recs { grid-column: 2; list-style: none; margin: 0.35rem 0 0; padding: 0; display: flex; flex-direction: column; gap: 0.2rem; }
   .recs li { font-size: 0.78rem; color: var(--text-dim); }
 
+  .ai-box { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 0.9rem 1.1rem; margin-bottom: 1.25rem; }
+  .ai-head { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
+  .ai-note { color: var(--text-dim); font-size: 0.76rem; }
+  .ai-result { margin-top: 0.8rem; padding-top: 0.8rem; border-top: 1px solid var(--line); font-size: 0.86rem; line-height: 1.5; white-space: pre-wrap; }
+
   .track-box { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 1rem 1.25rem; margin-top: 1.5rem; }
   .track-box h3 { margin: 0 0 0.4rem; font-size: 0.95rem; }
   .track-box p { color: var(--text-dim); font-size: 0.82rem; margin: 0 0 0.7rem; }
@@ -437,6 +442,15 @@
     </form>
 
     <div id="searchMeta" class="meta"></div>
+
+    <div class="ai-box" id="aiBox" hidden>
+      <div class="ai-head">
+        <button class="secondary" id="aiButton">✨ KI-Empfehlung (Gemini)</button>
+        <span class="ai-note">Analysiert die gefundenen Angebote nach deinen Kriterien. Sucht selbst keine weiteren Flüge.</span>
+      </div>
+      <div id="aiResult" class="ai-result" hidden></div>
+    </div>
+
     <div id="searchResults"></div>
 
     <div class="track-box" id="trackBox" hidden>
