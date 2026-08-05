@@ -259,18 +259,29 @@
 
       <fieldset data-group="flightGroup">
         <legend>Flug-Optionen</legend>
-        <div class="row3">
-          <div class="field">
-            <label for="checkedBags">Anzahl Koffer</label>
-            <input type="number" id="checkedBags" min="0" value="0">
-          </div>
+        <label style="display:block;">Aufgegebenes Gepäck</label>
+        <div class="row3" style="margin-top:0.3rem">
           <div class="field">
             <label for="checkedBagKg">kg pro Koffer</label>
             <input type="number" id="checkedBagKg" min="0" value="23">
           </div>
+          <div class="field">
+            <label for="checkedBags">Anzahl Koffer</label>
+            <input type="number" id="checkedBags" min="0" value="0">
+          </div>
+        </div>
+        <label style="display:block; margin-top:0.8rem;">Handgepäck</label>
+        <div class="row3" style="margin-top:0.3rem">
+          <div class="field">
+            <label for="carryOnMaxKg">kg pro Stück (max.)</label>
+            <input type="number" id="carryOnMaxKg" min="0" step="0.5" value="8">
+          </div>
+          <div class="field">
+            <label for="carryOnCount">Anzahl</label>
+            <input type="number" id="carryOnCount" min="0" value="1">
+          </div>
         </div>
         <div class="checks" style="margin-top:0.7rem">
-          <label><input type="checkbox" id="carryOnOnly"> Nur Handgepäck</label>
           <label><input type="checkbox" id="lowCostOk" checked> Low-Cost-Airlines ok</label>
         </div>
       </fieldset>

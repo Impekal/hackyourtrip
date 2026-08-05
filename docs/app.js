@@ -718,7 +718,7 @@ async function runSearch(route) {
       const bags = Math.max(route.checkedBags, 1);
       const savings = round2(primary.bagFee * bags);
       if (savings / c.price >= BAGGAGE_SAVINGS_THRESHOLD) {
-        c.recommendations.push(`🎒 Nur Handgepäck statt ${bags}x Koffer (${route.checkedBagKg}kg) spart ${savings} ${primary.currency}.`);
+        c.recommendations.push(`🎒 Nur Handgepäck (bis ${route.carryOnMaxKg}kg) statt ${bags}x Koffer (${route.checkedBagKg}kg) spart ${savings} ${primary.currency}.`);
       }
     }
 
@@ -943,9 +943,10 @@ function readRouteFromForm() {
     currency: document.getElementById('currency').value,
     maxDuration: numOrNull('maxDuration'),
     priority: document.getElementById('priority').value,
-    carryOnOnly: document.getElementById('carryOnOnly').checked,
     checkedBags: Number(document.getElementById('checkedBags').value || 0),
     checkedBagKg: Number(document.getElementById('checkedBagKg').value || 23),
+    carryOnCount: Number(document.getElementById('carryOnCount').value || 1),
+    carryOnMaxKg: Number(document.getElementById('carryOnMaxKg').value || 8),
     bahncard: document.getElementById('bahncard').value,
     deutschlandticket: document.getElementById('deutschlandticket').checked,
     lowCostOk: document.getElementById('lowCostOk').checked,
@@ -1016,9 +1017,10 @@ function buildYamlSnippet(route) {
     priority: ${route.priority}
     modes: [${route.modes.join(', ')}]
     baggage:
-      carry_on_only: ${route.carryOnOnly}
       checked_bags: ${route.checkedBags}
       checked_bag_kg: ${route.checkedBagKg}
+      carry_on_count: ${route.carryOnCount}
+      carry_on_max_kg: ${route.carryOnMaxKg}
     rail:
       bahncard: ${route.bahncard ? `"${route.bahncard}"` : 'null'}
       deutschlandticket: ${route.deutschlandticket}

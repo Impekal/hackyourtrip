@@ -25,8 +25,9 @@ auf einem Dashboard die besten aktuellen Optionen pro Strecke zeigt.
 - **Einstellungen pro Strecke** (`config/routes.yaml`): Start/Ziel, Datum +
   Flexibilität in Tagen davor/danach, Mindest-/Max-Aufenthalt (für Hotel),
   Budget, Währung, maximale Reisezeit, Priorität (`cheapest` / `fastest` /
-  `best_value`), Gepäck (Handgepäck-only, Anzahl/Gewicht Koffer), Bahn-Extras
-  (BahnCard 25/50/100, Deutschlandticket), ob Low-Cost-Airlines ok sind.
+  `best_value`), Gepäck (aufgegebene Koffer: kg pro Stück + Anzahl;
+  Handgepäck separat: kg-Limit pro Stück + Anzahl), Bahn-Extras (BahnCard
+  25/50/100, Deutschlandticket), ob Low-Cost-Airlines ok sind.
 - **Hotel-Kriterien** (das volle Trivago-Filterset, siehe `HotelPref` in
   `traveldeals/models.py`): Min. Sterne, Mindestbewertung, max. Entfernung
   zu Zentrum/Bahnhof/Flughafen, Unterkunftsart (Hotel/Apartment/Hostel/

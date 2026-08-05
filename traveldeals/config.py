@@ -59,9 +59,10 @@ def _parse_route(raw: dict) -> RoutePreference:
         priority=Priority(raw.get("priority", "best_value")),
         modes=[Mode(m) for m in raw.get("modes", ["flight"])],
         baggage=BaggagePref(
-            carry_on_only=bool(baggage_raw.get("carry_on_only", False)),
             checked_bags=int(baggage_raw.get("checked_bags", 0)),
             checked_bag_kg=int(baggage_raw.get("checked_bag_kg", 23)),
+            carry_on_count=int(baggage_raw.get("carry_on_count", 1)),
+            carry_on_max_kg=float(baggage_raw.get("carry_on_max_kg", 8.0)),
         ),
         rail=RailPref(
             bahncard=rail_raw.get("bahncard"),

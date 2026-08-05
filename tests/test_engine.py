@@ -90,9 +90,9 @@ def test_baggage_hint_when_checked_bag_fee_significant(tmp_path):
               checked_bag_fee=30),
     ]
     engine = make_engine({Mode.FLIGHT: FakeProvider(Mode.FLIGHT, offers)}, tmp_path)
-    route = make_route(baggage=BaggagePref(checked_bags=1))
+    route = make_route(baggage=BaggagePref(checked_bags=1, carry_on_max_kg=8))
     result = engine.search(route)
-    assert any("Handgepäck" in r for r in result[0].recommendations)
+    assert any("Handgepäck" in r and "8kg" in r for r in result[0].recommendations)
 
 
 def test_flight_hotel_combo_pairs_same_day_cheapest_hotel(tmp_path):

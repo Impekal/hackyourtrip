@@ -45,9 +45,14 @@ OR_COMBO_MODES = {
 
 @dataclass
 class BaggagePref:
-    carry_on_only: bool = False
+    """Checked bags and carry-on tracked separately, each with their own
+    weight-per-piece and count - matches how airlines actually price/allow
+    baggage (a fixed checked-bag allowance plus a much smaller cabin
+    allowance), rather than a single carry-on-only yes/no toggle."""
     checked_bags: int = 0
     checked_bag_kg: int = 23
+    carry_on_count: int = 1
+    carry_on_max_kg: float = 8.0
 
 
 @dataclass
