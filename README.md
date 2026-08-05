@@ -42,6 +42,11 @@ auf einem Dashboard die besten aktuellen Optionen pro Strecke zeigt.
   zirkulär über Mitternacht hinweg berechnet. Angebote außerhalb des
   Fensters werden herausgefiltert - auch die "später fahren spart X€"-
   Empfehlung schlägt nie eine Zeit außerhalb dieses Fensters vor.
+- **Von/Nach-Autocomplete:** Stadt eintippen, passenden Flughafen/Bahnhof
+  auswählen - wie auf gängigen Reiseplattformen. Flug/Hotel nutzen die
+  echte, öffentliche Travelpayouts-Places-API (`autocomplete.travelpayouts.com`,
+  kein Token nötig), Bahn/Bus eine kuratierte statische Liste großer
+  DACH-/europäischer Bahnhöfe (dafür ist keine freie API bekannt).
 - **Hin- und Rückreise:** bei Flug/Bahn/Bus (und deren "was ist besser"-Kombis)
   lässt sich zwischen Nur-Hinfahrt und Hin+Rück wählen (`round_trip` +
   `return_date` in `RoutePreference`). Bei echten Travelpayouts-Daten liefert

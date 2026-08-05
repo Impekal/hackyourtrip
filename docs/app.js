@@ -31,17 +31,22 @@ tabAlerts.addEventListener('click', () => activateMainTab('alerts'));
 // define the search window" (pure transport + OR-combos) - the from/until
 // range stays for Hotel/*_hotel, where a real check-in window makes sense
 // alongside min/max nights.
+// placeSource picks the autocomplete data source for Von/Nach: 'flight' hits
+// the live Travelpayouts places API (real airports+cities, value = IATA
+// code), 'rail' filters the static RAIL_STATIONS list (value = station
+// name), 'city' hits the same live API but city-only (value = city name,
+// for the Hotel "Ort" field where a code makes no sense).
 const MODE_TAB_CONFIG = {
-  flight:          { origin: true,  nights: false, duration: true,  flight: true,  train: false, hotel: false, transportExtra: true,  roundTrip: true,  singleDate: true,  modes: ['flight'] },
-  train:           { origin: true,  nights: false, duration: true,  flight: false, train: true,  hotel: false, transportExtra: true,  roundTrip: true,  singleDate: true,  modes: ['train'] },
-  bus:             { origin: true,  nights: false, duration: true,  flight: false, train: false, hotel: false, transportExtra: true,  roundTrip: true,  singleDate: true,  modes: ['bus'] },
-  hotel:           { origin: false, nights: true,  duration: false, flight: false, train: false, hotel: true,  transportExtra: false, roundTrip: false, singleDate: false, modes: ['hotel'] },
-  train_or_bus:    { origin: true,  nights: false, duration: true,  flight: false, train: true,  hotel: false, transportExtra: true,  roundTrip: true,  singleDate: true,  modes: ['train_or_bus'] },
-  flight_or_train: { origin: true,  nights: false, duration: true,  flight: true,  train: true,  hotel: false, transportExtra: true,  roundTrip: true,  singleDate: true,  modes: ['flight_or_train'] },
-  flight_or_bus:   { origin: true,  nights: false, duration: true,  flight: true,  train: false, hotel: false, transportExtra: true,  roundTrip: true,  singleDate: true,  modes: ['flight_or_bus'] },
-  flight_hotel:    { origin: true,  nights: true,  duration: true,  flight: true,  train: false, hotel: true,  transportExtra: true,  roundTrip: false, singleDate: false, modes: ['flight_hotel'] },
-  train_hotel:     { origin: true,  nights: true,  duration: true,  flight: false, train: true,  hotel: true,  transportExtra: true,  roundTrip: false, singleDate: false, modes: ['train_hotel'] },
-  bus_hotel:       { origin: true,  nights: true,  duration: true,  flight: false, train: false, hotel: true,  transportExtra: true,  roundTrip: false, singleDate: false, modes: ['bus_hotel'] },
+  flight:          { origin: true,  nights: false, duration: true,  flight: true,  train: false, hotel: false, transportExtra: true,  roundTrip: true,  singleDate: true,  placeSource: 'flight', modes: ['flight'] },
+  train:           { origin: true,  nights: false, duration: true,  flight: false, train: true,  hotel: false, transportExtra: true,  roundTrip: true,  singleDate: true,  placeSource: 'rail',   modes: ['train'] },
+  bus:             { origin: true,  nights: false, duration: true,  flight: false, train: false, hotel: false, transportExtra: true,  roundTrip: true,  singleDate: true,  placeSource: 'rail',   modes: ['bus'] },
+  hotel:           { origin: false, nights: true,  duration: false, flight: false, train: false, hotel: true,  transportExtra: false, roundTrip: false, singleDate: false, placeSource: 'city',   modes: ['hotel'] },
+  train_or_bus:    { origin: true,  nights: false, duration: true,  flight: false, train: true,  hotel: false, transportExtra: true,  roundTrip: true,  singleDate: true,  placeSource: 'rail',   modes: ['train_or_bus'] },
+  flight_or_train: { origin: true,  nights: false, duration: true,  flight: true,  train: true,  hotel: false, transportExtra: true,  roundTrip: true,  singleDate: true,  placeSource: 'flight', modes: ['flight_or_train'] },
+  flight_or_bus:   { origin: true,  nights: false, duration: true,  flight: true,  train: false, hotel: false, transportExtra: true,  roundTrip: true,  singleDate: true,  placeSource: 'flight', modes: ['flight_or_bus'] },
+  flight_hotel:    { origin: true,  nights: true,  duration: true,  flight: true,  train: false, hotel: true,  transportExtra: true,  roundTrip: false, singleDate: false, placeSource: 'flight', modes: ['flight_hotel'] },
+  train_hotel:     { origin: true,  nights: true,  duration: true,  flight: false, train: true,  hotel: true,  transportExtra: true,  roundTrip: false, singleDate: false, placeSource: 'rail',   modes: ['train_hotel'] },
+  bus_hotel:       { origin: true,  nights: true,  duration: true,  flight: false, train: false, hotel: true,  transportExtra: true,  roundTrip: false, singleDate: false, placeSource: 'rail',   modes: ['bus_hotel'] },
 };
 
 let activeMode = 'flight';
@@ -711,6 +716,138 @@ function offerChips(offer) {
   }
   return chips;
 }
+
+/* =========================================================================
+ * Von/Nach-Autocomplete - Stadt eintippen, Flughafen/Bahnhof auswählen, wie
+ * auf gängigen Reiseplattformen.
+ *
+ * Für Flug/Hotel: echte, öffentliche Travelpayouts-Places-API
+ * (autocomplete.travelpayouts.com/places2, kein Token nötig - Shape via
+ * GitHub-Actions-Smoke-Test verifiziert, siehe Git-Historie), liefert reale
+ * Flughafen-/Stadt-Daten inkl. Popularitäts-Gewicht. Für Bahn/Bus gibt es
+ * keine bekannte freie Stations-API - stattdessen eine kuratierte statische
+ * Liste großer DACH-/europäischer Bahnhöfe (siehe RAIL_STATIONS unten).
+ * Beides degradiert graceful: bei Netzwerkfehler/leerer Liste bleibt die
+ * Texteingabe weiterhin frei nutzbar, nur ohne Vorschläge.
+ * ===================================================================== */
+const PLACES_API_URL = 'https://autocomplete.travelpayouts.com/places2';
+
+const RAIL_STATIONS = [
+  'Berlin Hbf', 'München Hbf', 'Hamburg Hbf', 'Köln Hbf', 'Frankfurt(Main) Hbf', 'Stuttgart Hbf',
+  'Düsseldorf Hbf', 'Leipzig Hbf', 'Dresden Hbf', 'Hannover Hbf', 'Nürnberg Hbf', 'Dortmund Hbf',
+  'Essen Hbf', 'Bremen Hbf', 'Duisburg Hbf', 'Bochum Hbf', 'Wuppertal Hbf', 'Bielefeld Hbf',
+  'Bonn Hbf', 'Münster(Westf) Hbf', 'Karlsruhe Hbf', 'Mannheim Hbf', 'Augsburg Hbf', 'Wiesbaden Hbf',
+  'Mönchengladbach Hbf', 'Gelsenkirchen Hbf', 'Aachen Hbf', 'Braunschweig Hbf', 'Kiel Hbf', 'Chemnitz Hbf',
+  'Halle(Saale)Hbf', 'Magdeburg Hbf', 'Freiburg(Breisgau) Hbf', 'Krefeld Hbf', 'Lübeck Hbf', 'Oberhausen Hbf',
+  'Erfurt Hbf', 'Rostock Hbf', 'Mainz Hbf', 'Kassel-Wilhelmshöhe', 'Saarbrücken Hbf', 'Potsdam Hbf',
+  'Ulm Hbf', 'Heidelberg Hbf', 'Darmstadt Hbf', 'Regensburg Hbf', 'Würzburg Hbf', 'Wolfsburg Hbf',
+  'Göttingen', 'Koblenz Hbf',
+  'Wien Hbf', 'Salzburg Hbf', 'Graz Hbf', 'Innsbruck Hbf', 'Linz Hbf',
+  'Zürich HB', 'Basel SBB', 'Bern', 'Genf', 'Luzern', 'St. Gallen',
+  'Paris Gare du Nord', 'Paris Gare de Lyon', 'Paris Est', 'Lyon Part-Dieu', 'Strasbourg',
+  'Amsterdam Centraal', 'Rotterdam Centraal', 'Brüssel-Süd', 'Antwerpen-Centraal',
+  'Prag hl.n.', 'Budapest Keleti', 'Warschau Centralna', 'Kraków Główny',
+  'Kopenhagen H', 'Mailand Centrale', 'Rom Termini', 'Venedig Santa Lucia', 'Bologna Centrale',
+  'Barcelona Sants', 'Madrid Atocha', 'Lissabon Santa Apolónia', 'London St Pancras',
+];
+
+function debounce(fn, ms) {
+  let timer;
+  return (...args) => { clearTimeout(timer); timer = setTimeout(() => fn(...args), ms); };
+}
+
+function filterRailStations(term) {
+  const q = term.trim().toLowerCase();
+  if (q.length < 2) return [];
+  const starts = [], contains = [];
+  for (const name of RAIL_STATIONS) {
+    const n = name.toLowerCase();
+    if (n.startsWith(q)) starts.push(name);
+    else if (n.includes(q)) contains.push(name);
+  }
+  return [...starts, ...contains].slice(0, 8).map(name => ({ label: `🚉 ${name}`, value: name }));
+}
+
+async function fetchLivePlaces(term, { includeAirports }) {
+  if (term.trim().length < 2) return [];
+  try {
+    const params = new URLSearchParams({ term, locale: 'de' });
+    params.append('types[]', 'city');
+    if (includeAirports) params.append('types[]', 'airport');
+    const resp = await fetch(`${PLACES_API_URL}?${params.toString()}`);
+    if (!resp.ok) return [];
+    const data = await resp.json();
+    const q = term.trim().toLowerCase();
+    return data
+      .filter(p => (p.name || '').toLowerCase().includes(q) || (p.city_name || '').toLowerCase().includes(q))
+      .sort((a, b) => (b.weight || 0) - (a.weight || 0))
+      .slice(0, 8)
+      .map(p => includeAirports
+        ? {
+            label: p.type === 'airport'
+              ? `✈️ ${p.name} (${p.code}) – ${p.city_name || p.country_name}`
+              : `🏙️ ${p.name} (${p.code}) – ${p.country_name}${p.main_airport_name ? ', alle Flughäfen' : ''}`,
+            value: p.code,
+          }
+        : { label: `🏙️ ${p.name} – ${p.country_name}`, value: p.name });
+  } catch (e) {
+    return []; // offline/geblockt - Freitext-Eingabe bleibt weiter möglich, nur ohne Vorschläge
+  }
+}
+
+function placeSuggestions(term) {
+  const source = MODE_TAB_CONFIG[activeMode].placeSource;
+  if (source === 'rail') return Promise.resolve(filterRailStations(term));
+  if (source === 'city') return fetchLivePlaces(term, { includeAirports: false });
+  return fetchLivePlaces(term, { includeAirports: true });
+}
+
+function wireAutocomplete(inputId, listId) {
+  const input = document.getElementById(inputId);
+  const list = document.getElementById(listId);
+  let items = [];
+  let activeIndex = -1;
+
+  function render() {
+    if (!items.length) { list.hidden = true; list.innerHTML = ''; return; }
+    list.innerHTML = items.map((it, i) =>
+      `<li class="autocomplete-item${i === activeIndex ? ' active' : ''}" data-index="${i}">${it.label}</li>`
+    ).join('');
+    list.hidden = false;
+  }
+  function hide() { items = []; activeIndex = -1; list.hidden = true; list.innerHTML = ''; }
+  function select(item) { input.value = item.value; hide(); }
+
+  const runSearchDebounced = debounce(async (term) => {
+    const results = await placeSuggestions(term);
+    items = results;
+    activeIndex = -1;
+    render();
+  }, 250);
+
+  input.addEventListener('input', () => runSearchDebounced(input.value));
+  input.addEventListener('keydown', (ev) => {
+    if (list.hidden || !items.length) return;
+    if (ev.key === 'ArrowDown') { ev.preventDefault(); activeIndex = Math.min(activeIndex + 1, items.length - 1); render(); }
+    else if (ev.key === 'ArrowUp') { ev.preventDefault(); activeIndex = Math.max(activeIndex - 1, 0); render(); }
+    else if (ev.key === 'Enter' && activeIndex >= 0) { ev.preventDefault(); select(items[activeIndex]); }
+    else if (ev.key === 'Escape') { hide(); }
+  });
+  list.addEventListener('mousedown', (ev) => {
+    const li = ev.target.closest('.autocomplete-item');
+    if (!li) return;
+    ev.preventDefault();
+    select(items[Number(li.dataset.index)]);
+  });
+  document.addEventListener('click', (ev) => {
+    if (ev.target !== input && !list.contains(ev.target)) hide();
+  });
+  // Modus-Wechsel wechselt die Vorschlagsquelle (Flughafen vs. Bahnhof) -
+  // alte Vorschläge für den vorigen Modus wegräumen.
+  modeTabsEl.addEventListener('click', hide);
+}
+wireAutocomplete('origin', 'originSuggestions');
+wireAutocomplete('destination', 'destinationSuggestions');
 
 /* =========================================================================
  * Search form wiring
