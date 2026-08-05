@@ -22,8 +22,24 @@
  * a hobby project's quota protection.
  */
 
-const TRAVELPAYOUTS_URL = "https://api.travelpayouts.com/v1/prices/cheap";
+// Two upstream endpoints, both queried per *month* rather than per day:
+// asking prices_for_dates for one date returns a single offer, asking for
+// the month returns dozens (measured against the live API). `latest` is a
+// separate index that surfaces partly different itineraries, so the client
+// merges both. See traveldeals/providers/travelpayouts.py for the same
+// split on the Python side.
+const UPSTREAM = {
+  prices_for_dates: "https://api.travelpayouts.com/aviasales/v3/prices_for_dates",
+  latest: "https://api.travelpayouts.com/v2/prices/latest",
+};
 const CACHE_TTL_SECONDS = 3600;
+
+// Only these may be forwarded upstream - keeps the proxy from being turned
+// into an open relay for arbitrary Travelpayouts query parameters.
+const FORWARDABLE_PARAMS = [
+  "departure_at", "return_at", "one_way", "sorting", "limit",
+  "period_type", "beginning_of_period",
+];
 
 function corsHeaders(origin) {
   return {
@@ -44,8 +60,10 @@ function isValidIataLike(code) {
   return typeof code === "string" && /^[A-Za-z]{2,4}$/.test(code);
 }
 
-function isValidDate(value) {
-  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value);
+// Accepts both "YYYY-MM" (a whole month, what the search actually uses) and
+// "YYYY-MM-DD".
+function isValidDateOrMonth(value) {
+  return typeof value === "string" && /^\d{4}-\d{2}(-\d{2})?$/.test(value);
 }
 
 export default {
@@ -63,19 +81,24 @@ export default {
     }
 
     const incoming = new URL(request.url);
+    // /cheap is the historical path and still maps to the (now richer)
+    // default endpoint, so older cached clients keep working.
+    const endpointKey = incoming.pathname.replace(/^\/+|\/+$/g, "") === "latest"
+      ? "latest" : "prices_for_dates";
     const origin = incoming.searchParams.get("origin") || "";
     const destination = incoming.searchParams.get("destination") || "";
-    const departDate = incoming.searchParams.get("depart_date") || "";
-    const returnDate = incoming.searchParams.get("return_date") || "";
     const currency = (incoming.searchParams.get("currency") || "eur").toLowerCase();
 
-    if (!isValidIataLike(origin) || !isValidIataLike(destination) || !isValidDate(departDate)) {
+    if (!isValidIataLike(origin) || !isValidIataLike(destination)) {
       return jsonResponse({
-        error: "origin/destination must be 2-4 letter airport codes, depart_date must be YYYY-MM-DD.",
+        error: "origin/destination must be 2-4 letter airport/city codes.",
       }, 400, allowedOrigin);
     }
-    if (returnDate && !isValidDate(returnDate)) {
-      return jsonResponse({ error: "return_date must be YYYY-MM-DD." }, 400, allowedOrigin);
+    for (const name of ["departure_at", "return_at", "beginning_of_period"]) {
+      const value = incoming.searchParams.get(name);
+      if (value && !isValidDateOrMonth(value)) {
+        return jsonResponse({ error: `${name} must be YYYY-MM or YYYY-MM-DD.` }, 400, allowedOrigin);
+      }
     }
 
     const cache = caches.default;
@@ -83,12 +106,14 @@ export default {
     const cached = await cache.match(cacheKey);
     if (cached) return cached;
 
-    const upstream = new URL(TRAVELPAYOUTS_URL);
+    const upstream = new URL(UPSTREAM[endpointKey]);
     upstream.searchParams.set("origin", origin.toUpperCase());
     upstream.searchParams.set("destination", destination.toUpperCase());
-    upstream.searchParams.set("depart_date", departDate);
-    if (returnDate) upstream.searchParams.set("return_date", returnDate);
     upstream.searchParams.set("currency", currency);
+    for (const name of FORWARDABLE_PARAMS) {
+      const value = incoming.searchParams.get(name);
+      if (value) upstream.searchParams.set(name, value);
+    }
 
     let upstreamResponse;
     try {

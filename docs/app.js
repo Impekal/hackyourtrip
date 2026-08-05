@@ -358,7 +358,12 @@ function mockHotelOffers(route) {
  * result all just fall back to mockFlightOffers()).
  * ===================================================================== */
 const PROXY_URL = 'https://hackyourtrip-proxy.iamanamelessman.workers.dev';
-const REAL_FLIGHT_MAX_DATES = 5; // mirrors traveldeals/providers/travelpayouts.py
+// Requests are per month, not per day - see monthsCovering() below and the
+// same reasoning in traveldeals/providers/travelpayouts.py.
+const REAL_FLIGHT_MAX_MONTHS = 6;
+// Base for the relative per-itinerary `link` the API returns
+// ("/search/BER1809BCN1?t=..."), which points at that exact flight.
+const AVIASALES_BASE = 'https://www.aviasales.com';
 
 // Mirrors traveldeals/providers/geo.py: distance-based duration estimate,
 // direct flights only - a connection's layover length has nothing to do
@@ -429,21 +434,17 @@ function sessionCacheSet(key, value) {
   try { sessionStorage.setItem(key, JSON.stringify(value)); } catch (e) { /* private mode etc. - fine to skip caching */ }
 }
 
-function flattenTravelpayoutsOffers(data) {
-  // The real API observed in production nests one level deeper than the
-  // documented example - keyed by an arbitrary index ("0") instead of the
-  // offer fields sitting directly under the destination code. Handle both
-  // shapes rather than assuming which one a given response uses.
-  const offers = [];
-  for (const value of Object.values(data || {})) {
-    if (!value || typeof value !== 'object') continue;
-    if ('price' in value) {
-      offers.push(value);
-    } else {
-      offers.push(...Object.values(value).filter(v => v && typeof v === 'object' && 'price' in v));
-    }
+// Distinct "YYYY-MM" months the candidate dates fall into. Mirrors
+// _months_covering() in travelpayouts.py: one request per month rather than
+// per day, because a single-date request returns one offer while a
+// month request returns dozens.
+function monthsCovering(route) {
+  const months = [];
+  for (const day of dayCandidates(route)) {
+    const m = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}`;
+    if (!months.includes(m)) months.push(m);
   }
-  return offers;
+  return months;
 }
 
 // Documented Aviasales search-results deep link (named query params, not the
@@ -485,43 +486,105 @@ function travelpayoutsRawToOffer(raw, currency, route) {
       arrive = new Date(depart.getTime() + estimate * 3600000);
     }
   }
+  const link = raw.link;
   return {
     mode: 'flight',
-    bookingSite: `Aviasales (${raw.airline ?? '?'}${raw.flight_number ?? ''})`,
+    // The real booking gate (Kiwi.com, Trip.com, ...) rather than a generic
+    // "Aviasales" label.
+    bookingSite: `${raw.gate || 'Aviasales'} (${raw.airline ?? '?'}${raw.flight_number ?? ''})`,
     price: Number(raw.price), currency, depart, durationHours,
     bagFee: 0, isLowCost: false, stops,
     wifiOnboard: false, powerOutlets: false, legroomCm: null, punctualityPct: null,
-    url: buildBookingUrl(route, departIso, raw.return_at),
+    // The per-itinerary link goes straight to this exact flight; only fall
+    // back to the generic search URL when it's missing.
+    url: link ? AVIASALES_BASE + link : buildBookingUrl(route, departIso, raw.return_at),
     returnDepart: raw.return_at ? new Date(raw.return_at.slice(0, 19)) : null,
   };
 }
 
+// v2/prices/latest rows: date-only (no clock time), price in `value`,
+// stops in `number_of_changes`, minutes in `duration`, and no link.
+function latestRawToOffer(raw, currency, route) {
+  const departIso = `${raw.depart_date}T00:00:00`;
+  const depart = new Date(departIso);
+  const minutes = Number(raw.duration || 0);
+  return {
+    mode: 'flight',
+    bookingSite: raw.gate || 'Aviasales',
+    price: Number(raw.value), currency, depart,
+    durationHours: minutes ? round2(minutes / 60) : 0,
+    bagFee: 0, isLowCost: false, stops: Number(raw.number_of_changes ?? 0),
+    wifiOnboard: false, powerOutlets: false, legroomCm: null, punctualityPct: null,
+    url: buildBookingUrl(route, departIso, null),
+    returnDepart: null,
+  };
+}
+
+async function fetchProxyJson(path, params) {
+  const url = `${PROXY_URL.replace(/\/$/, '')}/${path}?${params.toString()}`;
+  const cacheKey = `hyt:${url}`;
+  const cached = sessionCacheGet(cacheKey);
+  if (cached) return cached;
+  try {
+    const resp = await fetch(url);
+    if (!resp.ok) return null;
+    const payload = await resp.json();
+    sessionCacheSet(cacheKey, payload);
+    return payload;
+  } catch (e) {
+    return null; // this request failed - callers keep going with the rest
+  }
+}
+
 async function fetchRealFlightOffers(route) {
   if (!PROXY_URL) return null; // not configured - caller falls back to mock
+  const roundTrip = Boolean(route.roundTrip && route.returnDate);
+  const wantedDays = new Set(dayCandidates(route).map(isoDay));
   const offers = [];
-  const returnDateStr = (route.roundTrip && route.returnDate) ? isoDay(route.returnDate) : '';
-  for (const day of dayCandidates(route).slice(0, REAL_FLIGHT_MAX_DATES)) {
-    const dateStr = isoDay(day);
-    const cacheKey = `hyt:${route.origin}:${route.destination}:${dateStr}:${returnDateStr}:${route.currency}`;
-    let payload = sessionCacheGet(cacheKey);
-    if (!payload) {
-      try {
-        const url = `${PROXY_URL.replace(/\/$/, '')}/cheap?origin=${encodeURIComponent(route.origin)}`
-          + `&destination=${encodeURIComponent(route.destination)}&depart_date=${dateStr}`
-          + (returnDateStr ? `&return_date=${returnDateStr}` : '')
-          + `&currency=${route.currency.toLowerCase()}`;
-        const resp = await fetch(url);
-        if (!resp.ok) continue;
-        payload = await resp.json();
-        sessionCacheSet(cacheKey, payload);
-      } catch (e) {
-        continue; // this day failed - keep trying the others
+  const seen = new Set();
+
+  const push = (offer) => {
+    // The month query deliberately over-fetches; the flex window decides
+    // what actually counts, and identical itineraries collapse to one.
+    if (!wantedDays.has(isoDay(offer.depart))) return;
+    const key = `${offer.depart.toISOString()}|${offer.bookingSite}|${offer.price}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    offers.push(offer);
+  };
+
+  for (const month of monthsCovering(route).slice(0, REAL_FLIGHT_MAX_MONTHS)) {
+    const base = {
+      origin: route.origin, destination: route.destination,
+      currency: route.currency.toLowerCase(), limit: '1000', sorting: 'price',
+    };
+    const forDates = new URLSearchParams({
+      ...base, departure_at: month, one_way: roundTrip ? 'false' : 'true',
+    });
+    if (roundTrip) {
+      // A specific return date returns nothing from this API; the return
+      // *month* is what works.
+      const rd = route.returnDate;
+      forDates.set('return_at', `${rd.getFullYear()}-${String(rd.getMonth() + 1).padStart(2, '0')}`);
+    }
+    const payload = await fetchProxyJson('cheap', forDates);
+    if (payload && payload.success !== false) {
+      const currency = (payload.currency || route.currency).toUpperCase();
+      for (const raw of payload.data || []) {
+        if (raw && raw.price) push(travelpayoutsRawToOffer(raw, currency, route));
       }
     }
-    if (!payload || payload.success === false) continue;
-    const currency = (payload.currency || route.currency).toUpperCase();
-    for (const raw of flattenTravelpayoutsOffers(payload.data)) {
-      offers.push(travelpayoutsRawToOffer(raw, currency, route));
+
+    // Second index, one-way only (it returns nothing for round trips).
+    if (roundTrip) continue;
+    const latest = await fetchProxyJson('latest', new URLSearchParams({
+      ...base, one_way: 'true', period_type: 'month', beginning_of_period: `${month}-01`,
+    }));
+    if (latest && latest.success !== false) {
+      const currency = (latest.currency || route.currency).toUpperCase();
+      for (const raw of latest.data || []) {
+        if (raw && raw.value) push(latestRawToOffer(raw, currency, route));
+      }
     }
   }
   return offers;
@@ -556,6 +619,10 @@ function convert(amount, from, to, rates) {
  * (see the "Meine Alerts" tab), which a stateless in-browser search doesn't
  * have.
  * ===================================================================== */
+// How many ranked options the results list shows. Was 6, which alone made
+// searches look nearly empty once the providers started returning dozens of
+// offers - the cap, not the data, was the bottleneck.
+const MAX_RESULTS_SHOWN = 40;
 const BEST_VALUE_PRICE_WEIGHT = 0.5;
 const BEST_VALUE_DURATION_WEIGHT = 0.25;
 const BEST_VALUE_COMFORT_WEIGHT = 0.25;
@@ -720,7 +787,7 @@ async function runSearch(route) {
     }
   }
   candidates.sort((a, b) => a.score - b.score);
-  const top = candidates.slice(0, 6);
+  const top = candidates.slice(0, MAX_RESULTS_SHOWN);
 
   const rates = await getRatesPerEur();
   for (const c of top) {

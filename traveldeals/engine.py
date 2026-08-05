@@ -185,7 +185,9 @@ class DealEngine:
         self.as_of = as_of or date.today()
         self._rates_per_eur = get_rates_per_eur() if use_live_currency else None
 
-    def search(self, route: RoutePreference, top_n: int = 5) -> list[TripOption]:
+    # Raised from 5: the providers now return dozens of offers per search,
+    # so a tight cap was hiding most of what was actually found.
+    def search(self, route: RoutePreference, top_n: int = 25) -> list[TripOption]:
         candidates: list[TripOption] = []
         offer_pools: dict[Mode, list[Offer]] = {}
 
