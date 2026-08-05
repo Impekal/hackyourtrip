@@ -635,7 +635,7 @@ async function loadAlerts() {
             ${opt.is_error_fare ? '<span class="badge alert">Fehlerpreis</span>' : ''}
             ${opt.is_price_drop ? '<span class="badge good">Preis gefallen</span>' : ''}
           </div>
-          <span class="subline mono">${opt.mode} · ${opt.total_duration_hours}h · ${opt.booking_sites.join(', ')}</span>
+          <span class="subline mono">${opt.mode} · ${opt.total_duration_hours > 0 ? opt.total_duration_hours + 'h' : 'Dauer unbekannt'} · ${opt.booking_sites.join(', ')}</span>
           ${opt.recommendations.length ? `<ul class="recs">${opt.recommendations.map(r => `<li>${r}</li>`).join('')}</ul>` : ''}
         </div>
       `).join('')}

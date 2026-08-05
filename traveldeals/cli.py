@@ -25,6 +25,7 @@ from traveldeals.providers.amadeus import AmadeusFlightProvider
 from traveldeals.providers.base import Provider
 from traveldeals.providers.mock import (MockBusProvider, MockFlightProvider,
                                          MockHotelProvider, MockTrainProvider)
+from traveldeals.providers.travelpayouts import TravelpayoutsFlightProvider
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CONFIG = REPO_ROOT / "config" / "routes.yaml"
@@ -32,14 +33,26 @@ DEFAULT_DATA_DIR = REPO_ROOT / "data"
 DEFAULT_DASHBOARD_JSON = REPO_ROOT / "docs" / "data" / "deals.json"
 
 
-def build_providers() -> dict[Mode, Provider]:
-    # Flight uses the real Amadeus adapter once AMADEUS_API_KEY/SECRET are
-    # set (see providers/amadeus.py); train/bus/hotel are still mock.py
-    # until their real adapters (providers/real.py) get implemented.
+def _select_flight_provider() -> Provider:
+    # Travelpayouts is the recommended real source (free self-serve signup,
+    # see README) and wins if configured. Amadeus is kept working for anyone
+    # with an Enterprise account (its free self-service tier was
+    # decommissioned in July 2026) as a second real option. Mock is the
+    # final fallback so `check` always produces something to look at.
+    travelpayouts = TravelpayoutsFlightProvider()
+    if travelpayouts.configured:
+        return travelpayouts
     amadeus = AmadeusFlightProvider()
-    flight_provider = amadeus if amadeus.configured else MockFlightProvider()
+    if amadeus.configured:
+        return amadeus
+    return MockFlightProvider()
+
+
+def build_providers() -> dict[Mode, Provider]:
+    # Train/bus/hotel are still mock.py until their real adapters
+    # (providers/real.py) get implemented.
     return {
-        Mode.FLIGHT: flight_provider,
+        Mode.FLIGHT: _select_flight_provider(),
         Mode.TRAIN: MockTrainProvider(),
         Mode.BUS: MockBusProvider(),
         Mode.HOTEL: MockHotelProvider(),

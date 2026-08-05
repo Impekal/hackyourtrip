@@ -4,13 +4,17 @@ Bot/Webapp, der Flug-, Bahn-, Bus- und Hotel-Angebote vergleicht, dich per
 Telegram/E-Mail auf Preisverfall und mögliche Fehlerpreise hinweist und dir
 auf einem Dashboard die besten aktuellen Optionen pro Strecke zeigt.
 
-> **Stand v1:** Flug läuft auf **echten Preisen über die Amadeus Self-Service
-> API**, sobald `AMADEUS_API_KEY`/`AMADEUS_API_SECRET` gesetzt sind (siehe
-> "Amadeus einrichten" unten); ohne diese Zugangsdaten - und Bahn/Bus/Hotel
-> immer - läuft es auf **Mock-Providern** (siehe "Warum Mock-Daten?"). Die
-> komplette Pipeline (Einstellungen, Ranking, Empfehlungen, Alerts, Dashboard,
-> Cronjob) funktioniert so oder so Ende-zu-Ende. Nächster Schritt: Bahn/Bus/
-> Hotel ebenfalls durch echte APIs ersetzen (Roadmap unten).
+> **Stand v1:** Flug läuft auf **echten, aktuell beobachteten Preisen über
+> die Travelpayouts (Aviasales) Data API**, sobald `TRAVELPAYOUTS_TOKEN`
+> gesetzt ist (siehe "Travelpayouts einrichten" unten - kostenloses
+> Selfservice-Konto, kein Vertrag). Amadeus wird als zweite echte Quelle
+> weiterhin unterstützt, aber nur für Enterprise-Zugänge - die kostenlose
+> Amadeus-Self-Service-API wurde im Juli 2026 abgeschaltet. Ohne eine dieser
+> beiden Zugangsdaten - und Bahn/Bus/Hotel immer - läuft es auf
+> **Mock-Providern** (siehe "Warum Mock-Daten?"). Die komplette Pipeline
+> (Einstellungen, Ranking, Empfehlungen, Alerts, Dashboard, Cronjob)
+> funktioniert so oder so Ende-zu-Ende. Nächster Schritt: Bahn/Bus/Hotel
+> ebenfalls durch echte APIs ersetzen (Roadmap unten).
 
 ## Was der Bot kann
 
@@ -79,7 +83,8 @@ traveldeals/
   providers/
     base.py         Provider-Interface (search(route) -> list[Offer]) + date_candidates()
     mock.py         deterministische Fake-Angebote (v1, siehe unten)
-    amadeus.py      echter Flug-Provider (Amadeus Self-Service API, OAuth2)
+    travelpayouts.py echter Flug-Provider (Travelpayouts Data API, empfohlen)
+    amadeus.py      echter Flug-Provider (Amadeus API, nur Enterprise-Zugang)
     real.py         Stubs für DB/FlixBus/Booking - noch nicht implementiert
   engine.py         DealEngine: sammelt Angebote, baut Kombis, filtert
                      (Budget/Dauer/Low-Cost), rankt (cheapest/fastest/
@@ -108,24 +113,33 @@ Mock-Provider (Bahn/Bus/Hotel) hat in `providers/real.py` ein Gegenstück, das
 nur noch die echte API anbinden muss - die Schnittstelle (`Provider.search`)
 bleibt gleich.
 
-## Amadeus einrichten (echte Flugpreise)
+## Travelpayouts einrichten (echte Flugpreise, empfohlen)
 
-1. Kostenloses Konto auf [developers.amadeus.com](https://developers.amadeus.com),
-   "My Self-Service Workspace" -> "Create new app" -> API Key + API Secret kopieren.
-2. Lokal: in `.env` (aus `.env.example` kopiert) `AMADEUS_API_KEY`/
-   `AMADEUS_API_SECRET` eintragen.
-3. Für den GitHub-Actions-Cron: beide als Repo-Secrets hinterlegen (Settings
-   -> Secrets and variables -> Actions) - `check-deals.yml` reicht sie automatisch durch.
-4. Ohne diese beiden Werte läuft `traveldeals.providers.amadeus.AmadeusFlightProvider.search()`
-   einfach mit `[]` weiter (kein Fehler) und `cli.py` fällt automatisch auf
-   `MockFlightProvider` zurück - kein Code-Umbau nötig, um zwischen beiden zu wechseln.
+1. Kostenloses Konto auf [travelpayouts.com](https://www.travelpayouts.com),
+   im Account-Bereich den API-Token kopieren (kein Vertrag, keine Freischaltung nötig).
+2. Lokal: in `.env` (aus `.env.example` kopiert) `TRAVELPAYOUTS_TOKEN` eintragen.
+3. Für den GitHub-Actions-Cron: als Repo-Secret hinterlegen (Settings ->
+   Secrets and variables -> Actions) - `check-deals.yml` reicht ihn automatisch durch.
+4. Ohne diesen Wert läuft `TravelpayoutsFlightProvider.search()` einfach mit
+   `[]` weiter (kein Fehler) und `cli.py` fällt automatisch auf Amadeus
+   (falls konfiguriert) oder sonst `MockFlightProvider` zurück - kein
+   Code-Umbau nötig, um zwischen den dreien zu wechseln.
 
-**Wichtig zur Test-Umgebung:** Der kostenlose Amadeus-Zugang läuft gegen
-`test.api.amadeus.com` - das liefert Amadeus' eigene Beispiel-/Cache-Daten,
-keine live gebuchten Tagespreise, und hat ein begrenztes Anfrage-Kontingent
-pro Monat. `AmadeusFlightProvider` deckelt deshalb die Anzahl abgefragter
-Tage pro Route (`MAX_DATES_QUERIED = 5`) - bei einem breiten Flex-Fenster
-werden nicht alle Tage einzeln angefragt.
+**Was die Daten wirklich sind:** Der Endpunkt `v1/prices/cheap` liefert den
+günstigsten kürzlich für diese Strecke gefundenen Ticketpreis (von Aviasales
+zwischengespeichert) - echte Preise, aber kein Live-Suchergebnis für exakt
+heute. Er liefert außerdem **keine** Ankunftszeit/Flugdauer, nur Preis,
+Airline, Abflugzeit und Anzahl Umstiege - `duration_hours` wird deshalb auf
+`0.0` gesetzt; die Engine behandelt das genau wie bei Hotel-Angeboten (siehe
+`engine._meets_hard_constraints`) - "maximale Reisezeit" greift dann einfach
+nicht, statt falsch zu filtern.
+
+**Warum nicht Amadeus?** Die kostenlose Amadeus-Self-Service-API wurde am
+17. Juli 2026 abgeschaltet (nur noch Enterprise-Verträge). `providers/amadeus.py`
+funktioniert weiterhin und `cli.py` nutzt es automatisch, falls
+`AMADEUS_API_KEY`/`AMADEUS_API_SECRET` gesetzt sind - aber neu kommt man an
+solche Zugangsdaten nur noch über ein Enterprise-Konto, nicht per
+Selfservice-Anmeldung.
 
 ## Setup
 
@@ -177,9 +191,13 @@ Dashboard aktuell bleibt und die Preishistorie über die Zeit wächst.
 Ziel ist, `providers/mock.py` Modus für Modus durch echte Adapter zu
 ersetzen (Interface bleibt gleich, s.o.):
 
-- **Flug:** ✅ erledigt - `providers/amadeus.py` (Amadeus Self-Service API,
-  siehe "Amadeus einrichten" oben). Möglicher nächster Schritt: zusätzlich
-  Kiwi Tequila API als zweite Quelle für mehr Abdeckung/Vergleich.
+- **Flug:** ✅ erledigt - `providers/travelpayouts.py` (siehe "Travelpayouts
+  einrichten" oben), `providers/amadeus.py` als Alternative für Enterprise-
+  Zugänge. Möglicher nächster Schritt: eine Quelle mit echter Flugdauer/
+  Ankunftszeit ergänzen (Travelpayouts liefert das nicht), z.B. Duffel im
+  Test-Modus (kostenlos, aber Fake-Sandbox-Daten) oder ein Kiwi-Tequila-
+  Partnerzugang (mittlerweile nur noch auf Anfrage, kein offenes Selfservice
+  mehr).
 - **Bahn:** kein offenes Preis-API von der DB; `db-vendo-client` (Community,
   inoffiziell) oder ein kommerzieller Distributor wie Trainline Partner API.
 - **Bus:** FlixBus hat kein offenes Self-Serve-API, nur ein Partnerprogramm.
