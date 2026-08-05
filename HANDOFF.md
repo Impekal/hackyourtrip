@@ -123,6 +123,22 @@ Ergebnis) fällt alles graceful auf Mock-Daten zurück.
 - **`duration_to` (Minuten) aus der echten Travelpayouts-Antwort schlägt
   die eigene Distanzschätzung**, wenn vorhanden - echte Daten, funktioniert
   auch bei Umstiegen (nicht auf Direktflüge beschränkt).
+- **Flugpreise werden pro MONAT abgefragt, nicht pro Tag.** Das ist die
+  wichtigste Eigenschaft der Flugsuche und leicht versehentlich
+  kaputtzumachen: gegen die Live-API gemessen liefert
+  `aviasales/v3/prices_for_dates` für ein *konkretes Datum* genau 1 Angebot,
+  für einen *ganzen Monat* 27-44. Also: eine Anfrage je Monat, danach
+  clientseitig auf die Kandidatentage filtern. Wer das auf Tagesabfragen
+  zurückdreht, halbiert die Ergebnisliste auf einen Bruchteil.
+  Bei Hin+Zurück muss `return_at` ebenfalls ein *Monat* sein - ein
+  konkretes Rückreisedatum liefert null Zeilen.
+- **Zwei Preis-Indizes werden gemischt**: `prices_for_dates` (hat echte
+  Deep-Links je Verbindung + `gate`) und `v2/prices/latest` (kennt teils
+  andere Verbindungen, aber keine Links). `latest` liefert bei Hin+Zurück
+  nichts und wird dort übersprungen.
+- **Anzeigelimits sind bewusst hoch** (`MAX_RESULTS_SHOWN = 40` in app.js,
+  `top_n = 25` in engine.search) - die alten Werte 6/5 waren selbst ein
+  wesentlicher Grund für "kaum Ergebnisse".
 - **Round-Trip-Preis ist ein kombinierter Gesamtpreis**, kein
   client-seitiges Aufsummieren zweier Angebote - so liefert es die echte
   Travelpayouts-API (`return_date`-Param → ein Preis für beide Strecken),
@@ -151,6 +167,17 @@ Ergebnis) fällt alles graceful auf Mock-Daten zurück.
 - **`MEAL_PLAN_TIERS`/`PROPERTY_TYPES`** (models.py, gespiegelt in app.js)
   sind geordnete Listen - `min_meal_plan`-Filter vergleicht Tier-Indizes
   ("mindestens Halbpension" matched auch All-Inclusive-Angebote).
+- **"Deal" hat zwei Quellen**: die Preishistorie (Preisverfall/Fehlerpreis,
+  nur im Python-Cron verfügbar) und - wenn keine Historie existiert - der
+  Vergleich mit dem Median derselben Suche (`_flag_below_median` /
+  `flagBelowMedian`, je Verkehrsmittel, mind. 4 Kandidaten). Der
+  `deals_only`-Filter darf bewusst leer ausgehen, statt normale Preise als
+  Deals auszugeben.
+- **Gemini kann keine Flüge suchen.** Die KI-Empfehlung (`POST /ai` im
+  Worker) bekommt ausschließlich die bereits gefundenen Angebote und wird
+  im Prompt angewiesen, nichts zu erfinden. Wenn jemand "mehr Ergebnisse"
+  will, ist die Antwort die Monatsabfrage oben oder mehr Flex-Tage - nicht
+  die KI.
 - **Von/Nach-Autocomplete-Quelle hängt vom aktiven Modus ab**
   (`MODE_TAB_CONFIG[mode].placeSource`: `'flight'` = echte
   Travelpayouts-Places-API mit IATA-Code als Wert, `'city'` = dieselbe API
@@ -162,7 +189,7 @@ Ergebnis) fällt alles graceful auf Mock-Daten zurück.
 ```bash
 pip3 install --user requests PyYAML pytest   # falls nicht vorhanden
 cd /workspace/hackyourtrip
-python3 -m pytest tests/ -q                  # ~66+ Tests, alle sollten grün sein
+python3 -m pytest tests/ -q                  # ~80+ Tests, alle sollten grün sein
 node --check docs/app.js                     # Syntax-Check JS
 node --check worker/src/index.js
 ```
@@ -244,10 +271,33 @@ abgeschlossen und einzeln committed+gepusht:
    `checked_bags`/`checked_bag_kg`. Formular zeigt zwei getrennte Blöcke
    ("Aufgegebenes Gepäck" / "Handgepäck").
 
-Keine offenen Aufgaben aus dieser Session. Volle Testsuite (66 Tests)
-grün, JS-Syntax geprüft, alle vier Features per Playwright manuell
-gegen einen lokalen Static-Server verifiziert (Formular-Verhalten,
-Filter/Komfort-Score, YAML-Export).
+Zweite Runde User-Feedback, ebenfalls abgeschlossen:
+
+5. **"Gewicht egal" beim Gepäck**: `checked_bag_kg`/`carry_on_max_kg` sind
+   jetzt Optional; null = keine Vorgabe, ausdrücklich verschieden von 0.
+6. **Deutlich mehr Flugergebnisse**: Monatsabfragen statt Tagesabfragen,
+   zwei gemischte Indizes, echte Deep-Links + echter Buchungsanbieter je
+   Verbindung, Anzeigelimit 6->40 (JS) bzw. 5->25 (Python). Im
+   Playwright-Durchlauf 6 -> 26 Ergebnisse bei *weniger* API-Anfragen.
+   Details oben unter "Wichtige Konventionen".
+7. **Sortierung**: `most_expensive` und `exact_date` ergänzt, Feld heisst
+   jetzt "Sortieren nach".
+8. **Deals-Filter** (`deals_only`) inkl. Median-Heuristik ohne Historie.
+9. **KI-Empfehlung mit Gemini** über `POST /ai` im Worker, optionales
+   `GEMINI_API_KEY`-Secret.
+
+Keine offenen Aufgaben. Volle Testsuite (80 Tests) grün, JS- und
+Worker-Syntax geprüft, alle Features per Playwright gegen einen lokalen
+Static-Server verifiziert (inkl. der drei KI-Pfade: Erfolg, Key fehlt,
+Netzwerkfehler).
+
+**Offene Erwartungshaltung, die man kennen sollte:** Der Nutzer vergleicht
+mit Skyscanner/Momondo/Opodo. Diese Portale fragen Airline-Systeme live ab;
+die kostenlose Travelpayouts-Stufe ist ein Cache zuletzt *gefundener*
+Preise. Die Ergebnismenge wurde hier ausgereizt, aber Gleichstand mit einer
+Live-GDS-Suche ist mit kostenlosen Zugängen nicht erreichbar - das gehört
+bei Rückfragen ehrlich gesagt, statt es durch weitere Tricks zu
+suggerieren.
 
 ## Roadmap-Ideen (nicht in Arbeit, nur notiert)
 
