@@ -138,16 +138,31 @@ Ergebnis) fällt alles graceful auf Mock-Daten zurück.
 - **Spätere-Abfahrt-Empfehlung filtert erst nach den eigenen
   Zeitfenster-Constraints** - sonst könnte sie eine Zeit vorschlagen, die
   der Nutzer selbst ausgeschlossen hat (war ein echter Bug, siehe Git-Log).
-- **`carry_on_only` (BaggagePref) wird aktuell nirgends zum Filtern
-  verwendet** - nur als YAML-Exportfeld. Wird in der Gepäck-Überarbeitung
-  (siehe TODO) ersetzt.
+- **Gepäck ist zweigeteilt:** `checked_bags`/`checked_bag_kg` (aufgegebenes
+  Gepäck) und `carry_on_count`/`carry_on_max_kg` (Handgepäck) sind
+  getrennte Felder in `BaggagePref` - keine Ja/Nein-Checkbox mehr.
+- **Hotel-Amenity-Listen sind über mehrere Dateien synchron zu halten:**
+  `HOTEL_AMENITY_FIELDS`/`_HOTEL_AMENITY_REQUIREMENTS` (engine.py),
+  `_HOTEL_REQUIRE_FIELDS` (config.py), `_HOTEL_AMENITY_PROBABILITY`
+  (mock.py) und `HOTEL_AMENITY_REQUIREMENTS`/`HOTEL_AMENITY_PROBABILITY`
+  (app.js) sind vier separate, aber inhaltlich deckungsgleiche Listen -
+  eine neue Amenity braucht eine Ergänzung an allen vier Stellen (+ Offer/
+  HotelPref-Dataclass-Felder + Checkbox in index.html).
+- **`MEAL_PLAN_TIERS`/`PROPERTY_TYPES`** (models.py, gespiegelt in app.js)
+  sind geordnete Listen - `min_meal_plan`-Filter vergleicht Tier-Indizes
+  ("mindestens Halbpension" matched auch All-Inclusive-Angebote).
+- **Von/Nach-Autocomplete-Quelle hängt vom aktiven Modus ab**
+  (`MODE_TAB_CONFIG[mode].placeSource`: `'flight'` = echte
+  Travelpayouts-Places-API mit IATA-Code als Wert, `'city'` = dieselbe API
+  nur city-Typ mit Klartext-Namen als Wert (fürs Hotel-"Ort"-Feld),
+  `'rail'` = statische `RAIL_STATIONS`-Liste, kein Netzwerk nötig.
 
 ## Testing
 
 ```bash
 pip3 install --user requests PyYAML pytest   # falls nicht vorhanden
 cd /workspace/hackyourtrip
-python3 -m pytest tests/ -q                  # ~59+ Tests, alle sollten grün sein
+python3 -m pytest tests/ -q                  # ~66+ Tests, alle sollten grün sein
 node --check docs/app.js                     # Syntax-Check JS
 node --check worker/src/index.js
 ```
@@ -199,46 +214,40 @@ landen typischerweise im Scratchpad, nicht im Repo.
   für hackyourtrip selbst (nur als Vorbild für eine mögliche
   Multi-User-Zukunft erwähnt, siehe README-Roadmap).
 
-## Aktueller Stand / offene Aufgaben (diese Session)
+## Aktueller Stand / offene Aufgaben
 
-Zuletzt abgeschlossen: Hin-/Rückreise-Auswahl (Flug/Bahn/Bus + Kombis),
-echte klickbare Aviasales-Buchungslinks, Uhrzeit-Flexibilität,
-Cloudflare-Worker-Proxy ohne CLI.
+Stand 2026-08-05, alle fünf User-Feedback-Punkte aus dieser Session sind
+abgeschlossen und einzeln committed+gepusht:
 
-**Gerade in Arbeit** (User-Feedback vom 2026-08-05, alle vier parallel offen):
+1. **Datum-UX vereinfacht**: Flug/Bahn/Bus + Oder-Kombis zeigen nur noch
+   ein "Datum"-Feld (Flex-Tage-davor/danach spannen den Suchzeitraum auf,
+   die vorherige "Datum bis"-Spanne war redundant dazu); bei Hin+Zurück
+   kommt das Rückreisedatum-Feld dazu. Hotel/*_hotel behalten die
+   Anreise-Spanne (`departUntilGroup`/`cfg.singleDate` in `app.js`).
+2. **Von/Nach-Autocomplete**: Flug/Hotel nutzen die echte, tokenlose
+   `autocomplete.travelpayouts.com/places2`-API (Shape per
+   GitHub-Actions-Smoke-Test verifiziert - liefert `type`, `code`, `name`,
+   `city_name`, `weight` fürs Ranking); Bahn/Bus nutzen die statische
+   `RAIL_STATIONS`-Liste in `app.js` (keine freie Bahnhofs-API bekannt).
+   Generische Typeahead-Komponente mit Tastatur-Navigation, degradiert
+   graceful auf Freitext bei Netzwerkfehlern.
+3. **Hotel-Kriterien vervollständigt**: `HotelPref`/`Offer` haben jetzt
+   Unterkunftsart (`PROPERTY_TYPES`), Verpflegungsstufe (`MEAL_PLAN_TIERS`,
+   ersetzt die alte `require_breakfast`-Checkbox) und 27 einzelne
+   Ausstattungsmerkmale (Pool/Gym jetzt getrennt statt kombiniert). Läuft
+   in Python (`models.py`/`engine.py`/`mock.py`/`config.py`) und JS
+   (`app.js`) synchron, `index.html` gruppiert die Checkboxen in
+   Unterkategorien statt einer langen Liste.
+4. **Gepäck-Eingabe überarbeitet**: `carry_on_only` (war ohnehin nirgends
+   in der Filterlogik verwendet - nur YAML-Exportfeld) ersetzt durch
+   `carry_on_count` + `carry_on_max_kg`, gleichwertig zu den bestehenden
+   `checked_bags`/`checked_bag_kg`. Formular zeigt zwei getrennte Blöcke
+   ("Aufgegebenes Gepäck" / "Handgepäck").
 
-1. **Datum-UX vereinfachen**: Bei Nur-Hinflug nur EIN Datumsfeld zeigen
-   (Flex-Tage bestimmen ja schon das Zeitfenster, "Datum bis" ist
-   redundant); bei Hin+Zurück ein Hin-Datum + ein Rück-Datum. Betrifft nur
-   Flug/Bahn/Bus + deren Oder-Kombis, nicht Hotel/*_hotel (da bleibt die
-   Anreise-Spanne sinnvoll fürs Checkin-Fenster).
-2. **Autocomplete für Von/Nach**: Stadt eintippen → Flughäfen (Flug) bzw.
-   Bahnhöfe (Bahn/Bus) zur Auswahl vorschlagen, wie auf gängigen
-   Reiseplattformen. Plan: für Flughäfen die öffentliche
-   Travelpayouts-Autocomplete-API prüfen (echte Daten statt statischer
-   Liste) - Shape vorher per GitHub-Actions-Smoke-Test verifizieren, da die
-   Sandbox das nicht direkt erreichen kann. Für Bahn/Bus-Stationen gibt es
-   keine bekannte freie API dafür - kuratierte statische Liste geplant.
-3. **Hotel-Kriterien vervollständigen**: aktuell nur ~7 Amenities,
-   soll ein "wirklich alles"-Set wie Trivago werden (Verpflegungsstufen,
-   Objekttyp, Spa, Gym separat von Pool, Restaurant, Bar, Zimmerservice,
-   24h-Rezeption, Business-Ausstattung, Wäscheservice, Aufzug,
-   Balkon/Terrasse, Küche, Strandnähe, Barrierefreiheit, E-Ladestation,
-   Fahrradverleih, Babysitting, Sauna, Whirlpool, Nichtraucher,
-   Familienzimmer, Flughafentransfer, ...). Betrifft `HotelPref`/`Offer`
-   in `models.py`, `engine.py` (Filter + Komfort-Score), `mock.py`,
-   `config.py`, `routes.example.yaml`, und die komplette JS-Spiegelung in
-   `app.js` + neue Checkboxen in `index.html`.
-4. **Gepäck-Eingabe überarbeiten**: Koffer als "Gewicht pro Stück (z.B.
-   23kg) + Anzahl" (existiert schon: `checked_bag_kg`/`checked_bags`),
-   zusätzlich **Handgepäck separat** mit eigenem Gewichtslimit (z.B. 8kg)
-   + Anzahl statt der aktuellen reinen Ja/Nein-Checkbox
-   (`carry_on_only`, die ohnehin nirgends filtert). Neue Felder:
-   `carry_on_max_kg`, `carry_on_count` in `BaggagePref`.
-
-Reihenfolge in dieser Session: 2 (Datum) → 3 (Autocomplete) → 4 (Hotel) →
-5 (Gepäck) als eigene Commits, danach diese Datei mit dem finalen Stand
-aktualisieren.
+Keine offenen Aufgaben aus dieser Session. Volle Testsuite (66 Tests)
+grün, JS-Syntax geprüft, alle vier Features per Playwright manuell
+gegen einen lokalen Static-Server verifiziert (Formular-Verhalten,
+Filter/Komfort-Score, YAML-Export).
 
 ## Roadmap-Ideen (nicht in Arbeit, nur notiert)
 
