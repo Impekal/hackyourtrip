@@ -1,0 +1,51 @@
+name: Explore Travelpayouts prices endpoints for more results (temporary)
+
+# One-off: check whether omitting depart_date (calendar-style response) or
+# using v2/prices/latest gives more offers per call than our current
+# one-date-per-call v1/prices/cheap loop - verifying from a runner with
+# real internet access, since the dev sandbox has none. Uses the same
+# TRAVELPAYOUTS_TOKEN secret already configured for check-deals.yml.
+# Delete once the shapes are confirmed.
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  explore:
+    runs-on: ubuntu-latest
+    steps:
+      - name: v1/prices/cheap WITHOUT depart_date (potential calendar shape)
+        run: |
+          curl -sS -w '\nHTTP_STATUS:%{http_code}\n' \
+            -H "X-Access-Token: ${{ secrets.TRAVELPAYOUTS_TOKEN }}" \
+            --get "https://api.travelpayouts.com/v1/prices/cheap" \
+            --data-urlencode "origin=BER" \
+            --data-urlencode "destination=BCN" \
+            --data-urlencode "currency=eur"
+          echo
+
+      - name: v2/prices/latest (documented as multiple recent tickets, not just cheapest)
+        run: |
+          curl -sS -w '\nHTTP_STATUS:%{http_code}\n' \
+            -H "X-Access-Token: ${{ secrets.TRAVELPAYOUTS_TOKEN }}" \
+            --get "https://api.travelpayouts.com/v2/prices/latest" \
+            --data-urlencode "origin=BER" \
+            --data-urlencode "destination=BCN" \
+            --data-urlencode "currency=eur" \
+            --data-urlencode "limit=30" \
+            --data-urlencode "period_type=year" \
+            --data-urlencode "one_way=false" \
+            --data-urlencode "sorting=price"
+          echo
+
+      - name: v1/prices/month-matrix (calendar of cheapest fares across a month)
+        run: |
+          curl -sS -w '\nHTTP_STATUS:%{http_code}\n' \
+            -H "X-Access-Token: ${{ secrets.TRAVELPAYOUTS_TOKEN }}" \
+            --get "https://api.travelpayouts.com/v1/prices/month-matrix" \
+            --data-urlencode "origin=BER" \
+            --data-urlencode "destination=BCN" \
+            --data-urlencode "currency=eur" \
+            --data-urlencode "show_to_affiliates=true" \
+            --data-urlencode "month=2026-09-01"
+          echo
