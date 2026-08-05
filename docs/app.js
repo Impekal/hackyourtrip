@@ -27,17 +27,21 @@ tabAlerts.addEventListener('click', () => activateMainTab('alerts'));
  * that mode are shown: e.g. Hotel has no "Von", pure transport tabs have no
  * Naechte/Hotel-Kriterien.
  * ===================================================================== */
+// singleDate: true means "just one departure date, flex_before/after already
+// define the search window" (pure transport + OR-combos) - the from/until
+// range stays for Hotel/*_hotel, where a real check-in window makes sense
+// alongside min/max nights.
 const MODE_TAB_CONFIG = {
-  flight:          { origin: true,  nights: false, duration: true,  flight: true,  train: false, hotel: false, transportExtra: true,  roundTrip: true,  modes: ['flight'] },
-  train:           { origin: true,  nights: false, duration: true,  flight: false, train: true,  hotel: false, transportExtra: true,  roundTrip: true,  modes: ['train'] },
-  bus:             { origin: true,  nights: false, duration: true,  flight: false, train: false, hotel: false, transportExtra: true,  roundTrip: true,  modes: ['bus'] },
-  hotel:           { origin: false, nights: true,  duration: false, flight: false, train: false, hotel: true,  transportExtra: false, roundTrip: false, modes: ['hotel'] },
-  train_or_bus:    { origin: true,  nights: false, duration: true,  flight: false, train: true,  hotel: false, transportExtra: true,  roundTrip: true,  modes: ['train_or_bus'] },
-  flight_or_train: { origin: true,  nights: false, duration: true,  flight: true,  train: true,  hotel: false, transportExtra: true,  roundTrip: true,  modes: ['flight_or_train'] },
-  flight_or_bus:   { origin: true,  nights: false, duration: true,  flight: true,  train: false, hotel: false, transportExtra: true,  roundTrip: true,  modes: ['flight_or_bus'] },
-  flight_hotel:    { origin: true,  nights: true,  duration: true,  flight: true,  train: false, hotel: true,  transportExtra: true,  roundTrip: false, modes: ['flight_hotel'] },
-  train_hotel:     { origin: true,  nights: true,  duration: true,  flight: false, train: true,  hotel: true,  transportExtra: true,  roundTrip: false, modes: ['train_hotel'] },
-  bus_hotel:       { origin: true,  nights: true,  duration: true,  flight: false, train: false, hotel: true,  transportExtra: true,  roundTrip: false, modes: ['bus_hotel'] },
+  flight:          { origin: true,  nights: false, duration: true,  flight: true,  train: false, hotel: false, transportExtra: true,  roundTrip: true,  singleDate: true,  modes: ['flight'] },
+  train:           { origin: true,  nights: false, duration: true,  flight: false, train: true,  hotel: false, transportExtra: true,  roundTrip: true,  singleDate: true,  modes: ['train'] },
+  bus:             { origin: true,  nights: false, duration: true,  flight: false, train: false, hotel: false, transportExtra: true,  roundTrip: true,  singleDate: true,  modes: ['bus'] },
+  hotel:           { origin: false, nights: true,  duration: false, flight: false, train: false, hotel: true,  transportExtra: false, roundTrip: false, singleDate: false, modes: ['hotel'] },
+  train_or_bus:    { origin: true,  nights: false, duration: true,  flight: false, train: true,  hotel: false, transportExtra: true,  roundTrip: true,  singleDate: true,  modes: ['train_or_bus'] },
+  flight_or_train: { origin: true,  nights: false, duration: true,  flight: true,  train: true,  hotel: false, transportExtra: true,  roundTrip: true,  singleDate: true,  modes: ['flight_or_train'] },
+  flight_or_bus:   { origin: true,  nights: false, duration: true,  flight: true,  train: false, hotel: false, transportExtra: true,  roundTrip: true,  singleDate: true,  modes: ['flight_or_bus'] },
+  flight_hotel:    { origin: true,  nights: true,  duration: true,  flight: true,  train: false, hotel: true,  transportExtra: true,  roundTrip: false, singleDate: false, modes: ['flight_hotel'] },
+  train_hotel:     { origin: true,  nights: true,  duration: true,  flight: false, train: true,  hotel: true,  transportExtra: true,  roundTrip: false, singleDate: false, modes: ['train_hotel'] },
+  bus_hotel:       { origin: true,  nights: true,  duration: true,  flight: false, train: false, hotel: true,  transportExtra: true,  roundTrip: false, singleDate: false, modes: ['bus_hotel'] },
 };
 
 let activeMode = 'flight';
@@ -49,15 +53,18 @@ function applyModeVisibility(mode) {
     originGroup: cfg.origin, nightsGroup: cfg.nights, durationGroup: cfg.duration,
     flightGroup: cfg.flight, trainGroup: cfg.train, hotelGroup: cfg.hotel,
     transportExtraGroup: cfg.transportExtra, roundTripGroup: cfg.roundTrip,
+    departUntilGroup: !cfg.singleDate,
   };
   for (const [group, visible] of Object.entries(groupVisible)) {
     document.querySelectorAll(`[data-group="${group}"]`).forEach(el => { el.hidden = !visible; });
   }
   document.getElementById('origin').required = cfg.origin;
+  document.getElementById('departUntil').required = !cfg.singleDate;
   updateReturnDateVisibility();
   const isHotelOnly = mode === 'hotel';
   document.getElementById('destinationLabel').textContent = isHotelOnly ? 'Ort' : 'Nach';
-  document.getElementById('departFromLabel').textContent = cfg.hotel && !cfg.origin ? 'Anreise ab' : 'Datum von';
+  document.getElementById('departFromLabel').textContent =
+    cfg.singleDate ? 'Datum' : (cfg.hotel && !cfg.origin ? 'Anreise ab' : 'Datum von');
   document.getElementById('departUntilLabel').textContent = cfg.hotel && !cfg.origin ? 'Anreise bis' : 'Datum bis';
 }
 
@@ -724,7 +731,9 @@ function readRouteFromForm() {
     origin: cfg.origin ? document.getElementById('origin').value.trim() : '',
     destination: document.getElementById('destination').value.trim(),
     departFrom: new Date(document.getElementById('departFrom').value),
-    departUntil: new Date(document.getElementById('departUntil').value),
+    departUntil: cfg.singleDate
+      ? new Date(document.getElementById('departFrom').value)
+      : new Date(document.getElementById('departUntil').value),
     flexBefore: Number(document.getElementById('flexBefore').value || 0),
     flexAfter: Number(document.getElementById('flexAfter').value || 0),
     minNights: Number(document.getElementById('minNights').value || 0),
