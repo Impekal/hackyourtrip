@@ -137,6 +137,28 @@ def test_maps_real_nested_response_shape():
     assert offer.booking_site == "Aviasales (VY1883)"
 
 
+def test_booking_url_is_a_real_working_deep_link_with_return_date():
+    session = FakeSession(get_responses=[FakeResponse(NESTED_SAMPLE_PAYLOAD)])
+    provider = TravelpayoutsFlightProvider(token="tok", session=session)
+    offer = provider.search(make_route())[0]
+    assert offer.url.startswith("https://search.aviasales.com/flights/?")
+    assert "origin_iata=BER" in offer.url
+    assert "destination_iata=BCN" in offer.url
+    assert "depart_date=2026-09-04" in offer.url
+    assert "return_date=2026-09-07" in offer.url  # from return_at in the sample payload
+    assert "one_way=false" in offer.url
+
+
+def test_booking_url_is_one_way_without_return_at():
+    payload = {**SAMPLE_PAYLOAD, "data": {"BCN": {**SAMPLE_PAYLOAD["data"]["BCN"]}}}
+    del payload["data"]["BCN"]["expires_at"]
+    session = FakeSession(get_responses=[FakeResponse(payload)])
+    provider = TravelpayoutsFlightProvider(token="tok", session=session)
+    offer = provider.search(make_route())[0]
+    assert "one_way=true" in offer.url
+    assert "return_date" not in offer.url
+
+
 def test_duration_to_is_used_directly_when_present():
     session = FakeSession(get_responses=[FakeResponse(NESTED_SAMPLE_PAYLOAD)])
     provider = TravelpayoutsFlightProvider(token="tok", session=session)

@@ -45,6 +45,27 @@ from traveldeals.providers.geo import estimate_direct_flight_duration_hours
 SEARCH_URL = "https://api.travelpayouts.com/v1/prices/cheap"
 MAX_DATES_QUERIED = 5
 
+# Documented Aviasales search-results deep link (named query params, not the
+# fragile compact "MOW1502BKK1"-style code some older docs mention):
+# https://support.travelpayouts.com/hc/en-us/articles/5711895629714
+BOOKING_URL = "https://search.aviasales.com/flights/"
+
+
+def _build_booking_url(route: RoutePreference, depart_time: str, return_at: str | None) -> str:
+    params = {
+        "origin_iata": route.origin,
+        "destination_iata": route.destination,
+        "depart_date": depart_time[:10],
+        "adults": "1", "children": "0", "infants": "0", "trip_class": "0",
+        "locale": "de",
+    }
+    if return_at:
+        params["return_date"] = return_at[:10]
+        params["one_way"] = "false"
+    else:
+        params["one_way"] = "true"
+    return BOOKING_URL + "?" + "&".join(f"{k}={v}" for k, v in params.items())
+
 
 def _flatten_offers(data: dict) -> list[dict]:
     offers = []
@@ -123,6 +144,6 @@ class TravelpayoutsFlightProvider(Provider):
             depart_time=depart_time,
             arrive_time=arrive_time,
             duration_hours=duration_hours,
-            url="https://www.aviasales.com",
+            url=_build_booking_url(route, depart_time, raw.get("return_at")),
             stops=stops,
         )

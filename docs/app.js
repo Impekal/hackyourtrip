@@ -350,6 +350,24 @@ function flattenTravelpayoutsOffers(data) {
   return offers;
 }
 
+// Documented Aviasales search-results deep link (named query params, not the
+// fragile compact "MOW1502BKK1"-style code some older docs mention):
+// https://support.travelpayouts.com/hc/en-us/articles/5711895629714
+function buildBookingUrl(route, departIso, returnAt) {
+  const params = new URLSearchParams({
+    origin_iata: route.origin, destination_iata: route.destination,
+    depart_date: departIso.slice(0, 10),
+    adults: '1', children: '0', infants: '0', trip_class: '0', locale: 'de',
+  });
+  if (returnAt) {
+    params.set('return_date', returnAt.slice(0, 10));
+    params.set('one_way', 'false');
+  } else {
+    params.set('one_way', 'true');
+  }
+  return `https://search.aviasales.com/flights/?${params.toString()}`;
+}
+
 function travelpayoutsRawToOffer(raw, currency, route) {
   // Strip a trailing "Z" or "+HH:MM"/"-HH:MM" offset - keeps the naive
   // local-time convention the mock providers use (new Date(y,m,d,h,...)).
@@ -377,6 +395,7 @@ function travelpayoutsRawToOffer(raw, currency, route) {
     price: Number(raw.price), currency, depart, durationHours,
     bagFee: 0, isLowCost: false, stops,
     wifiOnboard: false, powerOutlets: false, legroomCm: null, punctualityPct: null,
+    url: buildBookingUrl(route, departIso, raw.return_at),
   };
 }
 
@@ -628,6 +647,14 @@ async function runSearch(route) {
 function fmtHM(date) { return date.toTimeString().slice(0, 5); }
 function fmtShort(date) { return date.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }) + ' ' + fmtHM(date); }
 
+// Mock offers either have no url at all (JS mocks) or a placeholder
+// "https://example.invalid/..." (Python mocks, fed through data/deals.json) -
+// only render a clickable booking link for a URL that could actually work.
+function bookingSiteHtml(name, url) {
+  const isReal = url && !url.includes('example.invalid');
+  return isReal ? `<a href="${url}" target="_blank" rel="noopener">${name}</a>` : name;
+}
+
 function offerChips(offer) {
   const chips = [];
   if (offer.mode === 'hotel') {
@@ -725,7 +752,7 @@ function renderResults(route, options, usedRealFlightData) {
           <div class="price-row">
             <span class="price mono">${opt.price.toFixed(2)} ${route.currency}</span>
           </div>
-          <span class="subline mono">${opt.mode} · ${fmtShort(opt.offers[0].depart)} · ${opt.durationHours}h · ${opt.offers.map(o => o.bookingSite).join(', ')}</span>
+          <span class="subline mono">${opt.mode} · ${fmtShort(opt.offers[0].depart)} · ${opt.durationHours}h · ${opt.offers.map(o => bookingSiteHtml(o.bookingSite, o.url)).join(', ')}</span>
           <div class="chips">${opt.offers.flatMap(offerChips).map(c => `<span class="chip">${c}</span>`).join('')}</div>
           ${opt.recommendations.length ? `<ul class="recs">${opt.recommendations.map(r => `<li>${r}</li>`).join('')}</ul>` : ''}
         </div>
@@ -835,7 +862,7 @@ async function loadAlerts() {
             ${opt.is_error_fare ? '<span class="badge alert">Fehlerpreis</span>' : ''}
             ${opt.is_price_drop ? '<span class="badge good">Preis gefallen</span>' : ''}
           </div>
-          <span class="subline mono">${opt.mode} · ${opt.total_duration_hours > 0 ? opt.total_duration_hours + 'h' : 'Dauer unbekannt'} · ${opt.booking_sites.join(', ')}</span>
+          <span class="subline mono">${opt.mode} · ${opt.total_duration_hours > 0 ? opt.total_duration_hours + 'h' : 'Dauer unbekannt'} · ${opt.offers.map(o => bookingSiteHtml(o.booking_site, o.url)).join(', ')}</span>
           ${opt.recommendations.length ? `<ul class="recs">${opt.recommendations.map(r => `<li>${r}</li>`).join('')}</ul>` : ''}
         </div>
       `).join('')}
