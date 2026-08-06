@@ -546,6 +546,13 @@ function latestRawToOffer(raw, currency, route) {
   };
 }
 
+// Why the last proxy call failed. Callers keep going on a null, but a
+// silent fallback to example data left users staring at
+// "Beispieldaten - nicht buchbar" with no way to tell whether the route has
+// no fares, the input wasn't understood, or the proxy is simply down. The
+// reason is surfaced in the results header instead of being swallowed.
+let lastProxyError = '';
+
 async function fetchProxyJson(path, params) {
   const url = `${PROXY_URL.replace(/\/$/, '')}/${path}?${params.toString()}`;
   const cacheKey = `hyt:${url}`;
@@ -553,17 +560,70 @@ async function fetchProxyJson(path, params) {
   if (cached) return cached;
   try {
     const resp = await fetch(url);
-    if (!resp.ok) return null;
+    if (!resp.ok) {
+      const detail = await resp.json().then(j => j && j.error).catch(() => null);
+      lastProxyError = detail || `HTTP ${resp.status}`;
+      return null;
+    }
     const payload = await resp.json();
     sessionCacheSet(cacheKey, payload);
     return payload;
   } catch (e) {
+    lastProxyError = 'Proxy nicht erreichbar';
     return null; // this request failed - callers keep going with the rest
+  }
+}
+
+// The price API only knows 2-4 letter airport/city codes, and the proxy
+// rejects anything else outright. Typing "Berlin" and hitting Suchen -
+// instead of picking a suggestion - therefore produced a 400 and a silent
+// fall back to example data, which is exactly what it looked like from the
+// outside: "the flights are still fake". Resolve the free text through the
+// same Places API the autocomplete uses, so typing the city is enough.
+async function resolveAirportCode(term) {
+  const text = (term || '').trim();
+  if (/^[A-Za-z]{2,4}$/.test(text)) return text.toUpperCase(); // already a code
+  if (text.length < 2) return null;
+  const cacheKey = `hyt:code:${text.toLowerCase()}`;
+  const cached = sessionCacheGet(cacheKey);
+  if (cached) return cached;
+  try {
+    const params = new URLSearchParams({ term: text, locale: 'de' });
+    params.append('types[]', 'city');
+    params.append('types[]', 'airport');
+    const resp = await fetch(`${PLACES_API_URL}?${params.toString()}`);
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    // Prefer the city entry: its code covers all airports of that city
+    // ("BER" style metro codes), which is what a user typing a city wants.
+    const ranked = (data || []).slice().sort((a, b) =>
+      (a.type === b.type ? 0 : a.type === 'city' ? -1 : 1) || (b.weight || 0) - (a.weight || 0));
+    const code = ranked.length && ranked[0].code ? String(ranked[0].code).toUpperCase() : null;
+    if (code) sessionCacheSet(cacheKey, code);
+    return code;
+  } catch (e) {
+    return null;
   }
 }
 
 async function fetchRealFlightOffers(route) {
   if (!PROXY_URL) return null; // not configured - caller falls back to mock
+  lastProxyError = '';
+
+  // Whatever stands in the Von/Nach fields has to become an airport code
+  // first; free text is rejected by the price API (see resolveAirportCode).
+  const [origin, destination] = await Promise.all([
+    resolveAirportCode(route.origin),
+    resolveAirportCode(route.destination),
+  ]);
+  if (!origin || !destination) {
+    lastProxyError = `„${origin ? route.destination : route.origin}" nicht als Flughafen/Stadt erkannt`;
+    return null;
+  }
+  // Everything downstream (query + booking links) must use the resolved
+  // codes, not the raw text the user typed.
+  route = { ...route, origin, destination };
+
   const roundTrip = Boolean(route.roundTrip && route.returnDate);
   const wantedDays = new Set(dayCandidates(route).map(isoDay));
   const offers = [];
@@ -947,6 +1007,9 @@ const OR_COMBO_MODES = { train_or_bus: ['train', 'bus'], flight_or_train: ['flig
 async function runSearch(route) {
   const pools = {};
   let usedRealFlightData = false;
+  // Why flights fell back to example data, in the user's words - empty when
+  // they didn't fall back at all.
+  let flightFallbackReason = '';
   async function pool(mode) {
     if (pools[mode]) return pools[mode];
     if (mode === 'flight') {
@@ -955,6 +1018,9 @@ async function runSearch(route) {
         pools[mode] = real;
         usedRealFlightData = true;
       } else {
+        flightFallbackReason = !PROXY_URL
+          ? 'Kein Proxy konfiguriert'
+          : (lastProxyError || 'Für diese Strecke und diesen Zeitraum sind dort keine Preise hinterlegt');
         pools[mode] = mockFlightOffers(route);
       }
     } else if (mode === 'train' || mode === 'bus') {
@@ -1096,7 +1162,7 @@ async function runSearch(route) {
       }
     }
   }
-  return { options: top, usedRealFlightData };
+  return { options: top, usedRealFlightData, flightFallbackReason };
 }
 
 function fmtHM(date) { return date.toTimeString().slice(0, 5); }
@@ -1467,7 +1533,7 @@ function isMockOption(opt) {
   return opt.offers.some(o => o.isMock);
 }
 
-function renderResults(route, options, usedRealFlightData) {
+function renderResults(route, options, usedRealFlightData, flightFallbackReason) {
   const label = route.origin ? `${route.origin} → ${route.destination}` : route.destination;
   const mockCount = options.filter(isMockOption).length;
   const timetableCount = options.filter(o => o.hasUnknownPrice).length;
@@ -1490,10 +1556,17 @@ function renderResults(route, options, usedRealFlightData) {
     return;
   }
 
+  // Naming the reason matters: a flight search that quietly fell back looked
+  // exactly like one that was never meant to be real - the only visible
+  // message was "nicht buchbar", with no hint what to do about it.
+  const flightReasonHtml = flightFallbackReason ? `
+    <br><br><strong>Warum bei Flügen keine echten Preise?</strong> ${flightFallbackReason}.
+    Tipp: Von/Nach aus der Vorschlagsliste auswählen, ein anderes Datum oder mehr Flex-Tage probieren -
+    oder die Strecke unten direkt beim Anbieter prüfen.` : '';
   const warning = mockCount ? `
     <p class="mock-warning">⚠️ <strong>${mockCount} dieser Angebote sind Beispieldaten</strong> - erfundene Preise zum Testen
     der Vergleichslogik, keine buchbaren Verbindungen. Echte Preise gibt es aktuell nur für Flüge.
-    Für Bahn, Bus und Hotel unten direkt beim jeweiligen Anbieter nachsehen.</p>` : '';
+    Für Bahn, Bus und Hotel unten direkt beim jeweiligen Anbieter nachsehen.${flightReasonHtml}</p>` : '';
   const timetableNote = timetableCount ? `
     <p class="timetable-note">🕓 <strong>${timetableCount} echte Verbindungen ohne Preis</strong> - Fahrplandaten von
     <a href="https://transitous.org" target="_blank" rel="noopener">Transitous</a> (offizielle Verkehrsverbund-Feeds,
@@ -1670,8 +1743,8 @@ searchForm.addEventListener('submit', async (ev) => {
   aiBox.hidden = true;
   aiResultEl.hidden = true;
   aiResultEl.textContent = '';
-  const { options, usedRealFlightData } = await runSearch(route);
-  renderResults(route, options, usedRealFlightData);
+  const { options, usedRealFlightData, flightFallbackReason } = await runSearch(route);
+  renderResults(route, options, usedRealFlightData, flightFallbackReason);
   lastSearch = { route, options };
   // Nothing to reason about without results, and no point offering it when
   // there's no proxy to reach Gemini through.

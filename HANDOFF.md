@@ -137,6 +137,21 @@ Ergebnis) fällt alles graceful auf Mock-Daten zurück.
     Sortieren immer hinter allen bepreisten Optionen (sonst stünde eine
     unbekannte Verbindung bei "Preis aufsteigend" ganz oben, als wäre sie
     gratis).
+- **Stiller Rückfall auf Mock-Daten ist selbst ein Fehler.** Wenn eine
+  echte Quelle nichts liefert, springen die Mock-Generatoren ein - das ist
+  richtig, aber der Nutzer sah dann nur "Beispieldaten - nicht buchbar" und
+  konnte nicht unterscheiden zwischen "diese Strecke hat dort keine Preise",
+  "der Ort wurde nicht verstanden" und "der Proxy ist tot". Deshalb hält
+  `lastProxyError` den Grund fest und `flightFallbackReason` wird bis in den
+  Warnkasten durchgereicht. Neue Quellen bitte genauso: Grund nennen, nicht
+  nur zurückfallen.
+- **Freitext im Von/Nach-Feld muss aufgelöst werden.** Die Preis-API kennt
+  nur 2-4-stellige Codes, der Worker lehnt alles andere mit 400 ab. Wer
+  "Berlin" tippt und *nicht* aus der Vorschlagsliste auswählt, bekam damit
+  stumm Beispieldaten - genau das Symptom "die Flüge sind immer noch fake".
+  `resolveAirportCode()` schickt den Freitext durch dieselbe Places-API wie
+  das Autocomplete und bevorzugt den Stadt-Eintrag (Metro-Code deckt alle
+  Flughäfen der Stadt ab).
 - **Anbieter-Links ohne erfundene Query-Parameter.** `PROVIDER_LINKS`
   verlinkt Einstiegsseiten, weil Flixbus/Omio/Trainline interne
   Stations-IDs brauchen, die von hier nicht auflösbar sind. Ausgedachte
