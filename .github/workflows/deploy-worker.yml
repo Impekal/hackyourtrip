@@ -66,6 +66,41 @@ jobs:
           curl -sS "$BASE/latest?origin=BER&destination=BCN&currency=eur&limit=1000&period_type=month&beginning_of_period=$MONTH-01&one_way=true" \
             | python3 -c "import json,sys; d=json.load(sys.stdin); print('offers:', len(d.get('data',[])))"
 
+          # Transitous: real train connections, no key needed. Checked end to
+          # end (geocode -> plan) because this is the only place with
+          # internet access - and because a passthrough that silently returns
+          # nothing would drop the whole Bahn/Bus mode back to example data
+          # without anyone noticing.
+          echo "=== /transit/geocode + /transit/plan ==="
+          python3 - "$BASE" <<'PY'
+          import json, sys, urllib.parse, urllib.request
+
+          base = sys.argv[1]
+
+          def get(path, **params):
+              url = f"{base}{path}?{urllib.parse.urlencode(params)}"
+              with urllib.request.urlopen(url, timeout=45) as resp:
+                  return json.load(resp)
+
+          def stop(text):
+              hits = get("/transit/geocode", text=text, language="de")
+              stops = [h for h in hits if h.get("type") == "STOP" and h.get("id")]
+              print(f"geocode {text!r}: {len(hits)} Treffer, davon {len(stops)} Haltestellen")
+              assert stops, f"keine Haltestelle für {text!r}"
+              return stops[0]
+
+          origin, destination = stop("Berlin Hauptbahnhof"), stop("München Hbf")
+          plan = get("/transit/plan", fromPlace=origin["id"], toPlace=destination["id"],
+                     time="2026-09-15T04:00:00Z", numItineraries=5,
+                     transitModes="HIGHSPEED_RAIL,LONG_DISTANCE,REGIONAL_RAIL,WALK")
+          itineraries = plan.get("itineraries", [])
+          print("Verbindungen:", len(itineraries))
+          assert itineraries, "plan lieferte keine Verbindung"
+          first = itineraries[0]
+          lines = [leg.get("displayName") or leg.get("mode") for leg in first["legs"]]
+          print("erste Verbindung:", first["startTime"], "->", first["endTime"], "|", " -> ".join(lines))
+          PY
+
           # Print the body, not just the status: 501 means "no AI key set"
           # (fine, the feature is optional) but 502 carries the provider's
           # actual reason - which is the only thing that makes it fixable.
