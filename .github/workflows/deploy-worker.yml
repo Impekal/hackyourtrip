@@ -106,6 +106,32 @@ jobs:
           print("erste Verbindung:", first["startTime"], "->", first["endTime"], "|", " -> ".join(lines))
           PY
 
+          # Ryanair: real bookable fares, no key. Same reason as the transit
+          # check - this is the only place with internet access, and a broken
+          # passthrough would silently cost the one source that returns live
+          # airline prices.
+          echo "=== /ryanair/oneWayFares ==="
+          python3 - "$BASE" <<'PY'
+          import json, sys, urllib.parse, urllib.request
+
+          base = sys.argv[1]
+          q = urllib.parse.urlencode({
+              "departureAirportIataCode": "BER", "arrivalAirportIataCode": "BCN",
+              "outboundDepartureDateFrom": "2026-09-01",
+              "outboundDepartureDateTo": "2026-09-30",
+              "currency": "EUR", "language": "de", "market": "de-de", "limit": 50,
+          })
+          req = urllib.request.Request(f"{base}/ryanair/oneWayFares?{q}",
+                                       headers={"User-Agent": "HackYourTrip-SmokeTest/1.0"})
+          with urllib.request.urlopen(req, timeout=45) as resp:
+              fares = json.load(resp).get("fares") or []
+          print("Fares:", len(fares))
+          assert fares, "Ryanair lieferte keine Preise für BER->BCN"
+          first = fares[0]["outbound"]
+          print("billigster:", first["flightNumber"], first["departureDate"],
+                first["price"]["value"], first["price"]["currencyCode"])
+          PY
+
           # Print the body, not just the status: 501 means "no AI key set"
           # (fine, the feature is optional) but 502 carries the provider's
           # actual reason - which is the only thing that makes it fixable.
