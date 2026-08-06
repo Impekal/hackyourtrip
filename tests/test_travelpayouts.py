@@ -273,3 +273,18 @@ def test_request_exception_on_one_endpoint_does_not_crash_whole_search():
     offers = provider.search(make_route())
     assert len(offers) == 1
     assert offers[0].booking_site == "Kiwi.com"
+
+
+def test_low_cost_carrier_is_detected_from_airline_code():
+    # The API only returns an airline code; without the lookup table every
+    # real offer would count as non-low-cost and a "only low-cost" search
+    # would silently match nothing.
+    session = FakeSession(get_responses=[FakeResponse(payload(_raw(airline="FR")))])   # Ryanair
+    provider = TravelpayoutsFlightProvider(token="tok", session=session)
+    assert provider.search(make_route())[0].is_low_cost is True
+
+
+def test_full_service_carrier_is_not_low_cost():
+    session = FakeSession(get_responses=[FakeResponse(payload(_raw(airline="LH")))])   # Lufthansa
+    provider = TravelpayoutsFlightProvider(token="tok", session=session)
+    assert provider.search(make_route())[0].is_low_cost is False

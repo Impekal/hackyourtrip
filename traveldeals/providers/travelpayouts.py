@@ -51,6 +51,21 @@ from traveldeals.models import Mode, Offer, RoutePreference
 from traveldeals.providers.base import Provider, date_candidates
 from traveldeals.providers.geo import estimate_direct_flight_duration_hours
 
+# IATA codes of low-cost carriers. The price API only returns an airline
+# code, so without this table every real offer would count as non-low-cost
+# and a "only low-cost" search would silently match nothing. Mirrored in
+# docs/app.js (LOW_COST_CARRIERS).
+LOW_COST_CARRIERS = {
+    # Europe
+    "FR", "RK", "U2", "EZY", "EC", "W6", "W9", "W4", "VY", "PC", "DE", "HV",
+    "TO", "X3", "EW", "0B", "BY", "LS", "DY", "D8", "IW", "V7", "ZB", "FH",
+    # Middle East / Asia
+    "G9", "E5", "XY", "J9", "FZ", "6E", "SG", "IX", "AK", "FD", "D7", "TR",
+    "JQ", "3K", "GK", "MM", "ZG", "VJ", "VZ", "5J", "Z2",
+    # Americas
+    "WN", "NK", "F9", "G4", "Y4", "VB", "H2", "P5", "G3",
+}
+
 SEARCH_URL = "https://api.travelpayouts.com/aviasales/v3/prices_for_dates"
 LATEST_URL = "https://api.travelpayouts.com/v2/prices/latest"
 
@@ -247,5 +262,6 @@ class TravelpayoutsFlightProvider(Provider):
             # only fall back to the generic search URL if it's missing.
             url=(AVIASALES_BASE + link) if link else _build_booking_url(route, depart_time, return_at),
             stops=stops,
+            is_low_cost=str(raw.get("airline", "")).upper() in LOW_COST_CARRIERS,
             return_depart_time=return_at[:19] if return_at else None,
         )

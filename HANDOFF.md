@@ -336,6 +336,34 @@ Live-GDS-Suche ist mit kostenlosen Zugängen nicht erreichbar - das gehört
 bei Rückfragen ehrlich gesagt, statt es durch weitere Tricks zu
 suggerieren.
 
+## Recherche: kostenlose APIs ohne Anmeldung (06.08.2026, live geprüft)
+
+Ergebnis der Suche nach Ersatz für die erfundenen Bahn-/Bus-/Hotel-Preise -
+damit das nicht jede Session neu geprüft wird:
+
+| Quelle | Ergebnis |
+|---|---|
+| `v6.db.transport.rest`, `v5.db.transport.rest` | HTTP 503, Dienst nicht verfügbar |
+| `flixbus.transport.rest`, `v1.flixbus...` | NXDOMAIN, existiert nicht |
+| `vendo-prof-db.dbrail.de` | NXDOMAIN |
+| **`api.transitous.org` (MOTIS)** | **funktioniert ohne Key**: `/api/v1/geocode` + `/api/v1/plan` liefern echte Verbindungen (~150 KB Antwort für Berlin->München). Aber `debugOutput.fares: 0` - **keine Preise** |
+| `v6.vbb` / `v6.bvg.transport.rest` | 200, nur Berlin/Brandenburg-Nahverkehr |
+| OpenTripMap | 401, Key nötig |
+| Nominatim | 200, aber reiner Geocoder ohne Preise |
+
+**Fazit:** Preise für Bahn/Bus/Hotel sind kostenlos und ohne Anmeldung nicht
+zu bekommen. Fahrpläne schon - über Transitous.
+
+**Konkreter nächster Schritt, falls jemand daran weiterarbeitet:** einen
+`TransitousTrainProvider` bauen, der echte Verbindungen (Linien wie ICE 599,
+Abfahrt/Ankunft, Umstiege) liefert und **bewusst gar keinen Preis setzt**,
+statt einen zu erfinden. Die Offer-Darstellung kann Preise bereits als
+unbekannt behandeln (`duration_hours = 0.0` wird analog gehandhabt). Das
+ersetzt erfundene Züge durch echte Züge ohne Preis - deutlich besser als der
+Status quo, und ohne die Regel zu brechen, nichts zu erfinden.
+DB-Wrapper regelmässig neu prüfen: kämen sie zurück, gäbe es dort sogar
+Sparpreise.
+
 ## Roadmap-Ideen (nicht in Arbeit, nur notiert)
 
 - Bahn/Bus durch echte APIs ersetzen (DB/HAFAS, FlixBus) - aktuell immer

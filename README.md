@@ -11,6 +11,23 @@ auf einem Dashboard die besten aktuellen Optionen pro Strecke zeigt.
 > | **Flug** | **echte Preise** (Travelpayouts/Aviasales), sobald ein Token gesetzt ist |
 > | **Bahn, Bus, Hotel** | **erfundene Beispieldaten** - keine buchbaren Angebote |
 >
+> **Belegt, nicht vermutet** (Stand 06.08.2026, gegen die Live-Endpunkte
+> geprüft): Für Bahn/Bus/Hotel-*Preise* gibt es keine kostenlose Quelle ohne
+> Anmeldung.
+>
+> | Quelle | Ergebnis |
+> |---|---|
+> | `v6.db.transport.rest` (DB-Wrapper) | **HTTP 503** – Dienst nicht verfügbar |
+> | `v5.db.transport.rest` | HTTP 503 |
+> | `flixbus.transport.rest` | Domain existiert nicht |
+> | **`api.transitous.org`** (MOTIS) | **funktioniert** – echte Verbindungen/Zeiten, aber `fares: 0`, also **keine Preise** |
+> | `v6.vbb` / `v6.bvg.transport.rest` | 200, aber nur Berliner Nahverkehr |
+> | OpenTripMap (Hotels) | 401 – Schlüssel erforderlich |
+>
+> Nutzbar wäre also **Transitous für echte Fahrpläne** (ICE/TGV-Verbindungen,
+> Abfahrtszeiten, Umstiege) – Preise müssten weiterhin beim Anbieter geprüft
+> werden. Siehe Roadmap.
+>
 > Für Bahn, Bus und Hotel existiert keine frei nutzbare Preis-API. Diese
 > Modi laufen auf generierten Zufallspreisen, mit denen die Vergleichs- und
 > Ranking-Logik getestet wird. **Solche Angebote lassen sich nirgends

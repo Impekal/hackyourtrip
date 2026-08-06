@@ -58,6 +58,9 @@ function applyModeVisibility(mode) {
     originGroup: cfg.origin, nightsGroup: cfg.nights, durationGroup: cfg.duration,
     flightGroup: cfg.flight, trainGroup: cfg.train, hotelGroup: cfg.hotel,
     transportExtraGroup: cfg.transportExtra, roundTripGroup: cfg.roundTrip,
+    // Only flight offers carry a low-cost flag, so the selector would
+    // guarantee zero results on train/bus/hotel tabs.
+    lowCostGroup: cfg.flight,
     departUntilGroup: !cfg.singleDate,
   };
   for (const [group, visible] of Object.entries(groupVisible)) {
@@ -179,6 +182,21 @@ const BOOKING_SITES = {
   bus: ['Beispiel-Busanbieter A', 'Beispiel-Busanbieter B'],
   hotel: ['Beispiel-Hotelportal A', 'Beispiel-Hotelportal B'],
 };
+// IATA codes of low-cost carriers. Needed because the real price API only
+// returns an airline code - without this table every real offer would count
+// as non-low-cost and "Nur Low-Cost" would silently match nothing.
+// Mirrored in traveldeals/providers/travelpayouts.py.
+const LOW_COST_CARRIERS = new Set([
+  // Europa
+  'FR', 'RK', 'U2', 'EZY', 'EC', 'W6', 'W9', 'W4', 'VY', 'PC', 'DE', 'HV',
+  'TO', 'X3', 'EW', '0B', 'BY', 'LS', 'DY', 'D8', 'IW', 'V7', 'ZB', 'FH',
+  // Naher Osten / Asien
+  'G9', 'E5', 'XY', 'J9', 'FZ', '6E', 'SG', 'IX', 'AK', 'FD', 'D7', 'TR',
+  'JQ', '3K', 'GK', 'MM', 'ZG', 'VJ', 'VZ', '5J', 'Z2',
+  // Amerika
+  'WN', 'NK', 'F9', 'G4', 'Y4', 'VB', 'H2', 'P5', 'G3',
+]);
+
 const BAHNCARD_DISCOUNT = { '25': 0.25, '50': 0.5, '100': 1.0, '': 0.0 };
 const LEGROOM_RANGE = { flight: [66, 96], train: [85, 120], bus: [70, 100] };
 
@@ -501,7 +519,7 @@ function travelpayoutsRawToOffer(raw, currency, route) {
     // "Aviasales" label.
     bookingSite: `${raw.gate || 'Aviasales'} (${raw.airline ?? '?'}${raw.flight_number ?? ''})`,
     price: Number(raw.price), currency, depart, durationHours,
-    bagFee: 0, isLowCost: false, stops,
+    bagFee: 0, isLowCost: LOW_COST_CARRIERS.has((raw.airline || '').toUpperCase()), stops,
     wifiOnboard: false, powerOutlets: false, legroomCm: null, punctualityPct: null,
     // The per-itinerary link goes straight to this exact flight; only fall
     // back to the generic search URL when it's missing.
