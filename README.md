@@ -234,6 +234,16 @@ auf einem Dashboard die besten aktuellen Optionen pro Strecke zeigt.
   bei „Dauer", denn die Dauer, die sie mitbringen, ist echt.
 - **Maximale Reisezeit gilt pro Strecke,** nicht für die Summe: 5h hin und 5h
   zurück ist keine „10h-Reise", die ein 8h-Limit ausblenden dürfte.
+- **Freigepäck im Angebot** (🎒 Handgepäck 8 kg inkl. / 🧳 Koffer 23 kg inkl.,
+  beides nebeneinander wenn beides im Preis ist): Zwei Flüge zu 45 € und 39 €
+  sind nicht vergleichbar, wenn beim einen der Koffer 45 € extra kostet.
+  **Wichtig - und die Einschränkung gehört dazu:** ein Chip erscheint nur,
+  wenn es dazu etwas zu belegen gibt. Nennt eine Tarif-Angabe nur Maße statt
+  Kilo (Ryanair: kleine Tasche unter dem Sitz), steht das Maß da, keine
+  erfundene Kilo-Zahl. Und sagt eine Quelle zum Gepäck gar nichts, steht
+  **gar kein Chip** - "keine Angabe" ist nicht dasselbe wie "nicht
+  enthalten", und eine geratene Zahl wäre derselbe Fehler wie ein geratener
+  Preis. Jede Angabe trägt ihre Herkunft (`baggage_source`).
 - **Deals-Filter:** entweder alle Angebote oder nur die, die wirklich nach
   einem Deal aussehen (`deals_only`). Als Deal gilt: von der Preishistorie
   als Preisverfall/Fehlerpreis markiert - oder, solange keine Historie

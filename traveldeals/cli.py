@@ -122,6 +122,11 @@ def _option_to_dict(option: TripOption) -> dict:
                 "arrive_time": o.arrive_time, "duration_hours": o.duration_hours, "url": o.url,
                 "return_depart_time": o.return_depart_time,
                 "price_known": o.price_known, "line_label": o.line_label,
+                "included_carry_on_kg": o.included_carry_on_kg,
+                "included_carry_on_note": o.included_carry_on_note,
+                "included_checked_bags": o.included_checked_bags,
+                "included_checked_bag_kg": o.included_checked_bag_kg,
+                "baggage_source": o.baggage_source,
             }
             for o in option.offers
         ],

@@ -4,7 +4,7 @@
 // guessing: if this doesn't match, the browser is running a cached old
 // app.js and any "the fix didn't work" report is about the old file. Bump
 // together with the ?v= in index.html.
-const BUILD_STAMP = '2026-08-06-14';
+const BUILD_STAMP = '2026-08-06-15';
 document.getElementById('buildStamp').textContent = BUILD_STAMP;
 
 /* =========================================================================
@@ -299,7 +299,13 @@ function mockFlightOffers(route) {
       offers.push({
         mode: 'flight', isMock: true, bookingSite: rngChoice(rng, BOOKING_SITES.flight),
         price: finalPrice, currency: route.currency, depart, durationHours: duration,
-        bagFee, isLowCost, returnDepart, ...transportComfortFields(rng, 'flight', [0.55, 0.35, 0.10]),
+        bagFee, isLowCost, returnDepart,
+        // Beispieldaten, wie alles hier: Billigflieger nur Handgepäck,
+        // Linienflug zusätzlich ein Koffer. Die Zeile trägt ohnehin das
+        // "Beispieldaten"-Abzeichen.
+        includedCarryOnKg: 8, includedCheckedBags: isLowCost ? 0 : 1,
+        includedCheckedBagKg: isLowCost ? null : 23, baggageSource: 'Beispieldaten',
+        ...transportComfortFields(rng, 'flight', [0.55, 0.35, 0.10]),
       });
     }
   }
@@ -1952,12 +1958,54 @@ function offerChips(offer) {
     }
   } else if (['flight', 'train', 'bus'].includes(offer.mode)) {
     chips.push(offer.stops === 0 ? 'Direkt' : `${offer.stops}x Umstieg`);
+    chips.push(...baggageChips(offer));
     if (offer.punctualityPct != null) chips.push(`${offer.punctualityPct}% pünktlich`);
     if (offer.legroomCm != null) chips.push(`${offer.legroomCm}cm Beinfreiheit`);
     if (offer.wifiOnboard) chips.push('WLAN an Bord');
     if (offer.powerOutlets) chips.push('Steckdosen');
   }
   return chips;
+}
+
+// Was im Preis an Gepäck drin ist - Symbol plus Gewicht, je einmal für
+// Handgepäck und Koffer, beide zusammen wenn beides inklusive ist.
+//
+// Bewusst nur, wo es etwas zu belegen gibt: die meisten Preisquellen sagen
+// zum Gepäck gar nichts, und "keine Angabe" ist nicht dasselbe wie "nicht
+// enthalten". Ein erfundenes "🎒 8 kg" wäre genau der Fehler, den dieses
+// Projekt schon zweimal gemacht hat - also erscheint dann gar kein Chip.
+function baggageChips(offer) {
+  const chips = [];
+  if (offer.includedCarryOnKg != null) {
+    chips.push(`🎒 Handgepäck ${fmtKg(offer.includedCarryOnKg)} inkl.`);
+  } else if (offer.includedCarryOnNote) {
+    // Manche Tarife nennen nur Maße statt Gewicht (Ryanair: kleine Tasche
+    // unter dem Sitz). Dann steht das Maß da, keine erfundenen Kilo.
+    chips.push(`🎒 Handgepäck ${offer.includedCarryOnNote} inkl.`);
+  }
+  if (offer.includedCheckedBags > 0) {
+    const count = offer.includedCheckedBags > 1 ? `${offer.includedCheckedBags}x ` : '';
+    const kg = offer.includedCheckedBagKg != null ? ` ${fmtKg(offer.includedCheckedBagKg)}` : '';
+    chips.push(`🧳 ${count}Koffer${kg} inkl.`);
+  }
+  return chips;
+}
+
+// "7 kg", nicht "7.0 kg" - und 22,5 kg bleibt 22,5 kg.
+function fmtKg(kg) {
+  return `${Number.isInteger(kg) ? kg : round1(kg)} kg`;
+}
+
+// deals.json (vom Python-Cronjob) benutzt snake_case. Umschluesseln statt
+// die Chip-Logik ein zweites Mal zu schreiben - zwei Kopien laufen
+// garantiert auseinander.
+function baggageChipsFromJson(offer) {
+  return baggageChips({
+    includedCarryOnKg: offer.included_carry_on_kg,
+    includedCarryOnNote: offer.included_carry_on_note,
+    includedCheckedBags: offer.included_checked_bags,
+    includedCheckedBagKg: offer.included_checked_bag_kg,
+  });
 }
 
 /* =========================================================================
@@ -2802,6 +2850,10 @@ async function loadAlerts() {
             ${opt.is_price_drop ? '<span class="badge good">Preis gefallen</span>' : ''}
           </div>
           <span class="subline mono">${opt.mode}${line ? ` · ${line}` : ''} · ${opt.total_duration_hours > 0 ? opt.total_duration_hours + 'h' : 'Dauer unbekannt'}${opt.offers[0].return_depart_time ? ` · zurück ${opt.offers[0].return_depart_time.slice(0, 16).replace('T', ' ')}` : ''} · ${opt.offers.map(o => bookingSiteHtml(o.booking_site, o.url)).join(', ')}</span>
+          ${(() => {
+            const bags = opt.offers.flatMap(baggageChipsFromJson);
+            return bags.length ? `<div class="chips">${bags.map(c => `<span class="chip">${c}</span>`).join('')}</div>` : '';
+          })()}
           ${opt.recommendations.length ? `<ul class="recs">${opt.recommendations.map(r => `<li>${r}</li>`).join('')}</ul>` : ''}
         </div>`;
       }).join('')}

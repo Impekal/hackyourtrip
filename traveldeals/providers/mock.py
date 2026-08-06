@@ -107,6 +107,14 @@ class MockFlightProvider(Provider):
                     url="https://example.invalid/flight",
                     checked_bag_fee=checked_bag_fee,
                     is_low_cost=is_low_cost,
+                    # Beispieldaten, wie alles hier: der Billigflieger hat
+                    # nur Handgepaeck im Preis, der Linienflug einen Koffer
+                    # dazu. Die Zeile traegt ohnehin das
+                    # "Beispieldaten"-Abzeichen.
+                    included_carry_on_kg=8.0,
+                    included_checked_bags=0 if is_low_cost else 1,
+                    included_checked_bag_kg=None if is_low_cost else 23.0,
+                    baggage_source="Beispieldaten",
                     return_depart_time=return_depart_time,
                     **_transport_comfort_fields(rnd, self.mode, [0.55, 0.35, 0.10]),
                 ))

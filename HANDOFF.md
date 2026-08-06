@@ -167,6 +167,21 @@ Ergebnis) fällt alles graceful auf Mock-Daten zurück.
   Spiegelbild im JS: `flixbusCityQueries` / `flixbusPickCity`. Test-Fixtures
   muessen seitdem auf die Anfrage antworten - eine feste Trefferliste faellt
   zu Recht durch.
+- **Freigepaeck ist Angebots-, keine Suchangabe.** `Offer.included_carry_on_kg`
+  / `included_checked_bags` / `included_checked_bag_kg` (+ `baggage_source`)
+  sagen, was der *Tarif* enthaelt - `RoutePreference.baggage` sagt, was der
+  Reisende *mitnehmen will*. Zwei verschiedene Dinge, nicht vermischen.
+  `None` heisst **"keine Angabe"** und ist nicht "nicht enthalten": die
+  meisten Preisquellen schweigen zum Gepaeck, und dann erzeugt
+  `baggageChips()` bewusst gar keinen Chip. Wer hier eine Default-Zahl
+  einsetzt, wiederholt den Fake-Preis-Fehler in neuer Form. Gefuellt wird
+  nur, wo es eine Quelle gibt: ein API-Feld oder die veroeffentlichten
+  Tarifbedingungen des Anbieters - und die gehoeren dann in
+  `baggage_source`, damit eine veraltete Zahl nachvollziehbar bleibt.
+  **Offen:** die echten Quellen sind noch nicht gefuellt - der Wegwerf-Workflow
+  `.github/workflows/probe-baggage.yml` sollte klaeren, ob Ryanair/FlixBus/
+  Skiplagged ueberhaupt ein Gepaeck-Feld liefern, blieb aber in der
+  Actions-Warteschlange haengen. Erst danach befuellen, nicht vorher raten.
 - **Beispieldaten sind Opt-in (`route.showMockData`), Voreinstellung aus.**
   Vorher füllten die Mock-Generatoren jede Lücke, und eine Suche ohne echte
   Treffer zeigte drei erfundene Preise statt einer ehrlichen Leermeldung -

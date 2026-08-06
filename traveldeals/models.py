@@ -228,6 +228,22 @@ class Offer:
     # both legs, and this is the return leg's departure time.
     return_depart_time: Optional[str] = None
 
+    # What the fare *includes* in baggage. None = "not known", which is not
+    # the same as "not included" and must not be rendered as either: most
+    # price sources say nothing about baggage at all. Only set these where
+    # there is something to point at - an API field, or the carrier's own
+    # published fare rules (then name it in `baggage_source`).
+    included_carry_on_kg: Optional[float] = None
+    # For allowances published as dimensions without a weight (Ryanair's
+    # small under-seat bag) - shown instead of a kilo figure.
+    included_carry_on_note: str = ""
+    included_checked_bags: int = 0
+    included_checked_bag_kg: Optional[float] = None
+    # Where the two above come from, e.g. "FlixBus-Beförderungsbedingungen,
+    # Stand 08/2026". Shown in the UI so a stale figure is traceable rather
+    # than anonymous.
+    baggage_source: str = ""
+
     # transport comfort
     stops: int = 0
     wifi_onboard: bool = False
