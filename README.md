@@ -200,8 +200,10 @@ auf einem Dashboard die besten aktuellen Optionen pro Strecke zeigt.
   client-seitiges Aufsummieren nötig); die Mock-Provider bilden das mit einer
   synthetisierten Rückreise nach demselben Prinzip nach. Reine Hotel-Modi
   brauchen das nicht (Checkin+Nächte bilden die Aufenthaltsdauer schon ab).
-- **Drei Ergebnis-Abschnitte bei Hin+Rück:** „Nur Hinfahrt", „Nur Rückfahrt"
-  und „Hin + Zurück" - jeder mit eigener Liste und eigener Sortierung. Die
+- **Drei Ergebnis-Tabs bei Hin+Rück:** „Nur Hinfahrt", „Nur Rückfahrt"
+  und „Hin + Zurück" - jeder mit eigener Liste und eigener Sortierung, als
+  echte Reiterleiste über den Ergebnissen (`role="tablist"`, Pfeiltasten/Pos1/
+  Ende, Roving-Tabindex, Ergebnisliste als zugehöriges `tabpanel`). Die
   Kombi-Liste enthält beides nebeneinander: echte Hin-/Rückflug-Tickets (ein
   Preis, ein Ticket) und aus zwei Einzelfahrten zusammengesetzte Reisen.
   Genau daran hängt der Spareffekt - zwei getrennt gebuchte Einzelfahrten

@@ -4,7 +4,7 @@
 // guessing: if this doesn't match, the browser is running a cached old
 // app.js and any "the fix didn't work" report is about the old file. Bump
 // together with the ?v= in index.html.
-const BUILD_STAMP = '2026-08-06-11';
+const BUILD_STAMP = '2026-08-06-12';
 document.getElementById('buildStamp').textContent = BUILD_STAMP;
 
 /* =========================================================================
@@ -2241,13 +2241,21 @@ function renderResults(route, result) {
     dealsHtml: null,
   };
 
+  // Real tabs, not just buttons: the list below is their panel, so it gets
+  // the tabpanel role and the arrow keys move between them (see below).
   const multi = result.sections.length > 1;
   legTabsEl.hidden = !multi;
-  legTabsEl.innerHTML = !multi ? '' : result.sections.map(s => `
-    <button type="button" class="legtab${s.id === shownSearch.sectionId ? ' active' : ''}"
-            role="tab" data-section="${s.id}" aria-selected="${s.id === shownSearch.sectionId}">
+  legTabsEl.innerHTML = !multi ? '' : result.sections.map(s => {
+    const on = s.id === shownSearch.sectionId;
+    return `
+    <button type="button" class="legtab${on ? ' active' : ''}" role="tab"
+            id="legtab-${s.id}" data-section="${s.id}" aria-selected="${on}"
+            aria-controls="searchResults" tabindex="${on ? '0' : '-1'}">
       ${s.label} <span class="count">(${s.candidates.length})</span>
-    </button>`).join('');
+    </button>`;
+  }).join('');
+  if (multi) searchResultsEl.setAttribute('role', 'tabpanel');
+  else searchResultsEl.removeAttribute('role');
   // Nothing found anywhere: a sort control over an empty list is noise.
   resultControlsEl.hidden = !result.sections.some(s => s.candidates.length);
   return renderActiveSection();
@@ -2260,7 +2268,11 @@ function renderActiveSection() {
     const on = btn.dataset.section === section.id;
     btn.classList.toggle('active', on);
     btn.setAttribute('aria-selected', String(on));
+    // Roving tabindex: Tab jumps into the tab strip once, then the arrow
+    // keys move within it - the usual behaviour for a tablist.
+    btn.tabIndex = on ? 0 : -1;
   }
+  searchResultsEl.setAttribute('aria-labelledby', `legtab-${section.id}`);
   const options = sortCandidates(section.candidates, sortByEl.value).slice(0, MAX_RESULTS_SHOWN);
   // Keep the "dauerhaft überwachen"-snippet describing the ranking the user
   // is actually looking at.
@@ -2410,11 +2422,29 @@ async function renderDealsInto(route) {
 // Sorting and section switching redraw the list from the candidates already
 // in memory - no provider is asked anything a second time.
 sortByEl.addEventListener('change', () => { if (shownSearch) renderActiveSection(); });
+function selectSection(id) {
+  if (!shownSearch || shownSearch.sectionId === id) return;
+  shownSearch.sectionId = id;
+  renderActiveSection();
+}
 legTabsEl.addEventListener('click', (ev) => {
   const btn = ev.target.closest('.legtab');
-  if (!btn || !shownSearch) return;
-  shownSearch.sectionId = btn.dataset.section;
-  renderActiveSection();
+  if (btn) selectSection(btn.dataset.section);
+});
+// Pfeiltasten/Pos1/Ende innerhalb der Reiterleiste - ohne das ist eine
+// role="tablist" nur behauptet, nicht eingelöst.
+legTabsEl.addEventListener('keydown', (ev) => {
+  const step = { ArrowLeft: -1, ArrowRight: 1, Home: 'first', End: 'last' }[ev.key];
+  if (!step || !shownSearch) return;
+  const tabs = [...legTabsEl.querySelectorAll('.legtab')];
+  const at = tabs.findIndex(t => t.dataset.section === shownSearch.sectionId);
+  const next = step === 'first' ? 0
+             : step === 'last' ? tabs.length - 1
+             : (at + step + tabs.length) % tabs.length;
+  if (!tabs[next]) return;
+  ev.preventDefault();
+  selectSection(tabs[next].dataset.section);
+  tabs[next].focus();
 });
 
 /* =========================================================================

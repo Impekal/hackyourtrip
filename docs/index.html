@@ -75,23 +75,26 @@
   .modetab.active { color: var(--bg); background: var(--accent-dim); border-color: var(--accent-dim); }
   .modetab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-  /* Ergebnis-Ansicht: Abschnittsreiter links, Sortierung rechts. Beides
-     wirkt rein auf die schon geladenen Angebote - keine neue Suche. */
+  /* Ergebnis-Ansicht: Hin/Rück/Kombi als echte Reiterleiste (gleiche Optik
+     wie .maintabs oben), Sortierung rechts auf derselben Linie. Beides wirkt
+     rein auf die schon geladenen Angebote - keine neue Suche. */
   .result-controls {
     display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between;
-    gap: 0.75rem; margin-bottom: 0.9rem;
+    gap: 0.5rem 1rem; margin-bottom: 0.9rem; border-bottom: 1px solid var(--line);
   }
-  .legtabs { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+  .legtabs { display: flex; flex-wrap: wrap; gap: 0 1.4rem; }
   .legtab {
-    appearance: none; cursor: pointer; font: inherit; font-size: 0.8rem; font-weight: 600;
-    color: var(--text-dim); background: var(--card); border: 1px solid var(--line);
-    border-radius: 999px; padding: 0.35rem 0.8rem;
+    appearance: none; border: none; background: none; cursor: pointer;
+    font: inherit; font-weight: 600; font-size: 0.85rem; color: var(--text-dim);
+    padding: 0.5rem 0.1rem; border-bottom: 2px solid transparent; margin-bottom: -1px;
   }
-  .legtab.active { color: var(--bg); background: var(--accent-dim); border-color: var(--accent-dim); }
+  .legtab:hover { color: var(--text); }
+  .legtab.active { color: var(--text); border-color: var(--accent); }
   .legtab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-  .legtab .count { font-weight: 500; opacity: 0.75; }
-  .sort-field { display: flex; flex-direction: column; gap: 0.3rem; margin-left: auto; }
-  .sort-field select { font-size: 0.85rem; }
+  .legtab .count { font-weight: 500; opacity: 0.7; }
+  .sort-field { display: flex; align-items: center; gap: 0.5rem; margin: 0 0 0.4rem auto; }
+  .sort-field label { white-space: nowrap; }
+  .sort-field select { font-size: 0.85rem; padding: 0.3rem 0.5rem; }
   .section-note { color: var(--text-dim); font-size: 0.82rem; margin: 0 0 0.8rem; }
 
   form.search { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 1.25rem; margin-bottom: 1.5rem; }
@@ -619,6 +622,6 @@
 <!-- The ?v= is deliberate: GitHub Pages lets browsers cache app.js, so a
      fix could ship and the visitor would keep running the old file. Bump
      this whenever app.js changes in a way users need to see. -->
-<script src="./app.js?v=2026-08-06-11"></script>
+<script src="./app.js?v=2026-08-06-12"></script>
 </body>
 </html>
