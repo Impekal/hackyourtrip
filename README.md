@@ -170,11 +170,23 @@ auf einem Dashboard die besten aktuellen Optionen pro Strecke zeigt.
   zirkulär über Mitternacht hinweg berechnet. Angebote außerhalb des
   Fensters werden herausgefiltert - auch die "später fahren spart X€"-
   Empfehlung schlägt nie eine Zeit außerhalb dieses Fensters vor.
-- **Flughäfen im Umkreis** (`nearby_km`): Hamburg→Lyon hat kaum Preise,
-  Bremen→Genf schon. Auf Wunsch werden Nachbarflughäfen bis 100/150/250 km
-  mitgesucht, und jedes Angebot von dort trägt sichtbar „ab BRE · +103 km
-  Anfahrt". Ob ein Umweg das wert ist, entscheidet niemand außer dir - genau
-  deshalb wird er angezeigt statt eingerechnet.
+- **Umkreis Start/Ziel** (`nearby_km`): Hamburg→Lyon hat kaum Preise,
+  Bremen→Genf schon. Auf Wunsch werden Nachbar-**Flughäfen und -Bahnhöfe**
+  bis 100/150/250 km mitgesucht, und jedes Angebot von dort trägt sichtbar
+  „ab BRE · +103 km Anfahrt". Ob ein Umweg das wert ist, entscheidet niemand
+  außer dir - genau deshalb wird er angezeigt statt eingerechnet.
+  Für Bahnhöfe gibt es **keine** Koordinatentabelle im Code: jeder Kandidat
+  wird über Transitous aufgelöst, das die echte Haltestelle mit echten
+  Koordinaten liefert. Eine aus Flughafenpositionen gebastelte Tabelle würde
+  den angezeigten Umweg um zig Kilometer danebenlegen.
+- **Hin/Zurück frei kombinieren** (Modus `mixed_return`): Hinweg und Rückweg
+  werden unabhängig gewählt, quer über Flug, Bahn und Bus - „hin fliegen,
+  zurück Bus". Kein Portal bietet das, weil jedes nur einen Modus verkauft.
+- **Deals und Fehlerpreise**: unter den Ergebnissen erscheinen passende
+  Beiträge aus den RSS-Feeds von Urlaubspiraten, Travelfree und Fly4free -
+  das, was keine Preis-API beantworten kann. Bewusst als Links, nicht als
+  Angebote mit Preis: „Mallorca ab 39 EUR" ist eine Anzeige, keine buchbare
+  Verbindung für deine Daten.
 - **Von/Nach-Autocomplete:** Stadt eintippen, passenden Flughafen/Bahnhof
   auswählen - wie auf gängigen Reiseplattformen. Flug/Hotel nutzen die
   echte, öffentliche Travelpayouts-Places-API (`autocomplete.travelpayouts.com`,

@@ -254,3 +254,68 @@ class TransitousTrainProvider(TransitousProvider):
 
 class TransitousBusProvider(TransitousProvider):
     mode = Mode.BUS
+
+
+def nearby_stations(resolver, name: str, radius_km: float, limit: int = 2) -> list[tuple[str, int]]:
+    """Stations within `radius_km` of `name`, nearest first.
+
+    Unlike airports there is no static table of station coordinates here, and
+    inventing one would make the detour shown to the user wrong by however
+    far a city's station sits from its airport. So the airport table is used
+    only as a grid of major cities to *propose* candidates; each candidate is
+    resolved through Transitous, which returns the real stop with real
+    coordinates, and the distance is measured from those.
+
+    `resolver` is anything with a `_resolve_stop(name)` - normally a
+    TransitousProvider, injectable for tests.
+    """
+    from traveldeals.providers.geo import AIRPORT_COORDS, _haversine_km
+
+    origin = resolver._resolve_stop(name)
+    if not origin or origin.get("lat") is None or radius_km <= 0:
+        return []
+
+    from traveldeals.providers.geo import AIRPORT_COORDS as grid
+    candidates = []
+    for code, coords in grid.items():
+        city = AIRPORT_CITY_NAMES.get(code)
+        if not city:
+            continue
+        # Generous pre-filter: a station can sit tens of km from its city's
+        # airport, so cut precisely later on the real coordinates.
+        rough = _haversine_km(origin["lat"], origin["lon"], *coords)
+        if rough <= radius_km + 60:
+            candidates.append((city, rough))
+    candidates.sort(key=lambda pair: pair[1])
+
+    found: list[tuple[str, int]] = []
+    seen = {origin.get("name")}
+    for city, _rough in candidates[:8]:
+        stop = resolver._resolve_stop(city)
+        if not stop or stop.get("lat") is None or stop.get("name") in seen:
+            continue
+        km = round(_haversine_km(origin["lat"], origin["lon"], stop["lat"], stop["lon"]))
+        if km == 0 or km > radius_km:
+            continue
+        seen.add(stop["name"])
+        found.append((stop["name"], km))
+        if len(found) >= limit:
+            break
+    return found
+
+
+# IATA -> city name, so the airport grid above can be turned into place names
+# Transitous understands. Mirrored in docs/app.js (AIRPORT_CITY_NAMES).
+AIRPORT_CITY_NAMES = {
+    "BER": "Berlin", "MUC": "München", "FRA": "Frankfurt", "DUS": "Düsseldorf",
+    "HAM": "Hamburg", "STR": "Stuttgart", "CGN": "Köln", "HAJ": "Hannover",
+    "NUE": "Nürnberg", "LEJ": "Leipzig", "DTM": "Dortmund", "BRE": "Bremen",
+    "VIE": "Wien", "ZRH": "Zürich", "GVA": "Genf", "SZG": "Salzburg",
+    "INN": "Innsbruck", "BSL": "Basel", "CDG": "Paris", "ORY": "Paris",
+    "NCE": "Nizza", "LYS": "Lyon", "MRS": "Marseille", "TLS": "Toulouse",
+    "BOD": "Bordeaux", "NTE": "Nantes", "AMS": "Amsterdam", "BRU": "Brüssel",
+    "MAD": "Madrid", "BCN": "Barcelona", "VLC": "Valencia", "FCO": "Rom",
+    "MXP": "Mailand", "LIN": "Mailand", "VCE": "Venedig", "NAP": "Neapel",
+    "LIS": "Lissabon", "OPO": "Porto", "CPH": "Kopenhagen", "WAW": "Warschau",
+    "PRG": "Prag", "BUD": "Budapest", "LHR": "London", "MAN": "Manchester",
+}

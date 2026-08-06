@@ -69,6 +69,50 @@ class CompositeProvider(Provider):
         return offers
 
 
+class NearbyStationsProvider(Provider):
+    """NearbyAirportsProvider for the ground modes.
+
+    Stations need their own wrapper because there is no coordinate table for
+    them: each candidate is resolved through Transitous, which returns the
+    real stop with real coordinates. Faking a table from airport positions
+    would misstate the detour by however far a city's station sits from its
+    airport.
+    """
+
+    def __init__(self, mode: Mode, inner: Provider, limit_per_side: int = 2):
+        self.mode = mode
+        self.inner = inner
+        self.limit_per_side = limit_per_side
+
+    def search(self, route: RoutePreference) -> list[Offer]:
+        offers = list(self.inner.search(route))
+        if not route.nearby_km:
+            return offers
+
+        from traveldeals.providers.transitous import (TransitousTrainProvider,
+                                                       nearby_stations)
+        resolver = TransitousTrainProvider()
+        origins = [(route.origin, 0)] + nearby_stations(resolver, route.origin, route.nearby_km, self.limit_per_side)
+        destinations = [(route.destination, 0)] + nearby_stations(resolver, route.destination, route.nearby_km, self.limit_per_side)
+
+        for origin, origin_km in origins:
+            for destination, destination_km in destinations:
+                if origin_km == 0 and destination_km == 0:
+                    continue
+                variant = replace(route, origin=origin, destination=destination)
+                try:
+                    found = self.inner.search(variant)
+                except Exception as exc:  # noqa: BLE001
+                    print(f"[nearby-stations] {origin}->{destination} failed: {exc}")
+                    continue
+                for offer in found:
+                    offer.alt_origin = origin if origin_km else ""
+                    offer.alt_destination = destination if destination_km else ""
+                    offer.detour_km = origin_km + destination_km
+                    offers.append(offer)
+        return offers
+
+
 class NotConfiguredProvider(Provider):
     """Stand-in for a real API adapter that needs credentials which aren't
     set up yet. Returns no offers instead of crashing the whole pipeline, so

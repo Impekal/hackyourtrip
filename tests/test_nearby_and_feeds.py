@@ -176,3 +176,51 @@ def test_no_match_returns_nothing_rather_than_random_deals():
 def test_broken_feed_is_survived():
     assert dealfeeds.fetch_feed("Kaputt", "http://x", session=_feed_session(b"not xml")) == []
     assert dealfeeds.fetch_feed("Weg", "http://x", session=_feed_session(status=500)) == []
+
+
+# -- nearby stations (ground modes) ------------------------------------------
+
+class StopResolver:
+    """Real coordinates, so the asserted distances are real distances."""
+    STOPS = {
+        "Hamburg": {"name": "Hamburg Hbf", "lat": 53.5528, "lon": 10.0068},
+        "Bremen": {"name": "Bremen Hbf", "lat": 53.0833, "lon": 8.8136},
+        "Hannover": {"name": "Hannover Hbf", "lat": 52.3768, "lon": 9.7411},
+        "Berlin": {"name": "Berlin Hbf", "lat": 52.5250, "lon": 13.3695},
+    }
+
+    def __init__(self):
+        self.asked = []
+
+    def _resolve_stop(self, name):
+        self.asked.append(name)
+        for key, stop in self.STOPS.items():
+            if key.lower() in name.lower():
+                return stop
+        return None
+
+
+def test_nearby_stations_use_real_resolved_coordinates():
+    from traveldeals.providers.transitous import nearby_stations
+    found = nearby_stations(StopResolver(), "Hamburg Hbf", 150)
+    # Hamburg Hbf -> Bremen Hbf is ~95 km as the crow flies; a station table
+    # faked from airport coordinates would be off by tens of kilometres.
+    assert found == [("Bremen Hbf", 95), ("Hannover Hbf", 132)]
+
+
+def test_radius_zero_skips_the_lookup_entirely():
+    from traveldeals.providers.transitous import nearby_stations
+    resolver = StopResolver()
+    assert nearby_stations(resolver, "Hamburg Hbf", 0) == []
+
+
+def test_stations_outside_the_radius_are_dropped():
+    from traveldeals.providers.transitous import nearby_stations
+    # Berlin is ~255 km from Hamburg - out of a 150 km radius.
+    found = nearby_stations(StopResolver(), "Hamburg Hbf", 150)
+    assert all(name != "Berlin Hbf" for name, _ in found)
+
+
+def test_unresolvable_origin_yields_nothing():
+    from traveldeals.providers.transitous import nearby_stations
+    assert nearby_stations(StopResolver(), "Wolkenkuckucksheim", 150) == []

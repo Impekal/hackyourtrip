@@ -4,7 +4,7 @@
 // guessing: if this doesn't match, the browser is running a cached old
 // app.js and any "the fix didn't work" report is about the old file. Bump
 // together with the ?v= in index.html.
-const BUILD_STAMP = '2026-08-06-7';
+const BUILD_STAMP = '2026-08-06-8';
 document.getElementById('buildStamp').textContent = BUILD_STAMP;
 
 /* =========================================================================
@@ -631,6 +631,75 @@ function nearbyAirports(code, radiusKm, limit = 2) {
   }
   found.sort((a, b) => a[1] - b[1]);
   return found.slice(0, limit);
+}
+
+// Nearby *stations* work differently from nearby airports, and the
+// difference matters: there is no static table of station coordinates here,
+// and inventing one would put the shown detour off by however far a city's
+// station sits from its airport. So AIRPORT_COORDS is used only as a grid of
+// major cities to *propose* candidates; each candidate is then resolved
+// through Transitous, which returns the real stop with real coordinates, and
+// the distance is measured from those.
+async function fetchNearbyStations(name, radiusKm, limit = 2) {
+  if (!radiusKm || !PROXY_URL) return [];
+  const origin = await transitResolveStop(name);
+  if (!origin || origin.lat == null) return [];
+
+  // Generous pre-filter on the city grid: a station can sit tens of km from
+  // its city's airport, so candidates are collected wide and cut precisely
+  // afterwards, on the real coordinates.
+  const candidates = [];
+  for (const [code, coords] of Object.entries(AIRPORT_COORDS)) {
+    const cityName = AIRPORT_CITY_NAMES[code];
+    if (!cityName) continue;
+    const rough = haversineKm([origin.lat, origin.lon], coords);
+    if (rough <= radiusKm + 60) candidates.push([cityName, rough]);
+  }
+  candidates.sort((a, b) => a[1] - b[1]);
+
+  const found = [];
+  const seen = new Set([origin.name]);
+  for (const [cityName] of candidates.slice(0, 8)) {
+    const stop = await transitResolveStop(cityName);
+    if (!stop || stop.lat == null || seen.has(stop.name)) continue;
+    const km = Math.round(haversineKm([origin.lat, origin.lon], [stop.lat, stop.lon]));
+    if (km === 0 || km > radiusKm) continue;
+    seen.add(stop.name);
+    found.push([stop.name, km]);
+    if (found.length >= limit) break;
+  }
+  return found;
+}
+
+// One direction, one mode, priced sources first - shared by the plain search
+// and the nearby-station variants so both stay in step.
+async function groundOffersFor(route, mode) {
+  const priced = mode === 'bus' ? await fetchFlixbusOffers(route) : [];
+  const timetable = await fetchRealTransitOffers(route, mode);
+  return [...priced, ...(timetable || [])];
+}
+
+async function fetchGroundOffersWithNeighbours(route, mode) {
+  const base = await groundOffersFor(route, mode);
+  if (!route.nearbyKm) return base;
+
+  const offers = [...base];
+  const [origins, destinations] = await Promise.all([
+    fetchNearbyStations(route.origin, route.nearbyKm),
+    fetchNearbyStations(route.destination, route.nearbyKm),
+  ]);
+  for (const [origin, originKm] of [[route.origin, 0], ...origins]) {
+    for (const [destination, destinationKm] of [[route.destination, 0], ...destinations]) {
+      if (!originKm && !destinationKm) continue;
+      for (const offer of await groundOffersFor({ ...route, origin, destination }, mode)) {
+        offer.altOrigin = originKm ? origin : '';
+        offer.altDestination = destinationKm ? destination : '';
+        offer.detourKm = originKm + destinationKm;
+        offers.push(offer);
+      }
+    }
+  }
+  return offers;
 }
 
 // Wraps the single-airport search: runs it again for nearby airports and
@@ -1391,13 +1460,11 @@ async function runSearch(route) {
         pools[mode] = fallback('flight');
       }
     } else if (mode === 'train' || mode === 'bus') {
-      // Bus has a genuinely priced source now, so ask FlixBus first and let
-      // Transitous fill in the coaches and regional buses it doesn't run.
-      // Real timetables without prices still beat invented prices; example
-      // data only appears when explicitly switched on.
-      const priced = mode === 'bus' ? await fetchFlixbusOffers(route) : [];
-      const timetable = await fetchRealTransitOffers(route, mode);
-      const merged = [...priced, ...(timetable || [])];
+      // FlixBus for real prices, Transitous for everything it doesn't run,
+      // plus neighbouring stations when the user asked for them. Real
+      // timetables without prices still beat invented prices; example data
+      // only appears when explicitly switched on.
+      const merged = await fetchGroundOffersWithNeighbours(route, mode);
       pools[mode] = merged.length ? merged : fallback(mode);
     } else {
       // No free hotel source exists at all, so this mode is empty unless
