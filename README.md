@@ -67,7 +67,26 @@ auf einem Dashboard die besten aktuellen Optionen pro Strecke zeigt.
 > | Kiwi skypicker | 404, abgeschaltet |
 > | Hostelworld, Booking, Hotelbeds | 404 / 401 |
 >
-> **Fazit nach fünf Runden:** Vier kostenlose, anmeldungsfreie Quellen mit
+> Sechste Runde (06.08.2026) – deine Idee: Wiederverkäufer verkaufen sich
+> gegenseitig die Tickets, vielleicht ist DB über SNCF & Co. erreichbar.
+>
+> | Quelle | Ergebnis |
+> |---|---|
+> | SNCF Connect | 401 UNAUTHORIZED |
+> | B-Europe (SNCB, verkauft DB+TGV) | 404 |
+> | Rail Europe | Domain existiert nicht mehr |
+> | Trenitalia, Italo | 400 / SOAP-Fault |
+> | Renfe | Dynatrace-Bot-Schutz |
+> | NS (NL) | Subscription-Key nötig |
+> | Eurostar, ÖBB-Ticketshop, Interrail | 403 / 404 |
+> | **SBB via `transport.opendata.ch`** | **200 – aber Fahrplan ohne Preise** |
+> | Agoda, Trivago, Expedia, Hotels.com | 404 / 429 |
+> | Kayak | 200, aber nur ein Hotelmarken-Verzeichnis ohne Preise |
+>
+> Die Idee war richtig gedacht, führt aber nicht zum Ziel: **jeder** europäische
+> Bahn-Wiederverkäufer verlangt entweder Auth oder sitzt hinter Bot-Schutz.
+>
+> **Fazit nach sechs Runden:** Vier kostenlose, anmeldungsfreie Quellen mit
 > echten Preisen – **Ryanair**, **Skiplagged**, **FlixBus** und (mit
 > kostenlosem Token) **Travelpayouts** –, dazu drei Deal-Feeds. Für **Bahn**
 > und **Hotel** gibt es keine: die Bahn blockt ihre eigene App-API

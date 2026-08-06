@@ -111,6 +111,24 @@ const FLIXBUS_HEADERS = {
   "Accept-Language": "de-DE,de;q=0.9,en;q=0.8",
 };
 
+// Skiplagged: covers the full-service carriers Ryanair doesn't fly and the
+// Travelpayouts cache misses. Quotes in USD (evidenced: the site renders "$",
+// and BER->BCN was 62.00 there where Ryanair said 53.36 EUR - ratio 0.86, the
+// EUR/USD rate) - the client converts, see providers/skiplagged.py.
+const SKIPLAGGED_UPSTREAM = "https://skiplagged.com/api/search.php";
+const SKIPLAGGED_FORWARDABLE_PARAMS = ["from", "to", "depart", "return", "sort"];
+
+// Deal and error-fare feeds: plain RSS, free, key-less. Proxied because a
+// browser cannot read cross-origin XML, and converted to JSON here so the
+// client doesn't need an XML parser. Cached hard - these update hourly at
+// most, and every visitor pulling three feeds directly would be rude.
+const DEAL_FEEDS = [
+  ["Urlaubspiraten", "https://www.urlaubspiraten.de/feed"],
+  ["Travelfree", "https://travelfree.info/feed/"],
+  ["Fly4free", "https://www.fly4free.com/feed/"],
+];
+const DEAL_MAX_ITEMS_PER_FEED = 12;
+
 // Only these may be forwarded upstream - keeps the proxy from being turned
 // into an open relay for arbitrary Travelpayouts query parameters.
 const FORWARDABLE_PARAMS = [
@@ -440,6 +458,117 @@ async function handleFlixbusRequest(incoming, request, ctx, allowedOrigin) {
   return response;
 }
 
+/** GET /skiplagged?from=&to=&depart= - passthrough, no secret needed. */
+async function handleSkiplaggedRequest(incoming, request, ctx, allowedOrigin) {
+  const upstream = new URL(SKIPLAGGED_UPSTREAM);
+  for (const name of SKIPLAGGED_FORWARDABLE_PARAMS) {
+    const value = incoming.searchParams.get(name);
+    if (value !== null) upstream.searchParams.set(name, value);
+  }
+  upstream.searchParams.set("poll", "true");
+  if (!(upstream.searchParams.get("from") && upstream.searchParams.get("to")
+        && upstream.searchParams.get("depart"))) {
+    return jsonResponse({ error: "skiplagged needs from, to and depart." }, 400, allowedOrigin);
+  }
+
+  const cache = caches.default;
+  const cacheKey = new Request(incoming.toString(), request);
+  const cached = await cache.match(cacheKey);
+  if (cached) return cached;
+
+  let upstreamResponse;
+  try {
+    upstreamResponse = await fetch(upstream.toString(), { headers: RYANAIR_HEADERS });
+  } catch (err) {
+    return jsonResponse({ error: `Skiplagged request failed: ${err.message}` }, 502, allowedOrigin);
+  }
+  const response = new Response(await upstreamResponse.text(), {
+    status: upstreamResponse.status,
+    headers: {
+      "Content-Type": "application/json",
+      "Cache-Control": `public, max-age=${CACHE_TTL_SECONDS}`,
+      ...corsHeaders(allowedOrigin),
+    },
+  });
+  if (upstreamResponse.ok) ctx.waitUntil(cache.put(cacheKey, response.clone()));
+  return response;
+}
+
+// Feeds wrap their HTML twice: once as markup, once escaped as entities.
+// Decoding has to come first, otherwise "&lt;p&gt;" survives tag-stripping
+// and lands in the page as visible gibberish.
+const HTML_ENTITIES = {
+  amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " ",
+  // The feeds are German, French and Polish - accented names are the rule,
+  // not the exception, and "g&uuml;nstig" must not reach the page as-is.
+  auml: "ä", ouml: "ö", uuml: "ü", Auml: "Ä", Ouml: "Ö", Uuml: "Ü", szlig: "ß",
+  eacute: "é", egrave: "è", ecirc: "ê", agrave: "à", acirc: "â", ccedil: "ç",
+  iacute: "í", oacute: "ó", uacute: "ú", ntilde: "ñ", aacute: "á",
+  euro: "€", pound: "£", hellip: "…", ndash: "–", mdash: "—", rsquo: "’", lsquo: "‘",
+};
+function decodeEntities(value) {
+  return value
+    .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, code) => String.fromCharCode(parseInt(code, 16)))
+    // Case matters here: &Uuml; and &uuml; are different characters.
+    .replace(/&([a-zA-Z]+);/g, (match, name) => HTML_ENTITIES[name] ?? HTML_ENTITIES[name.toLowerCase()] ?? match);
+}
+
+/** Minimal RSS <item> reader - enough for title/link/pubDate/description. */
+function parseRssItems(xml, source, limit) {
+  const pick = (block, tag) => {
+    const m = block.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`, "i"));
+    if (!m) return "";
+    const withoutCdata = m[1].replace(/<!\[CDATA\[|\]\]>/g, "");
+    // Decode, then strip: markup can hide inside the decoded text too.
+    return decodeEntities(withoutCdata).replace(/<[^>]+>/g, "").trim();
+  };
+  const items = [];
+  const blocks = xml.match(/<item[\s\S]*?<\/item>/gi) || [];
+  for (const block of blocks) {
+    const title = pick(block, "title");
+    const url = pick(block, "link");
+    if (!title || !url) continue;
+    items.push({
+      source, title: title.slice(0, 200), url,
+      published: pick(block, "pubDate"),
+      summary: pick(block, "description").slice(0, 240),
+    });
+    if (items.length >= limit) break;
+  }
+  return items;
+}
+
+/** GET /deals - the three RSS feeds, merged and handed over as JSON. */
+async function handleDealsRequest(incoming, request, ctx, allowedOrigin) {
+  const cache = caches.default;
+  const cacheKey = new Request(incoming.toString(), request);
+  const cached = await cache.match(cacheKey);
+  if (cached) return cached;
+
+  const posts = [];
+  // One dead feed must not take the others down - deals are a bonus, never
+  // a reason for the whole search to fail.
+  await Promise.all(DEAL_FEEDS.map(async ([source, url]) => {
+    try {
+      const resp = await fetch(url, { headers: { "User-Agent": TRANSIT_USER_AGENT } });
+      if (!resp.ok) return;
+      posts.push(...parseRssItems(await resp.text(), source, DEAL_MAX_ITEMS_PER_FEED));
+    } catch (err) { /* skip this feed */ }
+  }));
+
+  const response = new Response(JSON.stringify({ posts }), {
+    status: 200,
+    headers: {
+      "Content-Type": "application/json",
+      "Cache-Control": `public, max-age=${CACHE_TTL_SECONDS}`,
+      ...corsHeaders(allowedOrigin),
+    },
+  });
+  ctx.waitUntil(cache.put(cacheKey, response.clone()));
+  return response;
+}
+
 export default {
   async fetch(request, env, ctx) {
     const allowedOrigin = env.ALLOWED_ORIGIN || "*";
@@ -463,6 +592,12 @@ export default {
     }
     if (path.startsWith("flixbus/")) {
       return handleFlixbusRequest(requestUrl, request, ctx, allowedOrigin);
+    }
+    if (path === "skiplagged") {
+      return handleSkiplaggedRequest(requestUrl, request, ctx, allowedOrigin);
+    }
+    if (path === "deals") {
+      return handleDealsRequest(requestUrl, request, ctx, allowedOrigin);
     }
     if (!env.TRAVELPAYOUTS_TOKEN) {
       return jsonResponse({ error: "Proxy is not configured (missing TRAVELPAYOUTS_TOKEN secret)." }, 500, allowedOrigin);

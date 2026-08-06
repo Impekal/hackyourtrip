@@ -531,6 +531,17 @@ Nachbarflughäfen bekommen. Jedes Angebot von dort trägt `alt_origin` /
 `alt_destination` / `detour_km` - nie ungekennzeichnet, sonst sähe ein Flug
 ab Bremen aus wie einer ab Hamburg.
 
+**Runde 6 (06.08.2026) - Bahn über Wiederverkäufer, Hotels zum Zweiten:**
+Die Hypothese "SNCF verkauft DB-Tickets, also kommt man dort an DB-Preise"
+ist plausibel, hält aber nicht: SNCF Connect 401, B-Europe 404, RailEurope
+DNS tot, Trenitalia 400, Italo SOAP-Fault, Renfe hinter Dynatrace, NS
+Subscription-Key, Eurostar 403, ÖBB-Ticketshop 404, Interrail 404, Omio 404,
+Trainline 404. Einziger 200er: `transport.opendata.ch` (SBB) - Fahrplan ohne
+Preise, also derselbe Stand wie Transitous.
+Hotels ebenso: Agoda/Trivago 404, Expedia/Hotels.com 429, Kayak liefert nur
+ein Hotelmarken-Verzeichnis. **Nicht nochmal durchprobieren**, ohne dass sich
+dort etwas ändert.
+
 Weiterhin offen bleibt der **Preis** für Bahn (und Hotel). DB-Wrapper regelmässig neu
 prüfen: kämen sie zurück, gäbe es dort sogar Sparpreise.
 

@@ -4,7 +4,7 @@
 // guessing: if this doesn't match, the browser is running a cached old
 // app.js and any "the fix didn't work" report is about the old file. Bump
 // together with the ?v= in index.html.
-const BUILD_STAMP = '2026-08-06-6';
+const BUILD_STAMP = '2026-08-06-7';
 document.getElementById('buildStamp').textContent = BUILD_STAMP;
 
 /* =========================================================================
@@ -53,6 +53,10 @@ const MODE_TAB_CONFIG = {
   flight_or_bus:   { origin: true,  nights: false, duration: true,  flight: true,  train: false, hotel: false, transportExtra: true,  roundTrip: true,  singleDate: true,  placeSource: 'flight', modes: ['flight_or_bus'] },
   flight_hotel:    { origin: true,  nights: true,  duration: true,  flight: true,  train: false, hotel: true,  transportExtra: true,  roundTrip: false, singleDate: false, placeSource: 'flight', modes: ['flight_hotel'] },
   train_hotel:     { origin: true,  nights: true,  duration: true,  flight: false, train: true,  hotel: true,  transportExtra: true,  roundTrip: false, singleDate: false, placeSource: 'rail',   modes: ['train_hotel'] },
+  // Fly out, take the bus back - or any other pairing. No booking portal
+  // offers this, because each of them sells one mode; a personal tool has
+  // no such constraint, and the saving can be substantial.
+  mixed_return:    { origin: true,  nights: false, duration: true,  flight: true,  train: true,  hotel: false, transportExtra: true,  roundTrip: true,  singleDate: true,  placeSource: 'flight', modes: ['mixed_return'] },
   bus_hotel:       { origin: true,  nights: true,  duration: true,  flight: false, train: false, hotel: true,  transportExtra: true,  roundTrip: false, singleDate: false, placeSource: 'rail',   modes: ['bus_hotel'] },
 };
 
@@ -685,12 +689,25 @@ async function fetchRealFlightOffers(route) {
     seen.add(`${offer.depart.toISOString()}|${offer.bookingSite}|${offer.price}`);
     offers.push(offer);
   }
-  // Ryanair serves only its own routes, so its failures are the least
-  // informative thing that could be reported. Park the reason and let the
-  // other sources speak first - otherwise one Ryanair hiccup replaces
-  // "keine Preise für dieses Datum" with a bare "HTTP 500".
-  const ryanairError = lastProxyError;
+  // Skiplagged covers the carriers Ryanair doesn't - the two barely
+  // overlap, so both get asked and the results merged.
+  for (const offer of await fetchSkiplaggedOffers(route)) {
+    if (!wantedDays.has(isoDay(offer.depart))) continue;
+    const key = `${offer.depart.toISOString()}|${offer.bookingSite}|${offer.price}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    offers.push(offer);
+  }
+  // Ryanair and Skiplagged cover only part of the market, so their failures
+  // are the least informative thing that could be reported. Park the reason
+  // and let the other sources speak first - otherwise one hiccup at an
+  // optional source replaces "keine Preise für dieses Datum" with "HTTP 500".
+  const optionalSourceError = lastProxyError;
   lastProxyError = '';
+  // Did a source actually answer? If one did and simply had nothing for this
+  // route, "keine Preise hinterlegt" is the true reason - reporting another
+  // source's transport error instead would misdirect the user.
+  let answered = false;
 
   // Offers the API did return for this route, but on a day outside the flex
   // window. They used to be dropped without trace, which is why a search
@@ -728,6 +745,7 @@ async function fetchRealFlightOffers(route) {
     }
     const payload = await fetchProxyJson('cheap', forDates);
     if (payload && payload.success !== false) {
+      answered = true;
       const currency = (payload.currency || route.currency).toUpperCase();
       for (const raw of payload.data || []) {
         if (raw && raw.price) push(travelpayoutsRawToOffer(raw, currency, route));
@@ -740,6 +758,7 @@ async function fetchRealFlightOffers(route) {
       ...base, one_way: 'true', period_type: 'month', beginning_of_period: `${month}-01`,
     }));
     if (latest && latest.success !== false) {
+      answered = true;
       const currency = (latest.currency || route.currency).toUpperCase();
       for (const raw of latest.data || []) {
         if (raw && raw.value) push(latestRawToOffer(raw, currency, route));
@@ -766,9 +785,10 @@ async function fetchRealFlightOffers(route) {
       .map(o => `${fmtDay(o.depart)} ab ${o.price.toFixed(0)} ${o.currency}`);
     lastProxyError = `Für dieses Datum sind dort keine Preise hinterlegt – wohl aber für ${nearest.join(', ')}`;
   }
-  // Only fall back to Ryanair's reason when no other source had anything to
-  // say at all.
-  if (!offers.length && !lastProxyError && ryanairError) lastProxyError = ryanairError;
+  // The parked error is a last resort: only when nothing answered at all.
+  if (!offers.length && !lastProxyError && !answered && optionalSourceError) {
+    lastProxyError = optionalSourceError;
+  }
   return offers;
 }
 
@@ -856,6 +876,72 @@ async function fetchRyanairOffers(route) {
   for (const fare of (payload && payload.fares) || []) {
     const offer = ryanairFareToOffer(fare, route, roundTrip);
     if (offer) offers.push(offer);
+  }
+  return offers;
+}
+
+/* =========================================================================
+ * Skiplagged - the full-service carriers Ryanair doesn't fly.
+ * Mirrors traveldeals/providers/skiplagged.py.
+ *
+ * Quotes in USD: the API names no currency and ignores a `currency`
+ * parameter, so it was established by evidence rather than assumed - the
+ * site renders "$", and BER->BCN was 62.00 there where Ryanair said
+ * 53.36 EUR (ratio 0.86, the EUR/USD rate). Converted, never relabelled.
+ *
+ * Hidden-city fares are deliberately not surfaced: they breach airline
+ * conditions of carriage and can cost a traveller their frequent-flyer
+ * account. Only the regular `depart` list is read.
+ * ===================================================================== */
+const SKIPLAGGED_SOURCE_CURRENCY = 'USD';
+const SKIPLAGGED_MAX_DAYS = 3;
+const SKIPLAGGED_MAX_PER_DAY = 40;
+
+function skiplaggedEntryToOffer(entry, flights, airlines, route, day, rates) {
+  // entry: [[price_cents], [], token, flight_id]
+  const priceCents = entry && entry[0] && entry[0][0];
+  const flight = flights[entry && entry[3]];
+  if (priceCents == null || !flight) return null;
+  const segments = flight[0] || [];
+  const first = segments[0];
+  const last = segments[segments.length - 1];
+  if (!first || !last) return null;
+
+  const flightNumber = first[0] || '';
+  const airline = airlines[flightNumber.slice(0, 2)] || flightNumber.slice(0, 2) || 'Airline';
+  return {
+    mode: 'flight',
+    bookingSite: `${airline} (${flightNumber})`,
+    lineLabel: segments.map(seg => seg[0]).join(' → '),
+    price: convert(round2(priceCents / 100), SKIPLAGGED_SOURCE_CURRENCY, route.currency, rates),
+    currency: route.currency,
+    depart: new Date(first[2].slice(0, 19)),
+    durationHours: round2((flight[1] || 0) / 3600),
+    bagFee: 0,
+    isLowCost: LOW_COST_CARRIERS.has(flightNumber.slice(0, 2).toUpperCase()),
+    stops: Math.max(segments.length - 1, 0),
+    wifiOnboard: false, powerOutlets: false, legroomCm: null, punctualityPct: null,
+    url: `https://skiplagged.com/flights/${route.origin}/${route.destination}/${day}`,
+    returnDepart: null,
+  };
+}
+
+async function fetchSkiplaggedOffers(route) {
+  if (!PROXY_URL) return [];
+  const rates = await getRatesPerEur();
+  const offers = [];
+  for (const day of dayCandidates(route).slice(0, SKIPLAGGED_MAX_DAYS)) {
+    const iso = isoDay(day);
+    const payload = await fetchProxyJson('skiplagged', new URLSearchParams({
+      from: route.origin, to: route.destination, depart: iso, return: '', sort: 'cost',
+    }));
+    if (!payload) continue;
+    const flights = payload.flights || {};
+    const airlines = payload.airlines || {};
+    for (const entry of (payload.depart || []).slice(0, SKIPLAGGED_MAX_PER_DAY)) {
+      const offer = skiplaggedEntryToOffer(entry, flights, airlines, route, iso, rates);
+      if (offer) offers.push(offer);
+    }
   }
   return offers;
 }
@@ -1270,6 +1356,9 @@ function dateDeviationDays(candidate, route) {
 }
 
 const COMBO_TRANSPORT_MODE = { flight_hotel: 'flight', train_hotel: 'train', bus_hotel: 'bus' };
+// Modes whose outbound and return legs may come from *different* transport
+// modes - the combination no portal sells, because each portal sells one.
+const MIXED_RETURN_MODES = ['flight', 'train', 'bus'];
 const OR_COMBO_MODES = { train_or_bus: ['train', 'bus'], flight_or_train: ['flight', 'train'], flight_or_bus: ['flight', 'bus'] };
 
 async function runSearch(route) {
@@ -1326,6 +1415,29 @@ async function runSearch(route) {
     hasUnknownPrice: offers.some(o => o.priceKnown === false),
   });
 
+  // One-way legs across every transport mode for one direction and date.
+  // Deliberately bypasses the `pool` cache: mixed_return needs a *different*
+  // route (reversed, other date) than the one the pools were built for.
+  async function legsFor(variant) {
+    const wanted = isoDay(variant.departFrom);
+    const legs = [];
+    for (const m of MIXED_RETURN_MODES) {
+      let found = [];
+      if (m === 'flight') found = (await fetchRealFlightOffers(variant)) || [];
+      else if (m === 'bus') found = [...(await fetchFlixbusOffers(variant)),
+                                      ...((await fetchRealTransitOffers(variant, 'bus')) || [])];
+      else found = (await fetchRealTransitOffers(variant, m)) || [];
+      for (const offer of found) {
+        // A round-trip fare can't be split, and a leg with no price can't be
+        // added to a total.
+        if (offer.returnDepart || offer.priceKnown === false) continue;
+        if (isoDay(offer.depart) !== wanted) continue;
+        legs.push(offer);
+      }
+    }
+    return legs;
+  }
+
   let candidates = [];
   for (const mode of route.modes) {
     if (['flight', 'train', 'bus', 'hotel'].includes(mode)) {
@@ -1334,6 +1446,37 @@ async function runSearch(route) {
       const tMode = COMBO_TRANSPORT_MODE[mode];
       for (const combo of buildCombos(await pool(tMode), await pool('hotel'))) {
         candidates.push(candidate(mode, [combo.transport, combo.hotel], combo.price, combo.transport.durationHours));
+      }
+    } else if (mode === 'mixed_return') {
+      // Cheapest way out and cheapest way back, chosen independently - the
+      // combination no portal sells, because each portal sells one mode.
+      //
+      // Two things this must get right, and both were wrong at first:
+      // the return leg travels *destination -> origin*, not the same
+      // direction again; and it departs on the return date, which the normal
+      // pools (built from the outbound window) never cover.
+      if (route.returnDate) {
+        const outward = { ...route, departFrom: route.departFrom, departUntil: route.departFrom };
+        const homeward = {
+          ...route, origin: route.destination, destination: route.origin,
+          departFrom: route.returnDate, departUntil: route.returnDate,
+          roundTrip: false, returnDate: null,
+        };
+        const [out, back] = await Promise.all([legsFor(outward), legsFor(homeward)]);
+        for (const o of out) {
+          // Pair each outbound with the cheapest return *per mode*, so
+          // "fly out, bus back" competes with "bus out, fly back".
+          const cheapestPerMode = {};
+          for (const b of back) {
+            if (!cheapestPerMode[b.mode] || b.price < cheapestPerMode[b.mode].price) {
+              cheapestPerMode[b.mode] = b;
+            }
+          }
+          for (const b of Object.values(cheapestPerMode)) {
+            candidates.push(candidate(mode, [o, b], round2(o.price + b.price),
+                                       round2(o.durationHours + b.durationHours)));
+          }
+        }
       }
     } else if (OR_COMBO_MODES[mode]) {
       const [modeA, modeB] = OR_COMBO_MODES[mode];
@@ -1458,6 +1601,24 @@ function bookingSiteHtml(name, url) {
   const isReal = url && !url.includes('example.invalid');
   return isReal ? `<a href="${url}" target="_blank" rel="noopener">${name}</a>` : name;
 }
+
+// IATA -> city name, so a feed post saying "Hamburg" is matched against a
+// search entered as "HAM". Only the codes in AIRPORT_COORDS need an entry.
+const AIRPORT_CITY_NAMES = {
+  BER: 'Berlin', MUC: 'München', FRA: 'Frankfurt', DUS: 'Düsseldorf', HAM: 'Hamburg',
+  STR: 'Stuttgart', CGN: 'Köln', HAJ: 'Hannover', NUE: 'Nürnberg', LEJ: 'Leipzig',
+  DTM: 'Dortmund', BRE: 'Bremen', VIE: 'Wien', ZRH: 'Zürich', GVA: 'Genf',
+  SZG: 'Salzburg', INN: 'Innsbruck', BSL: 'Basel', LHR: 'London', LGW: 'London',
+  STN: 'London', LTN: 'London', MAN: 'Manchester', EDI: 'Edinburgh', DUB: 'Dublin',
+  CDG: 'Paris', ORY: 'Paris', NCE: 'Nizza', LYS: 'Lyon', MRS: 'Marseille',
+  TLS: 'Toulouse', BOD: 'Bordeaux', NTE: 'Nantes', AMS: 'Amsterdam', BRU: 'Brüssel',
+  MAD: 'Madrid', BCN: 'Barcelona', PMI: 'Mallorca', VLC: 'Valencia', SVQ: 'Sevilla',
+  IBZ: 'Ibiza', AGP: 'Málaga', FCO: 'Rom', MXP: 'Mailand', LIN: 'Mailand',
+  VCE: 'Venedig', NAP: 'Neapel', LIS: 'Lissabon', OPO: 'Porto', CPH: 'Kopenhagen',
+  ARN: 'Stockholm', OSL: 'Oslo', HEL: 'Helsinki', KEF: 'Island', WAW: 'Warschau',
+  PRG: 'Prag', BUD: 'Budapest', ATH: 'Athen', IST: 'Istanbul', DXB: 'Dubai',
+  BKK: 'Bangkok', NRT: 'Tokio', HND: 'Tokio', JFK: 'New York', LAX: 'Los Angeles',
+};
 
 const MEAL_PLAN_LABELS = { breakfast: 'Frühstück', half_board: 'Halbpension', full_board: 'Vollpension', all_inclusive: 'All Inclusive' };
 const PROPERTY_TYPE_LABELS = { apartment: 'Apartment', hostel: 'Hostel', resort: 'Resort', bnb: 'B&B', guesthouse: 'Gästehaus', villa: 'Villa' };
@@ -1869,7 +2030,9 @@ function renderResults(route, options, usedRealFlightData, flightFallbackReason)
       <p class="empty">Es werden nur echte Daten angezeigt. Über <strong>Datenquelle → „Auch Beispieldaten"</strong>
       lassen sich erfundene Preise einblenden, um die Sortier- und Filterlogik zu testen - buchbar ist davon nichts.</p>
       ${renderProviderLinks(route)}
+      <div id="dealsPanel"></div>
     `;
+    renderDealsInto(route);
     return;
   }
 
@@ -1920,14 +2083,73 @@ function renderResults(route, options, usedRealFlightData, flightFallbackReason)
             ${detourHtml}
             ${opt.isBelowMedian ? '<span class="badge good">Deal</span>' : ''}
           </div>
-          <span class="subline mono">${opt.mode}${line ? ` · ${line}` : ''} · ${fmtShort(opt.offers[0].depart)}${opt.offers[0].returnDepart ? ` · zurück ${fmtShort(opt.offers[0].returnDepart)}` : ''} · ${opt.durationHours}h · ${opt.offers.map(o => bookingSiteHtml(o.bookingSite, o.url)).join(', ')}</span>
+          <span class="subline mono">${opt.mode}${line ? ` · ${line}` : ''} · ${fmtShort(opt.offers[0].depart)}${
+            opt.mode === 'mixed_return' && opt.offers[1]
+              ? ` (${opt.offers[0].mode}) · zurück ${fmtShort(opt.offers[1].depart)} (${opt.offers[1].mode})`
+              : (opt.offers[0].returnDepart ? ` · zurück ${fmtShort(opt.offers[0].returnDepart)}` : '')
+          } · ${opt.durationHours}h · ${opt.offers.map(o => bookingSiteHtml(o.bookingSite, o.url)).join(', ')}</span>
           <div class="chips">${opt.offers.flatMap(offerChips).map(c => `<span class="chip">${c}</span>`).join('')}</div>
           ${opt.recommendations.length ? `<ul class="recs">${opt.recommendations.map(r => `<li>${r}</li>`).join('')}</ul>` : ''}
         </div>`;
       }).join('')}
     </div>
     ${renderProviderLinks(route)}
+    <div id="dealsPanel"></div>
   `;
+  renderDealsInto(route);
+}
+
+// Deals load after the results are already on screen: they are a bonus, and
+// nobody should wait for three RSS feeds before seeing their flights.
+async function renderDealsInto(route) {
+  const target = document.getElementById('dealsPanel');
+  if (!target) return;
+  try {
+    target.innerHTML = renderDeals(await fetchRelevantDeals(route));
+  } catch (e) {
+    target.innerHTML = ''; // deals are optional - never break the results
+  }
+}
+
+/* =========================================================================
+ * Deal and error-fare feeds. A price API answers "what does this route
+ * cost"; it cannot answer "where is something absurdly cheap right now" -
+ * and that second question is where the real savings are.
+ *
+ * Shown as links with titles, never as priced rows: "Mallorca ab 39 EUR" is
+ * an advertisement, not a bookable itinerary for the user's dates. Turning
+ * it into an offer would repeat the mistake this project already made once.
+ * ===================================================================== */
+function dealMentions(post, places) {
+  const haystack = `${post.title} ${post.summary || ''}`.toLowerCase();
+  return places.some(place => place && place.length > 2 && haystack.includes(place.toLowerCase()));
+}
+
+async function fetchRelevantDeals(route) {
+  if (!PROXY_URL) return [];
+  const payload = await fetchProxyJson('deals', new URLSearchParams());
+  const posts = (payload && payload.posts) || [];
+  // Only what mentions this trip - an unrelated Mallorca offer is noise on
+  // a Hamburg->Lyon search, and noise is what makes people stop reading.
+  const places = [route.origin, route.destination,
+                  AIRPORT_CITY_NAMES[(route.origin || '').toUpperCase()],
+                  AIRPORT_CITY_NAMES[(route.destination || '').toUpperCase()]];
+  return posts.filter(p => dealMentions(p, places.filter(Boolean))).slice(0, 6);
+}
+
+function renderDeals(posts) {
+  if (!posts.length) return '';
+  return `
+    <div class="provider-links">
+      <h3>🔥 Aktuelle Deals zu dieser Strecke</h3>
+      <p class="provider-note">Aus den Feeds von Urlaubspiraten, Travelfree und Fly4free - Aktionen und
+      Fehlerpreise, die keine Preis-API kennt. Das sind Artikel, keine buchbaren Angebote für deine Daten:
+      Preis und Verfügbarkeit stehen erst beim Anbieter fest.</p>
+      <ul class="recs">
+        ${posts.map(p => `<li><a href="${p.url}" target="_blank" rel="noopener">${p.title}</a>
+          <span class="subline"> · ${p.source}</span></li>`).join('')}
+      </ul>
+    </div>`;
 }
 
 function buildYamlSnippet(route) {

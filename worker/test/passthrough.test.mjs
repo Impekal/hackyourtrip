@@ -197,5 +197,53 @@ stubFetch({ trips: [{ results: { 'uid-1': { status: 'available', price: { total:
   report(resp.status === 404, 'unknown /flixbus/* endpoint -> 404');
 }
 
+// ---- Skiplagged + Deals --------------------------------------------------
+
+stubFetch({ flights: {}, depart: [], airlines: {} });
+{
+  const { resp, last } = await call('/skiplagged?from=HAM&to=LYS&depart=2026-09-15');
+  const params = new URL(last.url).searchParams;
+  report(resp.status === 200
+    && last.url.startsWith('https://skiplagged.com/api/search.php')
+    && params.get('from') === 'HAM' && params.get('depart') === '2026-09-15'
+    && params.get('poll') === 'true',
+    'skiplagged forwards the route and forces poll=true', last?.url);
+}
+
+{
+  const { resp } = await call('/skiplagged?from=HAM&to=LYS');
+  report(resp.status === 400, 'skiplagged without a date -> 400');
+}
+
+{
+  const { last } = await call('/skiplagged?from=HAM&to=LYS&depart=2026-09-15&evil=1');
+  report(!new URL(last.url).searchParams.has('evil'), 'skiplagged drops unknown params', last?.url);
+}
+
+// RSS -> JSON, including the double-escaped HTML these feeds ship.
+globalThis.fetch = async () => new Response(
+  '<rss><channel><item><title>G&uuml;nstig nach Lyon ab 39 &euro;</title>'
+  + '<link>https://x/1</link><pubDate>Thu, 06 Aug 2026</pubDate>'
+  + '<description>&lt;p&gt;Fl&uuml;ge im September&lt;/p&gt;</description></item></channel></rss>',
+  { status: 200, headers: { 'Content-Type': 'application/rss+xml' } });
+{
+  const { resp, body } = await call('/deals');
+  const post = body.posts && body.posts[0];
+  report(resp.status === 200 && body.posts.length >= 1
+    && post.title === 'Günstig nach Lyon ab 39 €'
+    && post.summary === 'Flüge im September'
+    && post.url === 'https://x/1',
+    'deals: RSS becomes JSON with entities decoded and tags stripped',
+    JSON.stringify(post));
+}
+
+// A dead feed must not take the endpoint down - deals are a bonus.
+globalThis.fetch = async () => { throw new Error('feed down'); };
+{
+  const { resp, body } = await call('/deals');
+  report(resp.status === 200 && Array.isArray(body.posts) && body.posts.length === 0,
+    'deals: a dead feed yields an empty list, not an error');
+}
+
 globalThis.fetch = realFetch;
 if (failures) process.exitCode = 1;
