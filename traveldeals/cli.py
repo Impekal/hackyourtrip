@@ -25,6 +25,8 @@ from traveldeals.providers.amadeus import AmadeusFlightProvider
 from traveldeals.providers.base import Provider
 from traveldeals.providers.mock import (MockBusProvider, MockFlightProvider,
                                          MockHotelProvider, MockTrainProvider)
+from traveldeals.providers.transitous import (TransitousBusProvider,
+                                               TransitousTrainProvider)
 from traveldeals.providers.travelpayouts import TravelpayoutsFlightProvider
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -48,13 +50,18 @@ def _select_flight_provider() -> Provider:
     return MockFlightProvider()
 
 
-def build_providers() -> dict[Mode, Provider]:
-    # Train/bus/hotel are still mock.py until their real adapters
-    # (providers/real.py) get implemented.
+def build_providers(real_transit: bool = True) -> dict[Mode, Provider]:
+    """Train and bus now come from Transitous - real timetables, no key, and
+    deliberately no price (see providers/transitous.py). Hotels stay mocked;
+    no free, signup-free source for hotel prices was found.
+
+    Pass real_transit=False to fall back to the mock timetable generators,
+    e.g. for an offline demo run.
+    """
     return {
         Mode.FLIGHT: _select_flight_provider(),
-        Mode.TRAIN: MockTrainProvider(),
-        Mode.BUS: MockBusProvider(),
+        Mode.TRAIN: TransitousTrainProvider() if real_transit else MockTrainProvider(),
+        Mode.BUS: TransitousBusProvider() if real_transit else MockBusProvider(),
         Mode.HOTEL: MockHotelProvider(),
     }
 
@@ -74,6 +81,9 @@ def _option_to_dict(option: TripOption) -> dict:
     return {
         "mode": option.mode.value,
         "total_price": option.total_price,
+        # Without this the dashboard would print the 0.0 placeholder as a
+        # price; see Offer.price_known.
+        "has_unknown_price": option.has_unknown_price,
         "currency": option.currency,
         "total_duration_hours": option.total_duration_hours,
         "is_error_fare": option.is_error_fare,
@@ -86,6 +96,7 @@ def _option_to_dict(option: TripOption) -> dict:
                 "price": o.price, "currency": o.currency, "depart_time": o.depart_time,
                 "arrive_time": o.arrive_time, "duration_hours": o.duration_hours, "url": o.url,
                 "return_depart_time": o.return_depart_time,
+                "price_known": o.price_known, "line_label": o.line_label,
             }
             for o in option.offers
         ],

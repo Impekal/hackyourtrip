@@ -195,6 +195,17 @@ class Offer:
     url: str = ""
     checked_bag_fee: float = 0.0  # cost to add the user's requested checked bag(s)
     is_low_cost: bool = False
+    # False = the source knows this connection but not what it costs
+    # (Transitous/MOTIS serves real timetables, but carries no fares).
+    # `price` is then 0.0 as a placeholder that must never be displayed or
+    # ranked as if it were a real price - see TripOption.has_unknown_price
+    # and its handling in engine.py. Inventing a plausible number instead is
+    # exactly what once made the UI show a 42 EUR train that did not exist.
+    price_known: bool = True
+    # Human-readable line/leg description for timetable sources, e.g.
+    # "ICE 1007" or "ICE 599 -> TGV 9575" - empty for price-only sources
+    # (Travelpayouts) that don't say which vehicle it is.
+    line_label: str = ""
     # Set only for round-trip offers: `price` is then the combined total for
     # both legs, and this is the return leg's departure time.
     return_depart_time: Optional[str] = None
@@ -261,7 +272,19 @@ class TripOption:
     recommendations: list[str] = field(default_factory=list)
 
     @property
+    def has_unknown_price(self) -> bool:
+        """True when at least one leg came from a source that knows the
+        connection but not its fare (see Offer.price_known). `total_price`
+        is then not a price - renderers must say so instead of printing it,
+        and the engine keeps such options out of every price comparison."""
+        return any(not o.price_known for o in self.offers)
+
+    @property
     def is_deal(self) -> bool:
+        # Without a price there is nothing to call a deal, whatever the
+        # price history says about other offers on the same route.
+        if self.has_unknown_price:
+            return False
         return self.is_error_fare or self.is_price_drop or self.is_below_median
 
     @property

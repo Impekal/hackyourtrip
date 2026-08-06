@@ -127,6 +127,16 @@ Ergebnis) fällt alles graceful auf Mock-Daten zurück.
   - Wer neue Anbieter "berücksichtigen" soll, für die es keine Preis-API
     gibt: **keine Angebote erfinden**, stattdessen `PROVIDER_LINKS` in
     `app.js` erweitern (echte Suchseiten zum Selbstprüfen).
+  - **Kennt eine Quelle die Verbindung, aber nicht den Preis** (Transitous),
+    ist der richtige Weg `Offer.price_known = False` / `priceKnown: false`
+    im JS - nicht ein geschätzter Preis. `price` bleibt dann auf 0.0 als
+    reiner Platzhalter, und dieser Platzhalter darf **nirgends** wie ein
+    Preis wirken. Konkret geprüft in `tests/test_transitous.py`:
+    "Preis unbekannt" statt "0.00 EUR", nie ein Deal, nie im Median, nie in
+    der Preishistorie, kein Budget-Filter, keine Spar-Empfehlung, und beim
+    Sortieren immer hinter allen bepreisten Optionen (sonst stünde eine
+    unbekannte Verbindung bei "Preis aufsteigend" ganz oben, als wäre sie
+    gratis).
 - **Anbieter-Links ohne erfundene Query-Parameter.** `PROVIDER_LINKS`
   verlinkt Einstiegsseiten, weil Flixbus/Omio/Trainline interne
   Stations-IDs brauchen, die von hier nicht auflösbar sind. Ausgedachte
@@ -225,10 +235,15 @@ Ergebnis) fällt alles graceful auf Mock-Daten zurück.
 ```bash
 pip3 install --user requests PyYAML pytest   # falls nicht vorhanden
 cd /workspace/hackyourtrip
-python3 -m pytest tests/ -q                  # ~80+ Tests, alle sollten grün sein
+python3 -m pytest tests/ -q                  # 105 Tests, alle sollten grün sein
 node --check docs/app.js                     # Syntax-Check JS
 node --check worker/src/index.js
+npm --prefix worker test                     # 19 Worker-Tests (/ai + /transit)
 ```
+
+Die Worker-Tests setzen bei einem Fehlschlag `process.exitCode = 1` - vorher
+haben sie nur "FAIL" gedruckt und trotzdem mit 0 beendet, was `npm test`
+dauerhaft grün aussehen ließ.
 
 Für UI-Checks (kein `npm test`, kein Framework): lokalen Static-Server
 starten und mit Playwright (Chromium liegt unter
@@ -290,8 +305,10 @@ abgeschlossen und einzeln committed+gepusht:
 2. **Von/Nach-Autocomplete**: Flug/Hotel nutzen die echte, tokenlose
    `autocomplete.travelpayouts.com/places2`-API (Shape per
    GitHub-Actions-Smoke-Test verifiziert - liefert `type`, `code`, `name`,
-   `city_name`, `weight` fürs Ranking); Bahn/Bus nutzen die statische
-   `RAIL_STATIONS`-Liste in `app.js` (keine freie Bahnhofs-API bekannt).
+   `city_name`, `weight` fürs Ranking); Bahn/Bus nutzen seit 06.08.2026 den
+   Transitous-Geocoder (`fetchTransitStops`), also dieselbe Datenbank, mit
+   der danach geroutet wird - `RAIL_STATIONS` in `app.js` ist nur noch der
+   Offline-Fallback.
    Generische Typeahead-Komponente mit Tastatur-Navigation, degradiert
    graceful auf Freitext bei Netzwerkfehlern.
 3. **Hotel-Kriterien vervollständigt**: `HotelPref`/`Offer` haben jetzt
@@ -354,20 +371,46 @@ damit das nicht jede Session neu geprüft wird:
 **Fazit:** Preise für Bahn/Bus/Hotel sind kostenlos und ohne Anmeldung nicht
 zu bekommen. Fahrpläne schon - über Transitous.
 
-**Konkreter nächster Schritt, falls jemand daran weiterarbeitet:** einen
-`TransitousTrainProvider` bauen, der echte Verbindungen (Linien wie ICE 599,
-Abfahrt/Ankunft, Umstiege) liefert und **bewusst gar keinen Preis setzt**,
-statt einen zu erfinden. Die Offer-Darstellung kann Preise bereits als
-unbekannt behandeln (`duration_hours = 0.0` wird analog gehandhabt). Das
-ersetzt erfundene Züge durch echte Züge ohne Preis - deutlich besser als der
-Status quo, und ohne die Regel zu brechen, nichts zu erfinden.
-DB-Wrapper regelmässig neu prüfen: kämen sie zurück, gäbe es dort sogar
-Sparpreise.
+**Umgesetzt (06.08.2026):** `traveldeals/providers/transitous.py` +
+die Spiegelung in `docs/app.js` liefern jetzt genau das - echte Verbindungen
+(Linien wie "ICE 599 → RE 4021", Abfahrt/Ankunft, Gleis, Umstiege) **ganz
+ohne Preis**, siehe `Offer.price_known` unter den Konventionen oben.
+
+Details, die beim Weiterarbeiten Zeit sparen (alle gegen die Live-API
+verifiziert, Antwortstruktur per Wegwerf-Workflow abgegriffen):
+
+- Endpunkte: `GET /api/v1/geocode?text=&language=` und
+  `GET /api/v1/plan?fromPlace=&toPlace=&time=&numItineraries=&transitModes=`.
+- Der Geocoder mischt `type: "STOP"` (Haltestellen) mit `type: "PLACE"`
+  (POIs). **Nur STOPs routen** - der erste Treffer für "München Hbf" war
+  eine Sauna neben dem Bahnhof.
+- Zeiten kommen in **UTC mit `Z`**, der Rest des Projekts rechnet in naiver
+  Ortszeit. Umgerechnet wird über das `tz`-Feld der Haltestelle
+  (`_to_local_naive` / `zonedDate`). Ohne das zeigt ein ICE ab Berlin 08:37
+  statt 10:37.
+- MOTIS liefert "die nächsten N Verbindungen nach `time`" - eine Anfrage pro
+  Tag beschreibt also nur den frühen Morgen. Deshalb drei Anker-Zeiten pro
+  Tag (06/12/18 Uhr) und Deduplizierung über `(Abfahrt, Linie)`.
+- Request-Budget bewusst gedeckelt (`MAX_DAYS_QUERIED = 4` x 3 Anker = 12):
+  Transitous ist ein ehrenamtlich betriebener Dienst. Der Worker cacht
+  zusätzlich eine Stunde an der Edge, und `User-Agent` identifiziert die App,
+  wie Transitous es sich wünscht.
+- Es gibt **keine Buchungs-URL** für eine MOTIS-Verbindung, deshalb bleibt
+  `url` leer und die `PROVIDER_LINKS` unter den Ergebnissen übernehmen das.
+- **Nicht abgedeckt:** Hin-und-zurück liefert nur die Hinfahrt
+  (`returnDepart` bleibt `null`) - eine zweite Suche in Gegenrichtung wäre
+  der nächste Ausbauschritt. Und GTFS kennt keine Bordausstattung, deshalb
+  bleiben `wifiOnboard`/`powerOutlets` auf `false` ("nicht bestätigt", nicht
+  "nicht vorhanden"); eine Suche mit *Pflicht*-WLAN filtert diese
+  Verbindungen deshalb weg.
+
+Weiterhin offen bleibt der **Preis** für Bahn/Bus. DB-Wrapper regelmässig neu
+prüfen: kämen sie zurück, gäbe es dort sogar Sparpreise.
 
 ## Roadmap-Ideen (nicht in Arbeit, nur notiert)
 
-- Bahn/Bus durch echte APIs ersetzen (DB/HAFAS, FlixBus) - aktuell immer
-  Mock-Daten.
+- Bahn/Bus-**Preise** (Fahrpläne laufen seit 06.08.2026 echt über
+  Transitous). DB/HAFAS und FlixBus haben dafür kein offenes Self-Serve-API.
 - Travelpayouts GraphQL-Endpoint (`trip_duration`-Feld) für bessere
   Umstiegs-Dauer - Schema nicht verifizierbar gewesen, deshalb nicht
   implementiert (Docs gaben 403 auf WebFetch).

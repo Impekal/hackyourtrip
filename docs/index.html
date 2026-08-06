@@ -8,7 +8,7 @@
   :root {
     --ink: #10141c; --ink-2: #1a202c; --ink-3: #232b3a;
     --paper: #f6f3ec; --paper-2: #ffffff; --paper-3: #efeada;
-    --accent: #e0a53d; --accent-dim: #b98a34;
+    --accent: #e0a53d; --accent-dim: #b98a34; --accent-bg: rgba(224, 165, 61, 0.14);
     --good: #3f9e6d; --good-bg: rgba(63, 158, 109, 0.14);
     --alert: #d9573f; --alert-bg: rgba(217, 87, 63, 0.14);
     --text: #1d2230; --text-dim: #5b6472; --line: rgba(29, 34, 48, 0.14);
@@ -139,6 +139,17 @@
   .option.is-mock { border-left: 3px solid var(--alert); padding-left: 0.6rem; }
   .mock-warning {
     background: var(--alert-bg); color: var(--text); border: 1px solid var(--alert);
+    border-radius: 10px; padding: 0.7rem 0.9rem; font-size: 0.83rem; line-height: 1.45; margin: 0 0 1rem;
+  }
+
+  /* Real timetable, unknown fare - neither a warning (the connection is
+     genuine) nor a price row (there is no price). Its own neutral treatment,
+     deliberately not the crossed-out styling that marks invented prices. */
+  .badge.info { background: var(--accent-bg); color: var(--accent-dim); }
+  .option.is-timetable { border-left: 3px solid var(--accent-dim); padding-left: 0.6rem; }
+  .price-unknown { font-size: 0.95rem; font-weight: 600; color: var(--text-dim); font-style: italic; }
+  .timetable-note {
+    background: var(--accent-bg); color: var(--text); border: 1px solid var(--accent-dim);
     border-radius: 10px; padding: 0.7rem 0.9rem; font-size: 0.83rem; line-height: 1.45; margin: 0 0 1rem;
   }
 

@@ -39,6 +39,26 @@ const UPSTREAM = {
 };
 const CACHE_TTL_SECONDS = 3600;
 
+// Transitous (MOTIS): free, community-run public-transport routing, no key
+// and no account - which is why the browser search can use it at all. It is
+// proxied here anyway for two reasons: the client stops depending on
+// Transitous' CORS policy, and the edge cache spares a volunteer-funded
+// service from answering the same popular route for every single visitor.
+//
+// It serves timetables, never fares - see traveldeals/providers/transitous.py.
+// The client marks those offers as price-less instead of inventing a number.
+const TRANSIT_UPSTREAM = {
+  geocode: "https://api.transitous.org/api/v1/geocode",
+  plan: "https://api.transitous.org/api/v1/plan",
+};
+const TRANSIT_FORWARDABLE_PARAMS = {
+  geocode: ["text", "language"],
+  plan: ["fromPlace", "toPlace", "time", "numItineraries", "transitModes", "arriveBy"],
+};
+// Transitous asks API consumers to identify themselves, so they can get in
+// touch about traffic rather than just blocking it.
+const TRANSIT_USER_AGENT = "HackYourTrip/1.0 (+https://github.com/kalivolut/hackyourtrip)";
+
 // Only these may be forwarded upstream - keeps the proxy from being turned
 // into an open relay for arbitrary Travelpayouts query parameters.
 const FORWARDABLE_PARAMS = [
@@ -208,6 +228,61 @@ async function handleAiRequest(request, env, allowedOrigin) {
   return jsonResponse({ configured: true, provider: provider.name, model: provider.model, text }, 200, allowedOrigin);
 }
 
+/**
+ * GET /transit/geocode and GET /transit/plan - Transitous passthrough.
+ *
+ * Needs no secret, so it deliberately sits in front of the
+ * TRAVELPAYOUTS_TOKEN check: real train and bus timetables must keep working
+ * even on a deployment that has no flight token at all.
+ */
+async function handleTransitRequest(incoming, request, ctx, allowedOrigin) {
+  const kind = incoming.pathname.replace(/^\/+|\/+$/g, "").slice("transit/".length);
+  if (!TRANSIT_UPSTREAM[kind]) {
+    return jsonResponse({ error: "Unknown transit endpoint. Use /transit/geocode or /transit/plan." }, 404, allowedOrigin);
+  }
+
+  const upstream = new URL(TRANSIT_UPSTREAM[kind]);
+  for (const name of TRANSIT_FORWARDABLE_PARAMS[kind]) {
+    const value = incoming.searchParams.get(name);
+    if (value) upstream.searchParams.set(name, value);
+  }
+  // Without these two the plan endpoint has nothing to route between and
+  // would answer 400 - catch it here rather than passing the noise upstream.
+  if (kind === "plan" && !(upstream.searchParams.get("fromPlace") && upstream.searchParams.get("toPlace"))) {
+    return jsonResponse({ error: "plan needs fromPlace and toPlace." }, 400, allowedOrigin);
+  }
+  if (kind === "geocode" && !upstream.searchParams.get("text")) {
+    return jsonResponse({ error: "geocode needs text." }, 400, allowedOrigin);
+  }
+
+  const cache = caches.default;
+  const cacheKey = new Request(incoming.toString(), request);
+  const cached = await cache.match(cacheKey);
+  if (cached) return cached;
+
+  let upstreamResponse;
+  try {
+    upstreamResponse = await fetch(upstream.toString(), {
+      headers: { "User-Agent": TRANSIT_USER_AGENT, Accept: "application/json" },
+    });
+  } catch (err) {
+    return jsonResponse({ error: `Transitous request failed: ${err.message}` }, 502, allowedOrigin);
+  }
+
+  const response = new Response(await upstreamResponse.text(), {
+    status: upstreamResponse.status,
+    headers: {
+      "Content-Type": "application/json",
+      "Cache-Control": `public, max-age=${CACHE_TTL_SECONDS}`,
+      ...corsHeaders(allowedOrigin),
+    },
+  });
+  if (upstreamResponse.ok) {
+    ctx.waitUntil(cache.put(cacheKey, response.clone()));
+  }
+  return response;
+}
+
 export default {
   async fetch(request, env, ctx) {
     const allowedOrigin = env.ALLOWED_ORIGIN || "*";
@@ -220,6 +295,10 @@ export default {
     }
     if (request.method !== "GET") {
       return jsonResponse({ error: "Only GET is supported." }, 405, allowedOrigin);
+    }
+    const requestUrl = new URL(request.url);
+    if (requestUrl.pathname.replace(/^\/+/, "").startsWith("transit/")) {
+      return handleTransitRequest(requestUrl, request, ctx, allowedOrigin);
     }
     if (!env.TRAVELPAYOUTS_TOKEN) {
       return jsonResponse({ error: "Proxy is not configured (missing TRAVELPAYOUTS_TOKEN secret)." }, 500, allowedOrigin);

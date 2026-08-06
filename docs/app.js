@@ -617,6 +617,175 @@ async function fetchRealFlightOffers(route) {
 }
 
 /* =========================================================================
+ * Real train/bus connections via Transitous (MOTIS) - free, no key, no
+ * account. Mirrors traveldeals/providers/transitous.py.
+ *
+ * These offers carry NO price: Transitous serves official timetable feeds,
+ * which contain no fares. Every offer here is flagged priceKnown: false, and
+ * the whole pipeline below - filtering, ranking, rendering - is written to
+ * treat that as "unknown", never as "free" and never as a number to show.
+ * Making one up instead is exactly how a 42 EUR train that did not exist
+ * once ended up on screen.
+ * ===================================================================== */
+const TRANSIT_DEPART_ANCHORS = ['06:00', '12:00', '18:00'];
+const TRANSIT_ITINERARIES_PER_REQUEST = 5;
+// A free community service answers these requests; a wide flex window must
+// not turn into dozens of them. Anchors x days is the real request count.
+const TRANSIT_MAX_DAYS = 4;
+
+// Which MOTIS leg modes actually count as the searched mode. Anything else
+// (WALK, SUBWAY, ...) is fine as a connecting leg but doesn't make the
+// itinerary a long-distance train or coach journey.
+const TRANSIT_LEG_MODES = {
+  train: ['HIGHSPEED_RAIL', 'LONG_DISTANCE', 'NIGHT_RAIL', 'REGIONAL_FAST_RAIL', 'REGIONAL_RAIL', 'RAIL'],
+  bus: ['COACH', 'BUS'],
+};
+// Deliberately wider than the above: getting to the long-distance station
+// usually needs a local leg, and forbidding those drops valid connections.
+const TRANSIT_REQUEST_MODES = {
+  train: 'HIGHSPEED_RAIL,LONG_DISTANCE,NIGHT_RAIL,REGIONAL_FAST_RAIL,REGIONAL_RAIL,SUBURBAN,SUBWAY,TRAM,WALK',
+  bus: 'COACH,BUS,SUBURBAN,SUBWAY,TRAM,WALK',
+};
+
+// MOTIS answers in UTC ("2026-09-15T08:37:00Z"); everything else in this app
+// works with Date objects read in wall-clock terms (getHours() etc). So a
+// timestamp is re-read in the *station's* timezone and rebuilt as a local
+// Date with those wall-clock parts - a train leaving Berlin at 10:37 then
+// reads as 10:37 no matter which timezone the visitor's browser is in.
+function zonedWallClock(utcIso, tz) {
+  return new Intl.DateTimeFormat('sv-SE', {
+    timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+  }).format(new Date(utcIso)); // "2026-09-15 10:37:00"
+}
+
+function zonedDate(utcIso, tz) {
+  try {
+    const [datePart, timePart] = zonedWallClock(utcIso, tz).split(' ');
+    const [y, mo, d] = datePart.split('-').map(Number);
+    const [h, mi] = timePart.split(':').map(Number);
+    return new Date(y, mo - 1, d, h, mi);
+  } catch (e) {
+    return new Date(utcIso); // unknown timezone - browser-local is the best guess left
+  }
+}
+
+// The reverse: a wall-clock time in `tz` -> the UTC instant to ask MOTIS for.
+// Single-pass offset lookup, which can be an hour off exactly across a DST
+// switch - the anchors are 06:00/12:00/18:00, never inside that 02:00-03:00
+// window, and being an hour early on a search anchor costs nothing anyway.
+function anchorToUtcIso(day, hhmm, tz) {
+  const [h, mi] = hhmm.split(':').map(Number);
+  const asIfUtc = Date.UTC(day.getFullYear(), day.getMonth(), day.getDate(), h, mi);
+  let offsetMs = 0;
+  try {
+    const [datePart, timePart] = zonedWallClock(new Date(asIfUtc).toISOString(), tz).split(' ');
+    const [y, mo, d] = datePart.split('-').map(Number);
+    const [hh, mm, ss] = timePart.split(':').map(Number);
+    offsetMs = Date.UTC(y, mo - 1, d, hh, mm, ss) - asIfUtc;
+  } catch (e) {
+    offsetMs = 0; // treat as UTC
+  }
+  return new Date(asIfUtc - offsetMs).toISOString().replace(/\.\d{3}Z$/, 'Z');
+}
+
+function transitLegLabel(leg) {
+  for (const key of ['displayName', 'tripShortName', 'routeShortName', 'routeLongName']) {
+    const value = (leg[key] || '').trim();
+    if (value) return value;
+  }
+  return (leg.mode || '').replace(/_/g, ' ');
+}
+
+// The geocoder mixes stations (type STOP) with POIs (type PLACE) - the top
+// hit for "München Hbf" was a sauna next to the station. Only STOPs route.
+async function transitResolveStop(text) {
+  const payload = await fetchProxyJson('transit/geocode', new URLSearchParams({ text, language: 'de' }));
+  const stops = (Array.isArray(payload) ? payload : []).filter(h => h && h.type === 'STOP' && h.id);
+  if (!stops.length) return null;
+  const needle = text.trim().toLowerCase();
+  return stops.find(h => (h.name || '').trim().toLowerCase() === needle) || stops[0];
+}
+
+function transitItineraryToOffer(itinerary, mode, route, tz) {
+  const legs = itinerary.legs || [];
+  const transitLegs = legs.filter(l => TRANSIT_LEG_MODES[mode].includes(l.mode));
+  // A pure walking/local-transport result is real but not the train or coach
+  // the user is shopping for.
+  if (!transitLegs.length || !itinerary.startTime || !itinerary.endTime) return null;
+
+  const agencies = [];
+  for (const leg of transitLegs) {
+    const agency = (leg.agencyName || '').trim();
+    if (agency && !agencies.includes(agency)) agencies.push(agency);
+  }
+  return {
+    mode,
+    isMock: false,
+    // The one field that makes all the difference: this is a real
+    // connection whose fare this source simply does not carry.
+    priceKnown: false,
+    price: 0,
+    currency: route.currency,
+    // An operator name from an official feed is a fact, and nothing here
+    // claims a bookable price, so showing it verbatim is safe.
+    bookingSite: agencies.join(' / ') || 'Transitous',
+    lineLabel: transitLegs.map(transitLegLabel).join(' → '),
+    depart: zonedDate(itinerary.startTime, tz),
+    durationHours: round2((itinerary.duration || 0) / 3600),
+    bagFee: 0,
+    isLowCost: false,
+    returnDepart: null,
+    stops: Number(itinerary.transfers ?? 0),
+    // Not "no wifi" but "not stated": GTFS carries no on-board amenities, so
+    // these stay false and a search that *requires* them filters these out
+    // rather than getting a claim nobody verified.
+    wifiOnboard: false,
+    powerOutlets: false,
+    legroomCm: null,
+    punctualityPct: null,
+    url: '', // MOTIS itineraries have no booking URL - the operator links below do
+    track: (legs[0]?.from || {}).track || '',
+  };
+}
+
+async function fetchRealTransitOffers(route, mode) {
+  if (!PROXY_URL) return null;
+  const [origin, destination] = await Promise.all([
+    transitResolveStop(route.origin),
+    transitResolveStop(route.destination),
+  ]);
+  if (!origin || !destination) return null;
+  const tz = origin.tz || 'UTC';
+
+  const offers = [];
+  const seen = new Set();
+  for (const day of dayCandidates(route).slice(0, TRANSIT_MAX_DAYS)) {
+    for (const anchor of TRANSIT_DEPART_ANCHORS) {
+      const payload = await fetchProxyJson('transit/plan', new URLSearchParams({
+        fromPlace: origin.id,
+        toPlace: destination.id,
+        time: anchorToUtcIso(day, anchor, tz),
+        numItineraries: String(TRANSIT_ITINERARIES_PER_REQUEST),
+        transitModes: TRANSIT_REQUEST_MODES[mode],
+      }));
+      for (const itinerary of (payload && payload.itineraries) || []) {
+        const offer = transitItineraryToOffer(itinerary, mode, route, tz);
+        if (!offer) continue;
+        // The anchors overlap on purpose, and MOTIS happily rolls past
+        // midnight into a day that was never asked for.
+        if (isoDay(offer.depart) !== isoDay(day)) continue;
+        const key = `${offer.depart.toISOString()}|${offer.lineLabel}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        offers.push(offer);
+      }
+    }
+  }
+  return offers;
+}
+
+/* =========================================================================
  * Currency - live rate via the free Frankfurter API when reachable
  * (this page is a real hosted site, not a sandboxed artifact, so the fetch
  * is allowed), falling back to a static table otherwise.
@@ -742,7 +911,12 @@ function normalize(value, all) {
 // not the same market).
 function flagBelowMedian(candidates) {
   const byMode = {};
-  for (const c of candidates) (byMode[c.mode] ??= []).push(c);
+  for (const c of candidates) {
+    // Price-less options have nothing to compare, and must not drag the
+    // median towards zero for the ones that do.
+    if (c.hasUnknownPrice) continue;
+    (byMode[c.mode] ??= []).push(c);
+  }
   for (const group of Object.values(byMode)) {
     if (group.length < MIN_CANDIDATES_FOR_MEDIAN_DEAL) continue;
     const prices = group.map(c => c.price).sort((a, b) => a - b);
@@ -783,31 +957,48 @@ async function runSearch(route) {
       } else {
         pools[mode] = mockFlightOffers(route);
       }
+    } else if (mode === 'train' || mode === 'bus') {
+      // Real timetables without prices beat invented prices; the mock
+      // generators only step in when Transitous can't resolve the stops or
+      // is unreachable.
+      const real = await fetchRealTransitOffers(route, mode);
+      pools[mode] = (real && real.length)
+        ? real
+        : (mode === 'train' ? mockTrainOffers : mockBusOffers)(route);
     } else {
-      pools[mode] = { train: mockTrainOffers, bus: mockBusOffers, hotel: mockHotelOffers }[mode](route);
+      pools[mode] = mockHotelOffers(route);
     }
     return pools[mode];
   }
 
+  // Mirrors TripOption.has_unknown_price: one price-less leg makes the whole
+  // option's total meaningless, so `price` must not be shown or compared.
+  const candidate = (mode, offers, price, durationHours) => ({
+    mode, offers, price, durationHours,
+    hasUnknownPrice: offers.some(o => o.priceKnown === false),
+  });
+
   let candidates = [];
   for (const mode of route.modes) {
     if (['flight', 'train', 'bus', 'hotel'].includes(mode)) {
-      for (const offer of await pool(mode)) candidates.push({ mode, offers: [offer], price: offer.price, durationHours: offer.durationHours });
+      for (const offer of await pool(mode)) candidates.push(candidate(mode, [offer], offer.price, offer.durationHours));
     } else if (COMBO_TRANSPORT_MODE[mode]) {
       const tMode = COMBO_TRANSPORT_MODE[mode];
       for (const combo of buildCombos(await pool(tMode), await pool('hotel'))) {
-        candidates.push({ mode, offers: [combo.transport, combo.hotel], price: combo.price, durationHours: combo.transport.durationHours });
+        candidates.push(candidate(mode, [combo.transport, combo.hotel], combo.price, combo.transport.durationHours));
       }
     } else if (OR_COMBO_MODES[mode]) {
       const [modeA, modeB] = OR_COMBO_MODES[mode];
       for (const offer of [...(await pool(modeA)), ...(await pool(modeB))]) {
-        candidates.push({ mode, offers: [offer], price: offer.price, durationHours: offer.durationHours });
+        candidates.push(candidate(mode, [offer], offer.price, offer.durationHours));
       }
     }
   }
 
   candidates = candidates.filter(c => {
-    if (route.budget != null && c.price > route.budget) return false;
+    // An unknown price can't blow a budget. Dropping the option would hide a
+    // real connection over a number nobody has.
+    if (route.budget != null && !c.hasUnknownPrice && c.price > route.budget) return false;
     if (route.maxDuration != null && c.durationHours > route.maxDuration && c.mode !== 'hotel') return false;
     if (route.lowCost === 'exclude' && c.offers.some(o => o.isLowCost)) return false;
     if (route.lowCost === 'only') {
@@ -826,8 +1017,11 @@ async function runSearch(route) {
   flagBelowMedian(candidates);
   if (route.dealsOnly) candidates = candidates.filter(c => c.isBelowMedian);
 
-  const prices = candidates.map(c => c.price);
-  const durations = candidates.map(c => c.durationHours);
+  // Normalize against priced candidates only - a placeholder 0 would
+  // otherwise become the price minimum and squash every real one.
+  const priced = candidates.filter(c => !c.hasUnknownPrice);
+  const prices = (priced.length ? priced : candidates).map(c => c.price);
+  const durations = (priced.length ? priced : candidates).map(c => c.durationHours);
   for (const c of candidates) {
     if (route.priority === 'cheapest') c.score = c.price;
     else if (route.priority === 'most_expensive') c.score = -c.price;  // sorted ascending, so negate
@@ -843,7 +1037,10 @@ async function runSearch(route) {
               + BEST_VALUE_COMFORT_WEIGHT * discomfort;
     }
   }
-  candidates.sort((a, b) => a.score - b.score);
+  // Price-less options sort behind every priced one whatever the priority
+  // is: their 0 is a placeholder, and letting it compete would park them at
+  // the very top of a "Preis aufsteigend" search as though they were free.
+  candidates.sort((a, b) => (a.hasUnknownPrice - b.hasUnknownPrice) || (a.score - b.score));
   const top = candidates.slice(0, MAX_RESULTS_SHOWN);
 
   const rates = await getRatesPerEur();
@@ -852,11 +1049,22 @@ async function runSearch(route) {
     const primary = c.offers[0];
     const samePool = pools[primary.mode] || [];
 
+    if (c.hasUnknownPrice) {
+      // Everything below is about money - savings hints, currency
+      // equivalents - and none of it may run on a placeholder price. Say
+      // what is actually known and move on.
+      c.recommendations.push(
+        `🕓 Echte Verbindung laut Fahrplan (${primary.lineLabel || primary.bookingSite})` +
+        `${primary.track ? `, Gleis ${primary.track}` : ''} – Preis liefert diese Quelle nicht, bitte beim Anbieter prüfen.`
+      );
+      continue;
+    }
+
     if (['flight', 'train', 'bus'].includes(primary.mode)) {
       // Only compare against offers that also satisfy the route's own
       // transport constraints (esp. the depart-time window) - otherwise
       // this could suggest a time the user already said doesn't work.
-      const eligiblePool = samePool.filter(o => meetsTransportPrefs(o, route.transportPrefs));
+      const eligiblePool = samePool.filter(o => o.priceKnown !== false && meetsTransportPrefs(o, route.transportPrefs));
       const sameDayLater = eligiblePool.filter(o =>
         isoDay(o.depart) === isoDay(primary.depart) && o.depart > primary.depart && o.price < primary.price
       );
@@ -1018,9 +1226,31 @@ async function fetchLivePlaces(term, { includeAirports }) {
   }
 }
 
+// Live station lookup through the same Transitous geocoder the search
+// itself routes with - so a picked suggestion is guaranteed to resolve to a
+// stop later on. RAIL_STATIONS stays as the offline fallback (and for when
+// the proxy isn't configured at all).
+async function fetchTransitStops(term) {
+  if (term.trim().length < 2 || !PROXY_URL) return filterRailStations(term);
+  const payload = await fetchProxyJson('transit/geocode', new URLSearchParams({ text: term, language: 'de' }));
+  const stops = (Array.isArray(payload) ? payload : []).filter(h => h && h.type === 'STOP' && h.name);
+  if (!stops.length) return filterRailStations(term);
+  const seen = new Set();
+  const suggestions = [];
+  for (const stop of stops) {
+    // The geocoder returns one entry per platform/feed for a big station;
+    // the name is what gets typed back into the field, so collapse them.
+    if (seen.has(stop.name)) continue;
+    seen.add(stop.name);
+    suggestions.push({ label: `🚉 ${stop.name}${stop.country ? ` – ${stop.country}` : ''}`, value: stop.name });
+    if (suggestions.length === 8) break;
+  }
+  return suggestions;
+}
+
 function placeSuggestions(term) {
   const source = MODE_TAB_CONFIG[activeMode].placeSource;
-  if (source === 'rail') return Promise.resolve(filterRailStations(term));
+  if (source === 'rail') return fetchTransitStops(term);
   if (source === 'city') return fetchLivePlaces(term, { includeAirports: false });
   return fetchLivePlaces(term, { includeAirports: true });
 }
@@ -1240,12 +1470,15 @@ function isMockOption(opt) {
 function renderResults(route, options, usedRealFlightData) {
   const label = route.origin ? `${route.origin} → ${route.destination}` : route.destination;
   const mockCount = options.filter(isMockOption).length;
-  const realCount = options.length - mockCount;
-  // Report both counts instead of one blanket label: the old version said
-  // "echte Travelpayouts-Preise" for the whole list as soon as *flights*
-  // were real, which mislabelled every invented train/bus/hotel row.
+  const timetableCount = options.filter(o => o.hasUnknownPrice).length;
+  const realCount = options.length - mockCount - timetableCount;
+  // Report each bucket separately instead of one blanket label: the old
+  // version said "echte Travelpayouts-Preise" for the whole list as soon as
+  // *flights* were real, which mislabelled every invented train/bus/hotel
+  // row. A real connection without a price is its own third category.
   const parts = [];
   if (realCount) parts.push(`${realCount} mit echten Preisen`);
+  if (timetableCount) parts.push(`${timetableCount} echte Verbindungen ohne Preis`);
   if (mockCount) parts.push(`${mockCount} Beispieldaten`);
   const dealsLabel = route.dealsOnly ? ', nur Deals' : '';
   searchMetaEl.textContent = `${options.length} Angebote für ${label} (${parts.join(', ')}${dealsLabel})`;
@@ -1261,21 +1494,35 @@ function renderResults(route, options, usedRealFlightData) {
     <p class="mock-warning">⚠️ <strong>${mockCount} dieser Angebote sind Beispieldaten</strong> - erfundene Preise zum Testen
     der Vergleichslogik, keine buchbaren Verbindungen. Echte Preise gibt es aktuell nur für Flüge.
     Für Bahn, Bus und Hotel unten direkt beim jeweiligen Anbieter nachsehen.</p>` : '';
+  const timetableNote = timetableCount ? `
+    <p class="timetable-note">🕓 <strong>${timetableCount} echte Verbindungen ohne Preis</strong> - Fahrplandaten von
+    <a href="https://transitous.org" target="_blank" rel="noopener">Transitous</a> (offizielle Verkehrsverbund-Feeds,
+    kostenlos und ohne Anmeldung). Diese Quelle enthält keine Fahrpreise, deshalb steht hier kein Preis statt eines
+    erfundenen. Zeiten, Linie und Umstiege stimmen - den Preis unten beim Anbieter prüfen.</p>` : '';
 
   searchResultsEl.innerHTML = `
     ${warning}
+    ${timetableNote}
     <div class="route">
       ${options.map((opt, i) => {
         const mock = isMockOption(opt);
+        const noPrice = Boolean(opt.hasUnknownPrice);
+        // Never format the 0 placeholder as a price - that is the whole
+        // reason priceKnown exists.
+        const priceHtml = noPrice
+          ? '<span class="price price-unknown">Preis unbekannt</span>'
+          : `<span class="price mono">${opt.price.toFixed(2)} ${route.currency}</span>`;
+        const line = opt.offers.map(o => o.lineLabel).filter(Boolean).join(', ');
         return `
-        <div class="option${mock ? ' is-mock' : ''}">
+        <div class="option${mock ? ' is-mock' : ''}${noPrice ? ' is-timetable' : ''}">
           <span class="rank mono">${i + 1}</span>
           <div class="price-row">
-            <span class="price mono">${opt.price.toFixed(2)} ${route.currency}</span>
+            ${priceHtml}
             ${mock ? '<span class="badge warn">Beispieldaten – nicht buchbar</span>' : ''}
+            ${noPrice ? '<span class="badge info">Echter Fahrplan – Preis beim Anbieter</span>' : ''}
             ${opt.isBelowMedian ? '<span class="badge good">Deal</span>' : ''}
           </div>
-          <span class="subline mono">${opt.mode} · ${fmtShort(opt.offers[0].depart)}${opt.offers[0].returnDepart ? ` · zurück ${fmtShort(opt.offers[0].returnDepart)}` : ''} · ${opt.durationHours}h · ${opt.offers.map(o => bookingSiteHtml(o.bookingSite, o.url)).join(', ')}</span>
+          <span class="subline mono">${opt.mode}${line ? ` · ${line}` : ''} · ${fmtShort(opt.offers[0].depart)}${opt.offers[0].returnDepart ? ` · zurück ${fmtShort(opt.offers[0].returnDepart)}` : ''} · ${opt.durationHours}h · ${opt.offers.map(o => bookingSiteHtml(o.bookingSite, o.url)).join(', ')}</span>
           <div class="chips">${opt.offers.flatMap(offerChips).map(c => `<span class="chip">${c}</span>`).join('')}</div>
           ${opt.recommendations.length ? `<ul class="recs">${opt.recommendations.map(r => `<li>${r}</li>`).join('')}</ul>` : ''}
         </div>`;
@@ -1473,16 +1720,24 @@ async function loadAlerts() {
         // the dashboard can flag invented prices the same way the live
         // search does.
         const mock = opt.offers.some(o => (o.provider || '').startsWith('mock'));
+        // Timetable sources (Transitous) write total_price 0.0 with
+        // has_unknown_price set - printing that as "0.00 EUR" would be the
+        // exact failure mode price_known exists to prevent.
+        const noPrice = Boolean(opt.has_unknown_price);
+        const line = opt.offers.map(o => o.line_label).filter(Boolean).join(', ');
         return `
-        <div class="option${mock ? ' is-mock' : ''}">
+        <div class="option${mock ? ' is-mock' : ''}${noPrice ? ' is-timetable' : ''}">
           <span class="rank mono">${i + 1}</span>
           <div class="price-row">
-            <span class="price mono">${opt.total_price.toFixed(2)} ${opt.currency}</span>
+            ${noPrice
+              ? '<span class="price price-unknown">Preis unbekannt</span>'
+              : `<span class="price mono">${opt.total_price.toFixed(2)} ${opt.currency}</span>`}
             ${mock ? '<span class="badge warn">Beispieldaten – nicht buchbar</span>' : ''}
+            ${noPrice ? '<span class="badge info">Echter Fahrplan – Preis beim Anbieter</span>' : ''}
             ${opt.is_error_fare ? '<span class="badge alert">Fehlerpreis</span>' : ''}
             ${opt.is_price_drop ? '<span class="badge good">Preis gefallen</span>' : ''}
           </div>
-          <span class="subline mono">${opt.mode} · ${opt.total_duration_hours > 0 ? opt.total_duration_hours + 'h' : 'Dauer unbekannt'}${opt.offers[0].return_depart_time ? ` · zurück ${opt.offers[0].return_depart_time.slice(0, 16).replace('T', ' ')}` : ''} · ${opt.offers.map(o => bookingSiteHtml(o.booking_site, o.url)).join(', ')}</span>
+          <span class="subline mono">${opt.mode}${line ? ` · ${line}` : ''} · ${opt.total_duration_hours > 0 ? opt.total_duration_hours + 'h' : 'Dauer unbekannt'}${opt.offers[0].return_depart_time ? ` · zurück ${opt.offers[0].return_depart_time.slice(0, 16).replace('T', ' ')}` : ''} · ${opt.offers.map(o => bookingSiteHtml(o.booking_site, o.url)).join(', ')}</span>
           ${opt.recommendations.length ? `<ul class="recs">${opt.recommendations.map(r => `<li>${r}</li>`).join('')}</ul>` : ''}
         </div>`;
       }).join('')}

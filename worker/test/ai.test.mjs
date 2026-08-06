@@ -24,13 +24,21 @@ function aiRequest(prompt = 'Test-Prompt') {
 }
 const ctx = { waitUntil() {} };
 
+// Counted so a failure actually fails the run - printing FAIL while exiting 0
+// would make `npm test` green no matter what broke.
+let failures = 0;
+function report(ok, label) {
+  console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}`);
+  if (!ok) failures += 1;
+}
+
 async function check(label, env, responder, expect) {
   stubFetch(responder);
   const resp = await worker.fetch(aiRequest(), env, ctx);
   const body = await resp.json();
   const last = globalThis.__last;
   const ok = expect(resp.status, body, last);
-  console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}`);
+  report(ok, label);
   if (!ok) console.log('   status', resp.status, '\n   body', JSON.stringify(body), '\n   url', last?.url);
 }
 
@@ -95,13 +103,14 @@ stubFetch(() => ({ status: 200, body: {} }));
   const resp = await worker.fetch(new Request('https://proxy.test/ai', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
   }), { GROQ_API_KEY: 'q' }, ctx);
-  console.log(`${resp.status === 400 ? 'PASS' : 'FAIL'}  missing prompt -> 400`);
+  report(resp.status === 400, 'missing prompt -> 400');
 }
 
 // 10. GET on /ai is rejected
 {
   const resp = await worker.fetch(new Request('https://proxy.test/ai'), { GROQ_API_KEY: 'q' }, ctx);
-  console.log(`${resp.status === 405 ? 'PASS' : 'FAIL'}  GET /ai -> 405`);
+  report(resp.status === 405, 'GET /ai -> 405');
 }
 
 globalThis.fetch = realFetch;
+if (failures) process.exitCode = 1;

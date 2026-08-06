@@ -220,7 +220,11 @@ class DealEngine:
         _flag_below_median(candidates)
         for c in candidates:
             c.score = self._score(c, route.priority, candidates, route)
-        candidates.sort(key=lambda c: c.score)
+        # Options with no known price (timetable sources like Transitous) sort
+        # behind every priced one whatever the priority is: their total_price
+        # of 0.0 is a placeholder, and letting it compete would park them at
+        # the very top of a "cheapest" search as though they were free.
+        candidates.sort(key=lambda c: (c.has_unknown_price, c.score))
 
         if route.deals_only:
             # is_error_fare/is_price_drop come from the price history and are
@@ -265,7 +269,10 @@ class DealEngine:
     # -- filtering & scoring --------------------------------------------------
 
     def _meets_hard_constraints(self, option: TripOption, route: RoutePreference) -> bool:
-        if route.budget is not None and option.total_price > route.budget:
+        # An unknown price can't be compared to a budget. Dropping the option
+        # would hide a real connection over a number we don't have; keeping it
+        # is honest, and it is clearly labelled as price-less further down.
+        if route.budget is not None and not option.has_unknown_price and option.total_price > route.budget:
             return False
         if route.max_duration_hours is not None and option.total_duration_hours > route.max_duration_hours:
             # hotel-only trips have no transport duration constraint
@@ -299,8 +306,11 @@ class DealEngine:
             # date). Price breaks ties so the ordering stays deterministic
             # instead of depending on provider order.
             return _date_deviation_days(option, route) * 100_000 + option.total_price
-        prices = [c.total_price for c in all_candidates]
-        durations = [c.total_duration_hours for c in all_candidates]
+        # Normalize against priced candidates only - a placeholder 0.0 would
+        # otherwise become the price minimum and squash every real one.
+        priced = [c for c in all_candidates if not c.has_unknown_price] or all_candidates
+        prices = [c.total_price for c in priced]
+        durations = [c.total_duration_hours for c in priced]
         price_norm = _normalize(option.total_price, prices)
         duration_norm = _normalize(option.total_duration_hours, durations)
         discomfort_norm = 1 - comfort_score(option)
@@ -313,6 +323,18 @@ class DealEngine:
     def _annotate(self, option: TripOption, route: RoutePreference, offer_pools: dict[Mode, list[Offer]]) -> None:
         transport_offer = option.offers[0]
         same_mode_pool = offer_pools.get(transport_offer.mode, [])
+
+        if option.has_unknown_price:
+            # Every remaining annotation is about money: savings hints,
+            # currency equivalents, price-drop/error-fare detection, and
+            # feeding the price history. None of them may run on a
+            # placeholder price - so say what is known and stop here.
+            line = transport_offer.line_label or transport_offer.booking_site
+            option.recommendations.append(
+                f"🕓 Echte Verbindung laut Fahrplan ({line}) – "
+                "Preis liefert diese Quelle nicht, bitte beim Anbieter prüfen."
+            )
+            return
 
         self._add_later_departure_hint(option, transport_offer, same_mode_pool, route)
         self._add_baggage_hint(option, transport_offer, route)
@@ -339,7 +361,7 @@ class DealEngine:
         # transport constraints (esp. the depart-time window) - otherwise
         # this could suggest a time the user already said doesn't work for
         # them, which would contradict their own stated flexibility.
-        eligible_pool = [o for o in pool if _meets_transport_constraints(o, route.transport)]
+        eligible_pool = [o for o in pool if o.price_known and _meets_transport_constraints(o, route.transport)]
         same_day_later = [
             o for o in eligible_pool
             if o.depart_time[:10] == offer.depart_time[:10]
@@ -395,6 +417,10 @@ def _flag_below_median(candidates: list[TripOption]) -> None:
     """
     by_mode: dict[Mode, list[TripOption]] = {}
     for c in candidates:
+        # Price-less options neither have a price to compare nor may they drag
+        # the median towards zero for the ones that do.
+        if c.has_unknown_price:
+            continue
         by_mode.setdefault(c.mode, []).append(c)
     for group in by_mode.values():
         if len(group) < MIN_CANDIDATES_FOR_MEDIAN_DEAL:

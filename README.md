@@ -9,7 +9,8 @@ auf einem Dashboard die besten aktuellen Optionen pro Strecke zeigt.
 > | Modus | Datenquelle |
 > |---|---|
 > | **Flug** | **echte Preise** (Travelpayouts/Aviasales), sobald ein Token gesetzt ist |
-> | **Bahn, Bus, Hotel** | **erfundene Beispieldaten** - keine buchbaren Angebote |
+> | **Bahn, Bus** | **echte Verbindungen, aber ohne Preis** (Transitous/MOTIS): richtige Linie (ICE 1007), Abfahrtszeit, Gleis, Umstiege – nur **kein Preis**, weil die Quelle keinen führt. Dort steht "Preis unbekannt" statt einer erfundenen Zahl. |
+> | **Hotel** | **erfundene Beispieldaten** - keine buchbaren Angebote |
 >
 > **Belegt, nicht vermutet** (Stand 06.08.2026, gegen die Live-Endpunkte
 > geprüft): Für Bahn/Bus/Hotel-*Preise* gibt es keine kostenlose Quelle ohne
@@ -20,21 +21,25 @@ auf einem Dashboard die besten aktuellen Optionen pro Strecke zeigt.
 > | `v6.db.transport.rest` (DB-Wrapper) | **HTTP 503** – Dienst nicht verfügbar |
 > | `v5.db.transport.rest` | HTTP 503 |
 > | `flixbus.transport.rest` | Domain existiert nicht |
-> | **`api.transitous.org`** (MOTIS) | **funktioniert** – echte Verbindungen/Zeiten, aber `fares: 0`, also **keine Preise** |
+> | **`api.transitous.org`** (MOTIS) | **funktioniert** – echte Verbindungen/Zeiten, aber `fares: 0`, also **keine Preise**. **Ist jetzt eingebaut** (siehe unten). |
 > | `v6.vbb` / `v6.bvg.transport.rest` | 200, aber nur Berliner Nahverkehr |
 > | OpenTripMap (Hotels) | 401 – Schlüssel erforderlich |
 >
-> Nutzbar wäre also **Transitous für echte Fahrpläne** (ICE/TGV-Verbindungen,
-> Abfahrtszeiten, Umstiege) – Preise müssten weiterhin beim Anbieter geprüft
-> werden. Siehe Roadmap.
+> **Was daraus geworden ist:** Bahn und Bus laufen nicht mehr auf erfundenen
+> Preisen, sondern auf echten Fahrplandaten von Transitous - ohne Schlüssel,
+> ohne Anmeldung, gespeist aus den offiziellen Verkehrsverbund-Feeds. Eine
+> Zeile zeigt also die tatsächliche Verbindung und ausdrücklich **keinen**
+> Preis. Das ist bewusst so: ein echter ICE ohne Preisangabe ist mehr wert
+> als eine plausible Zahl, die niemand buchen kann.
 >
-> Für Bahn, Bus und Hotel existiert keine frei nutzbare Preis-API. Diese
-> Modi laufen auf generierten Zufallspreisen, mit denen die Vergleichs- und
+> Für **Hotels** existiert weiterhin keine frei nutzbare Quelle; dieser Modus
+> läuft auf generierten Zufallspreisen, mit denen die Vergleichs- und
 > Ranking-Logik getestet wird. **Solche Angebote lassen sich nirgends
 > buchen** - sie sind in der Oberfläche mit Warnbanner, durchgestrichenem
-> Preis und "Nicht buchbar"-Abzeichen gekennzeichnet, und unter den
-> Ergebnissen stehen Direktlinks zu den echten Anbietern (DB, SNCF Connect
-> für TGV, Trainline, FlixBus, BlaBlaCar Bus, Omio, Lastminute …).
+> Preis und "Nicht buchbar"-Abzeichen gekennzeichnet. Unter den Ergebnissen
+> stehen in jedem Fall Direktlinks zu den echten Anbietern (DB, SNCF Connect
+> für TGV, Trainline, FlixBus, BlaBlaCar Bus, Omio, Lastminute …), um den
+> Preis dort zu prüfen.
 >
 > Bis Version vom 06.08.2026 trugen diese Beispielangebote echte
 > Anbieternamen wie "DB Navigator" - das war irreführend und ist behoben.
@@ -45,11 +50,14 @@ auf einem Dashboard die besten aktuellen Optionen pro Strecke zeigt.
 > Selfservice-Konto, kein Vertrag). Amadeus wird als zweite echte Quelle
 > weiterhin unterstützt, aber nur für Enterprise-Zugänge - die kostenlose
 > Amadeus-Self-Service-API wurde im Juli 2026 abgeschaltet. Ohne eine dieser
-> beiden Zugangsdaten - und Bahn/Bus/Hotel immer - läuft es auf
-> **Mock-Providern** (siehe "Warum Mock-Daten?"). Die komplette Pipeline
-> (Einstellungen, Ranking, Empfehlungen, Alerts, Dashboard, Cronjob)
-> funktioniert so oder so Ende-zu-Ende. Nächster Schritt: Bahn/Bus/Hotel
-> ebenfalls durch echte APIs ersetzen (Roadmap unten).
+> beiden Zugangsdaten läuft der Flug-Modus auf **Mock-Providern** (siehe
+> "Warum Mock-Daten?"). **Bahn und Bus** brauchen dagegen gar keine
+> Zugangsdaten mehr: sie kommen über `providers/transitous.py` aus echten
+> Fahrplandaten - dafür ohne Preis. Nur **Hotel** ist noch komplett
+> Beispieldaten. Die komplette Pipeline (Einstellungen, Ranking,
+> Empfehlungen, Alerts, Dashboard, Cronjob) funktioniert so oder so
+> Ende-zu-Ende. Nächster Schritt: Preise für Bahn/Bus und eine echte
+> Hotel-Quelle (Roadmap unten).
 
 ## Was der Bot kann
 
@@ -87,8 +95,12 @@ auf einem Dashboard die besten aktuellen Optionen pro Strecke zeigt.
 - **Von/Nach-Autocomplete:** Stadt eintippen, passenden Flughafen/Bahnhof
   auswählen - wie auf gängigen Reiseplattformen. Flug/Hotel nutzen die
   echte, öffentliche Travelpayouts-Places-API (`autocomplete.travelpayouts.com`,
-  kein Token nötig), Bahn/Bus eine kuratierte statische Liste großer
-  DACH-/europäischer Bahnhöfe (dafür ist keine freie API bekannt).
+  kein Token nötig), Bahn/Bus den Transitous-Geocoder - also genau die
+  Haltestellen-Datenbank, mit der anschließend auch geroutet wird, damit ein
+  ausgewählter Vorschlag garantiert auflösbar ist. Nur Hotels/POIs werden
+  dabei aussortiert (der Top-Treffer für "München Hbf" war eine Sauna
+  nebenan). Fällt Transitous aus, greift eine kuratierte statische Liste
+  großer DACH-/europäischer Bahnhöfe.
 - **Hin- und Rückreise:** bei Flug/Bahn/Bus (und deren "was ist besser"-Kombis)
   lässt sich zwischen Nur-Hinfahrt und Hin+Rück wählen (`round_trip` +
   `return_date` in `RoutePreference`). Bei echten Travelpayouts-Daten liefert
@@ -204,10 +216,20 @@ trotzdem sofort die komplette Logik - Einstellungen, Ranking nach
 `cheapest`/`fastest`/`best_value`, alle Empfehlungs-Regeln, Alert-Versand,
 Dashboard, Cronjob - steht und getestet werden kann, generiert
 `providers/mock.py` deterministische, aber plausible Angebote (inkl.
-gelegentlich einem künstlichen "Fehlerpreis" zur Demo). Jeder verbleibende
-Mock-Provider (Bahn/Bus/Hotel) hat in `providers/real.py` ein Gegenstück, das
-nur noch die echte API anbinden muss - die Schnittstelle (`Provider.search`)
-bleibt gleich.
+gelegentlich einem künstlichen "Fehlerpreis" zur Demo).
+
+Für **Bahn und Bus** ist das inzwischen nur noch der Notnagel: normalerweise
+antwortet `providers/transitous.py` mit echten Verbindungen, und die
+Mock-Generatoren springen nur ein, wenn Transitous die Haltestellen nicht
+auflösen kann oder nicht erreichbar ist. Übrig bleibt **Hotel** als einziger
+Modus, der grundsätzlich auf erfundenen Preisen läuft.
+
+**Die Regel dahinter:** Ein erfundener Preis darf nie wie ein buchbarer
+aussehen. Kennt eine Quelle die Verbindung, aber nicht den Preis, wird
+`Offer.price_known = False` gesetzt - dann steht in der Oberfläche "Preis
+unbekannt", die Zeile zählt nirgends als Deal, taucht in keiner
+Preishistorie auf und rutscht auch bei "Preis aufsteigend" nicht nach oben,
+als wäre sie kostenlos.
 
 ## Travelpayouts einrichten (echte Flugpreise, empfohlen)
 
@@ -431,9 +453,17 @@ ersetzen (Interface bleibt gleich, s.o.):
   ein ungetestetes Schema implementiert. Alternativ: Duffel im Test-Modus
   (kostenlos, aber Fake-Sandbox-Daten) oder ein Kiwi-Tequila-Partnerzugang
   (mittlerweile nur noch auf Anfrage, kein offenes Selfservice mehr).
-- **Bahn:** kein offenes Preis-API von der DB; `db-vendo-client` (Community,
-  inoffiziell) oder ein kommerzieller Distributor wie Trainline Partner API.
-- **Bus:** FlixBus hat kein offenes Self-Serve-API, nur ein Partnerprogramm.
+- **Bahn:** ✅ Fahrpläne erledigt - `providers/transitous.py` liefert echte
+  Verbindungen über `api.transitous.org` (MOTIS, kostenlos, ohne Schlüssel
+  und ohne Anmeldung, gespeist aus offiziellen GTFS-Feeds). **Preise fehlen
+  dort und werden bewusst nicht erfunden** (`Offer.price_known = False`).
+  Offen bleibt also nur der Preis: die DB hat kein offenes Preis-API;
+  denkbar wären `db-vendo-client` (Community, inoffiziell - die öffentlichen
+  Wrapper antworteten zuletzt mit 503) oder ein kommerzieller Distributor
+  wie die Trainline Partner API.
+- **Bus:** ✅ Fahrpläne erledigt - derselbe Transitous-Provider mit
+  `COACH`/`BUS`-Modi. Preise ebenfalls offen: FlixBus hat kein offenes
+  Self-Serve-API, nur ein Partnerprogramm.
 - **Hotel:** Booking.com Affiliate Partner Program oder Trivago Publisher
   Program - beide erfordern eine Bewerbung/Freischaltung.
 - **Multi-Währungs-Preisvergleich (echt):** aktuell nur informative
