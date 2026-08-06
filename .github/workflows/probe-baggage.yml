@@ -1,0 +1,117 @@
+name: Probe baggage fields
+
+# Wegwerf-Workflow: welche der echten Preisquellen sagt ueberhaupt, was an
+# Gepaeck im Preis enthalten ist? Ohne diese Antwort waere jede Kilo-Angabe
+# im Angebot geraten - genau der Fehler, den dieses Projekt nicht nochmal
+# machen darf. Wird nach der Auswertung geloescht.
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Antworten nach Gepaeck-Feldern durchsuchen
+        run: |
+          python3 - <<'PY'
+          import json, urllib.parse, urllib.request
+
+          BASE = "https://hackyourtrip-proxy.iamanamelessman.workers.dev"
+          HDRS = {"User-Agent": "HackYourTrip-Probe/1.0"}
+
+          # Alles, was auch nur entfernt nach Gepaeck klingt.
+          NEEDLES = ("bag", "baggage", "luggage", "gepaeck", "gepäck", "cabin",
+                     "carry", "hand_lug", "handlug", "kg", "weight", "allowance",
+                     "included", "fare_family", "farefamily", "product", "tariff")
+
+          def get(path):
+              req = urllib.request.Request(f"{BASE}{path}", headers=HDRS)
+              with urllib.request.urlopen(req, timeout=60) as r:
+                  return json.load(r)
+
+          def walk(node, path=""):
+              """Jeden Schluessel melden, dessen Name nach Gepaeck klingt."""
+              hits = []
+              if isinstance(node, dict):
+                  for key, value in node.items():
+                      here = f"{path}.{key}"
+                      if any(n in key.lower() for n in NEEDLES):
+                          preview = json.dumps(value, ensure_ascii=False)[:160]
+                          hits.append((here, preview))
+                      hits += walk(value, here)
+              elif isinstance(node, list):
+                  for i, value in enumerate(node[:3]):
+                      hits += walk(value, f"{path}[{i}]")
+              return hits
+
+          def report(name, payload, sample_path=None):
+              print(f"\n===== {name} =====")
+              hits = walk(payload)
+              if not hits:
+                  print("  KEIN Gepaeck-Feld gefunden")
+              for where, preview in hits[:25]:
+                  print(f"  {where} = {preview}")
+              if sample_path:
+                  # Alle Schluesselnamen einer Beispiel-Verbindung, damit auch
+                  # anders benannte Felder auffallen.
+                  node = payload
+                  try:
+                      for step in sample_path:
+                          node = node[step]
+                      print("  -- alle Schluessel eines Eintrags:",
+                            sorted(node.keys()) if isinstance(node, dict) else type(node).__name__)
+                  except Exception as exc:
+                      print("  (Beispielpfad nicht erreichbar:", exc, ")")
+
+          # --- Ryanair -------------------------------------------------------
+          q = urllib.parse.urlencode({
+              "departureAirportIataCode": "BER", "arrivalAirportIataCode": "BCN",
+              "outboundDepartureDateFrom": "2026-09-01",
+              "outboundDepartureDateTo": "2026-09-30",
+              "currency": "EUR", "language": "de", "market": "de-de", "limit": 5,
+          })
+          try:
+              ry = get(f"/ryanair/oneWayFares?{q}")
+              report("Ryanair oneWayFares", ry, ["fares", 0])
+              print("  -- Rohbeispiel:", json.dumps((ry.get("fares") or [{}])[0], ensure_ascii=False)[:700])
+          except Exception as exc:
+              print("Ryanair FEHLER", exc)
+
+          # --- FlixBus -------------------------------------------------------
+          try:
+              cities = get("/flixbus/cities?" + urllib.parse.urlencode({"q": "Berlin", "lang": "de"}))
+              muc = get("/flixbus/cities?" + urllib.parse.urlencode({"q": "München", "lang": "de"}))
+              frm, to = cities[0]["id"], muc[0]["id"]
+              q = urllib.parse.urlencode({
+                  "from_city_id": frm, "to_city_id": to, "departure_date": "15.09.2026",
+                  "products": '{"adult":1}', "currency": "EUR", "locale": "de",
+                  "search_by": "cities", "include_after_midnight_rides": "1",
+              })
+              fx = get(f"/flixbus/search?{q}")
+              report("FlixBus search", fx)
+              trips = fx.get("trips") or []
+              if trips:
+                  results = list((trips[0].get("results") or {}).values())
+                  if results:
+                      print("  -- alle Schluessel eines Trips:", sorted(results[0].keys()))
+                      print("  -- Rohbeispiel:", json.dumps(results[0], ensure_ascii=False)[:900])
+          except Exception as exc:
+              print("FlixBus FEHLER", exc)
+
+          # --- Skiplagged ----------------------------------------------------
+          try:
+              q = urllib.parse.urlencode({"from": "HAM", "to": "LYS", "depart": "2026-09-15"})
+              sk = get(f"/skiplagged?{q}")
+              print("\n===== Skiplagged =====")
+              print("  Top-Level-Schluessel:", sorted(sk.keys()))
+              hits = walk({k: v for k, v in sk.items() if k != "flights"})
+              for where, preview in hits[:20]:
+                  print(f"  {where} = {preview}")
+              depart = sk.get("depart") or []
+              if depart:
+                  print("  -- ein Eintrag aus 'depart':",
+                        json.dumps(depart[0], ensure_ascii=False)[:600])
+          except Exception as exc:
+              print("Skiplagged FEHLER", exc)
+          PY
