@@ -1,4 +1,4 @@
-# Temporary: which currency does Skiplagged answer in? Deleted after use.
+# Temporary: in which currency does Skiplagged quote? Deleted after use.
 name: probe-resellers
 
 on:
@@ -8,40 +8,34 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
-      - name: Currency check
+      - name: Currency evidence
         run: |
           cat > probe.py <<'PY'
-          import json, urllib.parse, urllib.request
+          import json, re, urllib.parse, urllib.request
 
-          def get(url, lang="de-DE,de;q=0.9"):
-              req = urllib.request.Request(url, headers={
-                  "User-Agent": ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-                                 "(KHTML, like Gecko) Chrome/126.0 Safari/537.36"),
-                  "Accept": "application/json", "Accept-Language": lang})
-              with urllib.request.urlopen(req, timeout=40) as resp:
-                  return json.loads(resp.read().decode("utf-8", "replace"))
+          H = {"User-Agent": ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                              "(KHTML, like Gecko) Chrome/126.0 Safari/537.36"),
+               "Accept-Language": "de-DE,de;q=0.9"}
 
-          base = {"from": "HAM", "to": "LYS", "depart": "2026-09-15",
-                  "return": "", "poll": "true", "sort": "cost"}
+          def raw(url, headers=None):
+              h = dict(H); h.update(headers or {})
+              with urllib.request.urlopen(urllib.request.Request(url, headers=h), timeout=40) as r:
+                  return r.read().decode("utf-8", "replace")
 
-          for label, extra, lang in [
-              ("default (de)", {}, "de-DE,de;q=0.9"),
-              ("currency=EUR", {"currency": "EUR"}, "de-DE,de;q=0.9"),
-              ("currency=USD", {"currency": "USD"}, "en-US,en;q=0.9"),
-              ("en-US ohne currency", {}, "en-US,en;q=0.9"),
-          ]:
-              try:
-                  data = get("https://skiplagged.com/api/search.php?" +
-                             urllib.parse.urlencode({**base, **extra}), lang)
-              except Exception as exc:
-                  print(f"{label}: FAIL {exc}"); continue
-              info = data.get("info")
-              depart = data.get("depart") or []
-              cheapest = min((d[0][0] for d in depart if d and d[0]), default=None)
-              print(f"{label}: info={json.dumps(info, ensure_ascii=False)[:300]}")
-              print(f"    billigster Eintrag (Cent?): {cheapest}   Eintraege: {len(depart)}")
-              if depart:
-                  print(f"    erster depart-Eintrag komplett: {json.dumps(depart[0], ensure_ascii=False)[:180]}")
-              print()
+          # 1. What does their own page say next to a price?
+          html = raw("https://skiplagged.com/flights/HAM/LYS/2026-09-15")
+          for pattern in (r'currency["\s:=]{1,4}"?([A-Z]{3})', r'"currencyCode"\s*:\s*"([A-Z]{3})"',
+                          r'(\$|€)\s?\d{2,4}', r'data-currency="([^"]+)"'):
+              hits = re.findall(pattern, html)[:6]
+              print(f"  {pattern!r}: {hits}")
+
+          # 2. Same flight in a source whose currency is certain (Travelpayouts
+          #    is queried in EUR): compare the number for a busy route.
+          sk = json.loads(raw("https://skiplagged.com/api/search.php?" + urllib.parse.urlencode({
+              "from": "BER", "to": "BCN", "depart": "2026-09-25", "return": "",
+              "poll": "true", "sort": "cost"})))
+          cheapest = min((d[0][0] for d in (sk.get("depart") or []) if d and d[0]), default=None)
+          print("\nSkiplagged BER->BCN 25.09. billigster Wert:", cheapest)
+          print("Ryanair meldete fuer dieselbe Strecke/Datum: 5336 (= 53.36 EUR)")
           PY
           python3 probe.py
