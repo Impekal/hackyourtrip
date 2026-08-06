@@ -1,0 +1,47 @@
+# Temporary: why does api.transitous.org answer 403 to the Cloudflare Worker
+# while the same call works from a GitHub runner? Deleted again after use.
+name: probe-transitous
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Compare runner vs worker
+        run: |
+          cat > probe.py <<'PY'
+          import json, urllib.parse, urllib.request
+
+          WORKER = "https://hackyourtrip-proxy.iamanamelessman.workers.dev"
+          DIRECT = "https://api.transitous.org/api"
+
+          def show(label, url, headers=None):
+              req = urllib.request.Request(url, headers=headers or {})
+              try:
+                  with urllib.request.urlopen(req, timeout=45) as resp:
+                      body = resp.read(400).decode("utf-8", "replace")
+                      print(f"{label}: HTTP {resp.status}  {body[:300]}")
+              except urllib.error.HTTPError as exc:
+                  body = exc.read(600).decode("utf-8", "replace")
+                  print(f"{label}: HTTP {exc.code}  {body[:500]}")
+              except Exception as exc:
+                  print(f"{label}: {type(exc).__name__}: {exc}")
+              print()
+
+          q = urllib.parse.urlencode({"text": "Berlin Hauptbahnhof", "language": "de"})
+
+          # 1. Control: straight from the runner, exactly like the first probe.
+          show("direct, no UA", f"{DIRECT}/v1/geocode?{q}")
+          show("direct, our UA", f"{DIRECT}/v1/geocode?{q}",
+               {"User-Agent": "HackYourTrip/1.0 (+https://github.com/kalivolut/hackyourtrip)",
+                "Accept": "application/json"})
+
+          # 2. Through the Worker - this is the one returning 403.
+          show("via worker", f"{WORKER}/transit/geocode?{q}")
+
+          # 3. Does the flight path still work? (isolates worker vs upstream)
+          show("worker /cheap", f"{WORKER}/cheap?origin=BER&destination=BCN&currency=eur&limit=5")
+          PY
+          python3 probe.py
