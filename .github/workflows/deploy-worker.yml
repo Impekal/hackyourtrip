@@ -66,7 +66,10 @@ jobs:
           curl -sS "$BASE/latest?origin=BER&destination=BCN&currency=eur&limit=1000&period_type=month&beginning_of_period=$MONTH-01&one_way=true" \
             | python3 -c "import json,sys; d=json.load(sys.stdin); print('offers:', len(d.get('data',[])))"
 
-          echo "=== /ai (optional - 501 here just means GEMINI_API_KEY isn't set) ==="
-          curl -sS -o /dev/null -w 'HTTP_STATUS:%{http_code}\n' \
+          # Print the body, not just the status: 501 means "no AI key set"
+          # (fine, the feature is optional) but 502 carries the provider's
+          # actual reason - which is the only thing that makes it fixable.
+          echo "=== /ai (501 = no key configured, 200 = working) ==="
+          curl -sS -w '\nHTTP_STATUS:%{http_code}\n' \
             -X POST -H 'Content-Type: application/json' \
             -d '{"prompt":"Antworte nur mit: ok"}' "$BASE/ai"
