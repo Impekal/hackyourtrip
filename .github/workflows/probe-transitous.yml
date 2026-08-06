@@ -1,0 +1,62 @@
+# Temporary: dumps the api.transitous.org response shape so the provider can
+# be written against real fields instead of guesses. Deleted again after use.
+name: probe-transitous
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe MOTIS
+        run: |
+          cat > probe.py <<'PY'
+          import json, urllib.parse, urllib.request
+
+          BASE = "https://api.transitous.org/api"
+
+          def get(path, **params):
+              url = f"{BASE}{path}?{urllib.parse.urlencode(params)}"
+              req = urllib.request.Request(url, headers={"User-Agent": "hackyourtrip-probe"})
+              with urllib.request.urlopen(req, timeout=60) as resp:
+                  return json.load(resp)
+
+          def geocode(text):
+              out = get("/v1/geocode", text=text, language="de")
+              print(f"--- geocode {text!r}: {len(out)} hits")
+              for hit in out[:5]:
+                  print("   ", json.dumps(hit, ensure_ascii=False)[:300])
+              return out
+
+          a = geocode("Berlin Hbf")
+          b = geocode("Munchen Hbf")
+          geocode("Paris")
+
+          def place(hit):
+              if hit.get("id"):
+                  return hit["id"]
+              return f"{hit['lat']},{hit['lon']}"
+
+          plan = get(
+              "/v1/plan",
+              fromPlace=place(a[0]),
+              toPlace=place(b[0]),
+              time="2026-09-15T08:00:00Z",
+              numItineraries=5,
+              transitModes="RAIL,LONG_DISTANCE,HIGHSPEED_RAIL",
+          )
+          print("--- plan top-level keys:", list(plan.keys()))
+          its = plan.get("itineraries", [])
+          print("--- itineraries:", len(its))
+          if its:
+              it = its[0]
+              print("--- itinerary keys:", list(it.keys()))
+              print(json.dumps({k: v for k, v in it.items() if k != "legs"}, ensure_ascii=False)[:1500])
+              print("--- leg count:", len(it.get("legs", [])))
+              for leg in it["legs"][:3]:
+                  slim = {k: v for k, v in leg.items() if k not in ("legGeometry", "intermediateStops", "steps")}
+                  print(json.dumps(slim, ensure_ascii=False)[:1200])
+                  print("   leg keys:", list(leg.keys()))
+          PY
+          python3 probe.py
