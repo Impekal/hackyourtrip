@@ -153,3 +153,88 @@ def test_request_volume_stays_bounded_on_a_wide_window():
     FlixbusProvider(session=session).search(route)
     # One request per day, capped - this is somebody else's backend.
     assert len(session.search_calls) == 4
+
+
+# --- Bahnhofsnamen statt Städtenamen -------------------------------------
+#
+# Der Bus-Tab schlägt Bahnhöfe vor, FlixBus sucht Städte - und die
+# Autocomplete antwortet auf alles irgendetwas. Die Antworten unten sind die
+# echten, live gemessenen Trefferlisten (Wegwerf-Workflow, siehe
+# Git-Historie). Ungeprüft übernommen hieß der erste Treffer: eine Suche
+# Hamburg -> Köln fragte FlixBus nach Berlin -> Berlin.
+LIVE_HITS = {
+    "Hamburg Hbf": [{"name": "Berlin", "id": "berlin-uuid"},
+                    {"name": "Hamburg", "id": "hamburg-uuid"},
+                    {"name": "Flughafen Hamburg", "id": "ham-airport-uuid"}],
+    "Köln Hbf": [{"name": "Berlin", "id": "berlin-uuid"},
+                 {"name": "Köln", "id": "koeln-uuid"},
+                 {"name": "Lincoln, NE", "id": "lincoln-uuid"}],
+    "Münster(Westf) Hbf": [{"name": "Ascheberg (Westf.)", "id": "ascheberg-uuid"},
+                           {"name": "Warendorf", "id": "warendorf-uuid"},
+                           {"name": "Berlin", "id": "berlin-uuid"}],
+    "Münster": [{"name": "Münster", "id": "muenster-uuid"},
+                {"name": "Berlin", "id": "berlin-uuid"}],
+    "BER": [{"name": "Berlin", "id": "berlin-uuid"},
+            {"name": "Bergen", "id": "bergen-uuid"},
+            {"name": "Berlin (Flughafen)", "id": "ber-airport-uuid"}],
+    "Berlin": [{"name": "Berlin", "id": "berlin-uuid"}],
+    "Hamburg": [{"name": "Hamburg", "id": "hamburg-uuid"}],
+}
+
+
+def _resolve(name: str):
+    session = FakeSession(cities=LIVE_HITS)
+    return FlixbusProvider(session=session)._resolve_city(name), session
+
+
+def test_station_name_resolves_to_its_own_city_not_the_first_hit():
+    hit, _ = _resolve("Hamburg Hbf")
+    assert hit["id"] == "hamburg-uuid"  # nicht Berlin, das oben in der Liste steht
+
+
+def test_second_station_name_also_skips_the_bogus_first_hit():
+    hit, _ = _resolve("Köln Hbf")
+    assert hit["id"] == "koeln-uuid"
+
+
+def test_falls_back_to_the_bare_city_when_the_full_name_matches_nothing():
+    hit, session = _resolve("Münster(Westf) Hbf")
+    assert hit["id"] == "muenster-uuid"
+    queried = [c[1]["q"] for c in session.calls]
+    assert queried == ["Münster(Westf) Hbf", "Münster(Westf)", "Münster"]
+
+
+def test_iata_code_is_translated_to_the_city():
+    hit, session = _resolve("BER")
+    assert hit["id"] == "berlin-uuid"  # nicht "Bergen", nicht der Flughafen
+    assert session.calls[0][1]["q"] == "Berlin"
+
+
+def test_plain_city_name_still_resolves_in_one_request():
+    hit, session = _resolve("Berlin")
+    assert hit["id"] == "berlin-uuid"
+    assert len(session.calls) == 1
+
+
+def test_no_match_yields_nothing_rather_than_the_wrong_city():
+    # Eine Stadt, die FlixBus nicht kennt: lieber keine Buspreise als Preise
+    # für eine andere Strecke.
+    session = FakeSession(cities={"Kleinkleckersdorf": [{"name": "Berlin", "id": "berlin-uuid"}]})
+    assert FlixbusProvider(session=session)._resolve_city("Kleinkleckersdorf") is None
+
+
+def test_a_wrong_city_never_reaches_the_search_endpoint():
+    session = FakeSession(cities={"Hamburg Hbf": [{"name": "Berlin", "id": "berlin-uuid"}],
+                                  "Hamburg": [{"name": "Berlin", "id": "berlin-uuid"}]})
+    assert FlixbusProvider(session=session).search(make_route(origin="Hamburg Hbf")) == []
+    assert not session.search_calls
+
+
+def test_umlaut_spelling_variants_compare_equal():
+    from traveldeals.providers.flixbus import _fold_place_name
+
+    assert _fold_place_name("München") == _fold_place_name("Muenchen")
+    assert _fold_place_name("Köln") == _fold_place_name("Koeln")
+    assert _fold_place_name("Halle(Saale)") == _fold_place_name("Halle (Saale)")
+    # Der Flughafen ist nicht die Stadt.
+    assert _fold_place_name("Berlin (Flughafen)") != _fold_place_name("Berlin")

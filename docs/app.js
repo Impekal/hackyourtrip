@@ -4,7 +4,7 @@
 // guessing: if this doesn't match, the browser is running a cached old
 // app.js and any "the fix didn't work" report is about the old file. Bump
 // together with the ?v= in index.html.
-const BUILD_STAMP = '2026-08-06-12';
+const BUILD_STAMP = '2026-08-06-13';
 document.getElementById('buildStamp').textContent = BUILD_STAMP;
 
 /* =========================================================================
@@ -1030,10 +1030,77 @@ async function fetchSkiplaggedOffers(route) {
 const FLIXBUS_MAX_DAYS = 4;
 const FLIXBUS_BOOKING_BASE = 'https://shop.flixbus.de/search';
 
+/* FlixBus sucht *Städte* - der Bus-Tab schlägt aber Bahnhöfe vor ("Hamburg
+ * Hbf"), und die Autocomplete antwortet auf alles irgendetwas. Live gemessen:
+ *
+ *   "Hamburg Hbf"        -> 1. Treffer Berlin      (Hamburg erst an 2.)
+ *   "Köln Hbf"           -> 1. Treffer Berlin      (Köln erst an 2.)
+ *   "Münster(Westf) Hbf" -> 1. Treffer Ascheberg   (Münster gar nicht dabei)
+ *
+ * Den ersten Treffer ungeprüft zu nehmen hieß also nicht bloß "keine
+ * Buspreise", sondern: eine Suche Hamburg->Köln fragte FlixBus in Wahrheit
+ * nach Berlin->Berlin. Deshalb zwei Dinge: die Anfrage wird auf den Stadtnamen
+ * zurückgeschnitten, und der Treffer muss zur Anfrage passen. */
+const FLIXBUS_STATION_SUFFIX = /\s*(hauptbahnhof|busbahnhof|bahnhof|hbf|zob|bf)\.?$/i;
+
+// Vergleichsform: Groß/klein, Akzente, Umlaute und Satzzeichen weg, damit
+// "München"/"Muenchen" und "Halle(Saale)"/"Halle (Saale)" dasselbe sind.
+function foldPlaceName(name) {
+  return (name || '').toLowerCase()
+    // Vor der Unicode-Zerlegung: die wuerde aus "ü" ein blankes "u" machen,
+    // und "München" passte dann nicht mehr zu "Muenchen".
+    .replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]/g, '');
+}
+
+// Anfragen von der genauesten zur gröbsten - die erste, die einen passenden
+// Treffer liefert, gewinnt.
+function flixbusCityQueries(name) {
+  const queries = [];
+  const push = (q) => {
+    q = (q || '').trim();
+    if (q && !queries.includes(q)) queries.push(q);
+  };
+  // IATA zuerst übersetzen: "BER" konkurriert sonst mit "Bergen".
+  push(AIRPORT_CITY_NAMES[(name || '').toUpperCase()]);
+  push(name);
+  const stripped = (name || '').replace(FLIXBUS_STATION_SUFFIX, '');
+  push(stripped);
+  // "Münster(Westf)" -> "Münster"
+  push(stripped.replace(/\s*\([^)]*\)\s*/g, ' '));
+  return queries;
+}
+
+function flixbusPickCity(hits, query) {
+  const wanted = foldPlaceName(query);
+  if (!wanted) return null;
+  let prefixHit = null;
+  for (const hit of hits) {
+    if (!hit || !hit.id || !hit.name) continue;
+    const found = foldPlaceName(hit.name);
+    if (!found) continue;
+    if (found === wanted) return hit;  // exakter Treffer schlägt alles
+    // "Berlin" zu "Berlin Hbf" und "BER" zu "Berlin" - aber nie "Berlin" zu
+    // "Hamburg Hbf". "Berlin (Flughafen)" passt bewusst auch nicht.
+    if (!prefixHit && (wanted.startsWith(found) || found.startsWith(wanted))) prefixHit = hit;
+  }
+  return prefixHit;
+}
+
+// Die Umkreis-Suche fragt dieselben Orte wieder und wieder ab.
+const flixbusCityCache = new Map();
+
 async function flixbusResolveCity(name) {
-  const payload = await fetchProxyJson('flixbus/cities', new URLSearchParams({ q: name, lang: 'de' }));
-  const hits = Array.isArray(payload) ? payload : [];
-  return hits.find(h => h && h.id) || null;
+  if (flixbusCityCache.has(name)) return flixbusCityCache.get(name);
+  let found = null;
+  for (const query of flixbusCityQueries(name)) {
+    const payload = await fetchProxyJson('flixbus/cities', new URLSearchParams({ q: query, lang: 'de' }));
+    found = flixbusPickCity(Array.isArray(payload) ? payload : [], query);
+    if (found) break;
+  }
+  flixbusCityCache.set(name, found);
+  return found;
 }
 
 function flixbusResultToOffer(result, route, origin, destination, day) {
@@ -1072,13 +1139,27 @@ function flixbusResultToOffer(result, route, origin, destination, day) {
   };
 }
 
+// Warum es für den Bus keinen Preis gab, in der Sprache des Nutzers - leer,
+// wenn es einen gab. Ohne das steht bei jeder Zeile nur "Preis beim
+// Anbieter", und das liest sich wie ein kaputtes Programm statt wie
+// "FlixBus fährt hier nicht".
+let lastFlixbusNote = '';
+
 async function fetchFlixbusOffers(route) {
-  if (!PROXY_URL) return [];
+  lastFlixbusNote = '';
+  if (!PROXY_URL) {
+    lastFlixbusNote = 'Kein Proxy konfiguriert';
+    return [];
+  }
   const [origin, destination] = await Promise.all([
     flixbusResolveCity(route.origin),
     flixbusResolveCity(route.destination),
   ]);
-  if (!origin || !destination) return [];
+  if (!origin || !destination) {
+    const missing = [!origin ? route.origin : null, !destination ? route.destination : null].filter(Boolean);
+    lastFlixbusNote = `FlixBus kennt ${missing.map(m => `„${m}"`).join(' und ')} nicht als Stadt`;
+    return [];
+  }
 
   const offers = [];
   for (const day of dayCandidates(route).slice(0, FLIXBUS_MAX_DAYS)) {
@@ -1095,6 +1176,9 @@ async function fetchFlixbusOffers(route) {
         if (offer) offers.push(offer);
       }
     }
+  }
+  if (!offers.length) {
+    lastFlixbusNote = `FlixBus fährt ${origin.name} → ${destination.name} an diesen Tagen nicht`;
   }
   return offers;
 }
@@ -1512,6 +1596,9 @@ async function runSearch(route) {
   // Why flights fell back to example data, in the user's words - empty when
   // they didn't fall back at all.
   let flightFallbackReason = '';
+  // Same for the bus: FlixBus is the only bus source with prices, so when it
+  // has nothing the whole mode drops to timetables without a price.
+  let busPriceReason = '';
   // Invented prices are opt-in now, and off by default. They exist to
   // exercise the ranking logic, not to fill a results list - and filling the
   // list was actively harmful: a search that found no real fares showed
@@ -1545,6 +1632,10 @@ async function runSearch(route) {
       // timetables without prices still beat invented prices; example data
       // only appears when explicitly switched on.
       const merged = await fetchGroundOffersWithNeighbours(variant, mode);
+      // Only when FlixBus - the one bus source with prices - came up empty.
+      if (mode === 'bus' && !merged.some(o => o.priceKnown !== false)) {
+        busPriceReason = busPriceReason || lastFlixbusNote;
+      }
       poolCache[key] = merged.length ? merged : fallback(variant, mode);
     } else {
       // No free hotel source exists at all, so this mode is empty unless
@@ -1676,7 +1767,7 @@ async function runSearch(route) {
     const built = await buildCandidates(route, route.modes);
     return {
       sections: [makeSection('all', '', route, built)],
-      usedRealFlightData, flightFallbackReason,
+      usedRealFlightData, flightFallbackReason, busPriceReason,
     };
   }
 
@@ -1709,7 +1800,7 @@ async function runSearch(route) {
       'Gesamtpreis für beide Richtungen: echte Hin-/Rückflug-Tickets und aus zwei Einzelfahrten zusammengesetzte Reisen. '
       + 'Zwei Einzeltickets sind oft günstiger als ein Rückflugticket - vergleiche mit den beiden Reitern links.'),
   ];
-  return { sections, usedRealFlightData, flightFallbackReason };
+  return { sections, usedRealFlightData, flightFallbackReason, busPriceReason };
 }
 
 /* Sorting - runs on the already-fetched candidates, never triggers a search. */
@@ -2235,6 +2326,7 @@ function renderResults(route, result) {
     route,
     sections: result.sections,
     flightFallbackReason: result.flightFallbackReason,
+    busPriceReason: result.busPriceReason,
     // The whole trip is what was searched for, so that is what opens; the
     // two single-direction lists are the comparison next to it.
     sectionId: (result.sections.find(s => s.id === 'combined') || result.sections[0]).id,
@@ -2262,7 +2354,7 @@ function renderResults(route, result) {
 }
 
 function renderActiveSection() {
-  const { route, sections, sectionId, flightFallbackReason } = shownSearch;
+  const { route, sections, sectionId, flightFallbackReason, busPriceReason } = shownSearch;
   const section = sections.find(s => s.id === sectionId) || sections[0];
   for (const btn of legTabsEl.querySelectorAll('.legtab')) {
     const on = btn.dataset.section === section.id;
@@ -2278,10 +2370,10 @@ function renderActiveSection() {
   // is actually looking at.
   route.priority = sortByEl.value;
   if (!trackBox.hidden) trackYaml.value = buildYamlSnippet(route);
-  return renderOptionList(route, section, options, flightFallbackReason);
+  return renderOptionList(route, section, options, flightFallbackReason, busPriceReason);
 }
 
-async function renderOptionList(route, section, options, flightFallbackReason) {
+async function renderOptionList(route, section, options, flightFallbackReason, busPriceReason) {
   await addRecommendations(route, options, section.pools);
   // The AI recommendation reasons about what is actually on screen.
   lastSearch = { route, options };
@@ -2314,11 +2406,15 @@ async function renderOptionList(route, section, options, flightFallbackReason) {
     // route no free source covers - so it has to be genuinely useful: the
     // reason, what to try, and links to check the price for real. Returning
     // just "keine Angebote" here would repeat the old mistake in reverse.
+    // "Filter lockern" ist der falsche Rat, wenn in Wahrheit gar keine
+    // Quelle etwas hatte - dann gehört der echte Grund hierhin.
     const why = route.dealsOnly
       ? 'Keine Angebote, die deutlich unter dem Durchschnitt dieser Suche liegen - auf "Alle Angebote" umstellen oder das Zeitfenster (Flex-Tage) erweitern.'
       : (flightFallbackReason
           ? `Keine echten Preise gefunden. ${flightFallbackReason}.`
-          : 'Keine Angebote in diesem Budget/Zeitrahmen/Filter gefunden - Filter lockern und erneut suchen.');
+          : (busPriceReason
+              ? `Keine Busverbindung gefunden. ${busPriceReason}.`
+              : 'Keine Angebote in diesem Budget/Zeitrahmen/Filter gefunden - Filter lockern und erneut suchen.'));
     searchResultsEl.innerHTML = `
       ${sectionNote}
       <p class="empty">${why}</p>
@@ -2344,11 +2440,18 @@ async function renderOptionList(route, section, options, flightFallbackReason) {
     <p class="mock-warning">⚠️ <strong>${mockCount === 1 ? 'Eines dieser Angebote enthält' : `${mockCount} dieser Angebote enthalten`} Beispieldaten</strong>${affected}.
     Erfundene Preise zum Testen der Vergleichslogik, keine buchbaren Verbindungen -
     beim jeweiligen Anbieter unten nachsehen.${flightReasonHtml}</p>` : '';
+  // Beim Bus reicht "diese Quelle hat keine Preise" nicht: es gibt eine
+  // Busquelle mit Preisen (FlixBus), und wenn die nichts liefert, will man
+  // wissen warum - sonst liest sich jede Zeile wie ein Programmfehler.
+  const busReasonHtml = (busPriceReason && options.some(o => o.offers.some(x => x.mode === 'bus'))) ? `
+    <br><br><strong>Warum beim Bus kein Preis?</strong> ${busPriceReason}. Buspreise kommen hier von FlixBus -
+    für Fernbusse anderer Anbieter gibt es keine frei zugängliche Preisquelle, deshalb stehen deren Fahrten
+    ohne Preis in der Liste.` : '';
   const timetableNote = timetableCount ? `
     <p class="timetable-note">🕓 <strong>${timetableCount} echte Verbindungen ohne Preis</strong> - Fahrplandaten von
     <a href="https://transitous.org" target="_blank" rel="noopener">Transitous</a> (offizielle Verkehrsverbund-Feeds,
     kostenlos und ohne Anmeldung). Diese Quelle enthält keine Fahrpreise, deshalb steht hier kein Preis statt eines
-    erfundenen. Zeiten, Linie und Umstiege stimmen - den Preis unten beim Anbieter prüfen.</p>` : '';
+    erfundenen. Zeiten, Linie und Umstiege stimmen - den Preis unten beim Anbieter prüfen.${busReasonHtml}</p>` : '';
 
   searchResultsEl.innerHTML = `
     ${sectionNote}

@@ -155,6 +155,18 @@ Ergebnis) fällt alles graceful auf Mock-Daten zurück.
   `combined` - das ist die Reise, nach der gesucht wurde. Der Pool-Cache in
   `runSearch` ist deshalb nach Routen-Variante **und** Modus gekeyt: Hinweg,
   Rückweg und Rundreise sind drei verschiedene Abfragen an dieselben Quellen.
+- **FlixBus-Autocomplete niemals ungeprueft nehmen.** Sie antwortet auf
+  alles mit irgendetwas, und der erste Treffer ist regelmaessig falsch - live
+  gemessen: `"Hamburg Hbf"` -> Berlin, `"Köln Hbf"` -> Berlin,
+  `"Münster(Westf) Hbf"` -> Ascheberg. Der Bus-Tab schlaegt aber Bahnhoefe
+  vor, FlixBus sucht Staedte. Das war kein "keine Buspreise", sondern: eine
+  Suche Hamburg->Köln fragte FlixBus nach **Berlin->Berlin**. Deshalb
+  `_city_queries()` (Bahnhofs-Suffix und Klammerzusatz abschneiden, IATA
+  uebersetzen) plus `_pick_city()` (Treffer muss zur Anfrage passen, sonst
+  None). Lieber keine Buspreise als Preise fuer die falsche Strecke.
+  Spiegelbild im JS: `flixbusCityQueries` / `flixbusPickCity`. Test-Fixtures
+  muessen seitdem auf die Anfrage antworten - eine feste Trefferliste faellt
+  zu Recht durch.
 - **Beispieldaten sind Opt-in (`route.showMockData`), Voreinstellung aus.**
   Vorher füllten die Mock-Generatoren jede Lücke, und eine Suche ohne echte
   Treffer zeigte drei erfundene Preise statt einer ehrlichen Leermeldung -

@@ -28,12 +28,15 @@ tries to avoid.
 """
 from __future__ import annotations
 
+import re
+import unicodedata
 from datetime import datetime
 
 import requests
 
 from traveldeals.models import Mode, Offer, RoutePreference
 from traveldeals.providers.base import Provider, date_candidates
+from traveldeals.providers.transitous import AIRPORT_CITY_NAMES
 
 BASE_URL = "https://global.api.flixbus.com"
 # Public constant shipped in FlixBus' own web client - not a credential of
@@ -64,6 +67,73 @@ def _build_booking_url(origin_id: str, destination_id: str, day) -> str:
     return BOOKING_BASE + "?" + "&".join(f"{k}={v}" for k, v in params.items())
 
 
+# FlixBus searches for *cities*, but the bus tab suggests stations ("Hamburg
+# Hbf") - and the autocomplete answers everything with something. Measured
+# live against the real endpoint:
+#
+#     "Hamburg Hbf"        -> first hit Berlin      (Hamburg only 2nd)
+#     "Köln Hbf"           -> first hit Berlin      (Köln only 2nd)
+#     "Münster(Westf) Hbf" -> first hit Ascheberg   (Münster not in the list)
+#
+# Taking the first hit unchecked therefore did not merely mean "no bus
+# prices": a Hamburg->Köln search actually asked FlixBus for Berlin->Berlin.
+# Hence both halves below - trim the query down to the city name, and require
+# the hit to match the query.
+_STATION_SUFFIX = re.compile(r"\s*(hauptbahnhof|busbahnhof|bahnhof|hbf|zob|bf)\.?$", re.I)
+_PARENTHETICAL = re.compile(r"\s*\([^)]*\)\s*")
+_UMLAUTS = str.maketrans({"ä": "ae", "ö": "oe", "ü": "ue", "ß": "ss"})
+
+
+def _fold_place_name(name: str) -> str:
+    """Comparison form: case, accents, umlauts and punctuation removed, so
+    "München"/"Muenchen" and "Halle(Saale)"/"Halle (Saale)" compare equal."""
+    # Expanded before the Unicode decomposition, which would otherwise turn
+    # "ü" into a bare "u" and stop "München" matching "Muenchen".
+    folded = (name or "").lower().translate(_UMLAUTS)
+    folded = unicodedata.normalize("NFD", folded)
+    return "".join(c for c in folded if c.isalnum() and not unicodedata.combining(c))
+
+
+def _city_queries(name: str) -> list[str]:
+    """Queries from most to least specific - the first one with a matching
+    hit wins."""
+    queries: list[str] = []
+
+    def push(candidate: str | None) -> None:
+        candidate = (candidate or "").strip()
+        if candidate and candidate not in queries:
+            queries.append(candidate)
+
+    # Translate IATA first, or "BER" competes with "Bergen".
+    push(AIRPORT_CITY_NAMES.get((name or "").upper()))
+    push(name)
+    stripped = _STATION_SUFFIX.sub("", name or "")
+    push(stripped)
+    push(_PARENTHETICAL.sub(" ", stripped))  # "Münster(Westf)" -> "Münster"
+    return queries
+
+
+def _pick_city(hits, query: str) -> dict | None:
+    wanted = _fold_place_name(query)
+    if not wanted:
+        return None
+    prefix_hit = None
+    for hit in hits or []:
+        if not isinstance(hit, dict) or not hit.get("id") or not hit.get("name"):
+            continue
+        found = _fold_place_name(hit["name"])
+        if not found:
+            continue
+        if found == wanted:
+            return hit  # an exact match beats everything
+        # "Berlin" matches "Berlin Hbf" and "BER" matches "Berlin" - but
+        # "Berlin" never matches "Hamburg Hbf", and "Berlin (Flughafen)"
+        # deliberately does not match "Berlin" either.
+        if prefix_hit is None and (wanted.startswith(found) or found.startswith(wanted)):
+            prefix_hit = hit
+    return prefix_hit
+
+
 def _naive(iso: str) -> str:
     """"2026-09-15T07:15:00+02:00" -> "2026-09-15T07:15:00".
 
@@ -92,16 +162,21 @@ class FlixbusProvider(Provider):
 
     def _resolve_city(self, name: str) -> dict | None:
         """City UUID for a free-text place - the numeric legacy_id is rejected
-        by the search endpoint, so only `id` is usable."""
-        try:
-            hits = self._get("/search/autocomplete/cities", {"q": name, "lang": "de"})
-        except requests.RequestException as exc:
-            print(f"[flixbus] autocomplete failed for {name!r}: {exc}")
-            return None
-        except ValueError:
-            return None
-        for hit in hits or []:
-            if hit.get("id"):
+        by the search endpoint, so only `id` is usable.
+
+        Returns None rather than a wrong city: no bus prices is a fine
+        outcome, prices for the wrong route is not. See _pick_city above.
+        """
+        for query in _city_queries(name):
+            try:
+                hits = self._get("/search/autocomplete/cities", {"q": query, "lang": "de"})
+            except requests.RequestException as exc:
+                print(f"[flixbus] autocomplete failed for {query!r}: {exc}")
+                return None
+            except ValueError:
+                return None
+            hit = _pick_city(hits, query)
+            if hit:
                 return hit
         return None
 
