@@ -4,7 +4,7 @@
 // guessing: if this doesn't match, the browser is running a cached old
 // app.js and any "the fix didn't work" report is about the old file. Bump
 // together with the ?v= in index.html.
-const BUILD_STAMP = '2026-08-06-5';
+const BUILD_STAMP = '2026-08-06-6';
 document.getElementById('buildStamp').textContent = BUILD_STAMP;
 
 /* =========================================================================
@@ -611,6 +611,47 @@ async function resolveAirportCode(term) {
   } catch (e) {
     return null;
   }
+}
+
+// Mirrors providers/geo.nearby_airports: airports within `radiusKm`,
+// nearest first. The saving lever a metasearch engine can't personalise -
+// only the traveller knows what 100 km of driving is worth to them.
+function nearbyAirports(code, radiusKm, limit = 2) {
+  const origin = AIRPORT_COORDS[(code || '').toUpperCase()];
+  if (!origin || radiusKm <= 0) return [];
+  const found = [];
+  for (const [other, coords] of Object.entries(AIRPORT_COORDS)) {
+    if (other === code.toUpperCase()) continue;
+    const km = haversineKm(origin, coords);
+    if (km <= radiusKm) found.push([other, Math.round(km)]);
+  }
+  found.sort((a, b) => a[1] - b[1]);
+  return found.slice(0, limit);
+}
+
+// Wraps the single-airport search: runs it again for nearby airports and
+// tags every extra offer with where it actually departs from, so nothing
+// can silently look like a departure from the airport that was searched.
+async function fetchFlightOffersWithNeighbours(route) {
+  const base = await fetchRealFlightOffers(route);
+  if (!route.nearbyKm) return base;
+
+  const offers = base ? [...base] : [];
+  const origins = [[route.origin, 0], ...nearbyAirports(route.origin, route.nearbyKm)];
+  const destinations = [[route.destination, 0], ...nearbyAirports(route.destination, route.nearbyKm)];
+  for (const [origin, originKm] of origins) {
+    for (const [destination, destinationKm] of destinations) {
+      if (!originKm && !destinationKm) continue; // already searched
+      const found = await fetchRealFlightOffers({ ...route, origin, destination });
+      for (const offer of found || []) {
+        offer.altOrigin = originKm ? origin : '';
+        offer.altDestination = destinationKm ? destination : '';
+        offer.detourKm = originKm + destinationKm;
+        offers.push(offer);
+      }
+    }
+  }
+  return offers;
 }
 
 async function fetchRealFlightOffers(route) {
@@ -1250,7 +1291,7 @@ async function runSearch(route) {
   async function pool(mode) {
     if (pools[mode]) return pools[mode];
     if (mode === 'flight') {
-      const real = await fetchRealFlightOffers(route);
+      const real = await fetchFlightOffersWithNeighbours(route);
       if (real && real.length) {
         pools[mode] = real;
         usedRealFlightData = true;
@@ -1653,6 +1694,7 @@ function readRouteFromForm() {
     // Off by default: invented prices are for exercising the ranking logic,
     // not for filling a results list. See the mock rule in HANDOFF.md.
     showMockData: document.getElementById('showMockData').value === 'mock',
+    nearbyKm: Number(document.getElementById('nearbyKm').value || 0),
     roundTrip: cfg.roundTrip && document.getElementById('roundTrip').checked,
     returnDate: (cfg.roundTrip && document.getElementById('roundTrip').checked && document.getElementById('returnDate').value)
       ? new Date(document.getElementById('returnDate').value) : null,
@@ -1863,6 +1905,11 @@ function renderResults(route, options, usedRealFlightData, flightFallbackReason)
           ? '<span class="price price-unknown">Preis unbekannt</span>'
           : `<span class="price mono">${opt.price.toFixed(2)} ${route.currency}</span>`;
         const line = opt.offers.map(o => o.lineLabel).filter(Boolean).join(', ');
+        // Never let an offer from a neighbouring airport look like one from
+        // the airport that was actually searched for.
+        const detour = opt.offers.find(o => o.detourKm);
+        const detourHtml = detour ? `<span class="badge info">ab ${detour.altOrigin || route.origin}${
+          detour.altDestination ? ` nach ${detour.altDestination}` : ''} · +${detour.detourKm} km Anfahrt</span>` : '';
         return `
         <div class="option${mock ? ' is-mock' : ''}${noPrice ? ' is-timetable' : ''}">
           <span class="rank mono">${i + 1}</span>
@@ -1870,6 +1917,7 @@ function renderResults(route, options, usedRealFlightData, flightFallbackReason)
             ${priceHtml}
             ${mock ? '<span class="badge warn">Beispieldaten – nicht buchbar</span>' : ''}
             ${noPrice ? '<span class="badge info">Echter Fahrplan – Preis beim Anbieter</span>' : ''}
+            ${detourHtml}
             ${opt.isBelowMedian ? '<span class="badge good">Deal</span>' : ''}
           </div>
           <span class="subline mono">${opt.mode}${line ? ` · ${line}` : ''} · ${fmtShort(opt.offers[0].depart)}${opt.offers[0].returnDepart ? ` · zurück ${fmtShort(opt.offers[0].returnDepart)}` : ''} · ${opt.durationHours}h · ${opt.offers.map(o => bookingSiteHtml(o.bookingSite, o.url)).join(', ')}</span>

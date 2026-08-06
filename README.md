@@ -8,7 +8,7 @@ auf einem Dashboard die besten aktuellen Optionen pro Strecke zeigt.
 >
 > | Modus | Datenquelle |
 > |---|---|
-> | **Flug** | **echte Preise** – **Ryanair** liefert live buchbare Fares ganz ohne Zugangsdaten, **Travelpayouts/Aviasales** (mit Token) ergänzt alle anderen Airlines |
+> | **Flug** | **echte Preise** aus drei Quellen: **Ryanair** (live buchbar, ohne Zugangsdaten), **Skiplagged** (Lufthansa, Air France, KLM, Swiss, Turkish … – die Airlines, die Ryanair nicht fliegt) und **Travelpayouts** (mit Token) |
 > | **Bus** | **echte, buchbare Preise** – **FlixBus** liefert Live-Fahrpreise inkl. freier Plätze und Umstiegen |
 > | **Bahn** | **echte Verbindungen, aber ohne Preis** (Transitous/MOTIS): richtige Linie (ICE 1007), Abfahrtszeit, Gleis, Umstiege – nur **kein Preis**, weil die Quelle keinen führt. Dort steht "Preis unbekannt" statt einer erfundenen Zahl. |
 > | **Hotel** | **erfundene Beispieldaten** - keine buchbaren Angebote |
@@ -54,10 +54,31 @@ auf einem Dashboard die besten aktuellen Optionen pro Strecke zeigt.
 > | SBB, SNCF/Navitia | 403 / 401 |
 > | Trenitalia Stationssuche | 200 – Preise wären ein eigener Ausbauschritt |
 >
-> **Fazit nach drei Runden:** Es gibt genau drei kostenlose, anmeldungsfreie
-> Quellen mit echten Preisen – **Ryanair**, **FlixBus** und (mit kostenlosem
-> Token) **Travelpayouts**. Für **Bahn** und **Hotel** existiert keine; die
-> Bahn blockt ihre eigene App-API serverseitig.
+> Vierte und fünfte Runde (06.08.2026): Wiederverkäufer und Aggregatoren –
+> hat jemand Zugriff, wo der Betreiber selbst blockt?
+>
+> | Quelle | Ergebnis |
+> |---|---|
+> | **Skiplagged** | **funktioniert ohne Schlüssel** – 252 Verbindungen für HAM→LYS mit Lufthansa/AF/KLM/Swiss. **Ist eingebaut.** |
+> | **Deal-Feeds** (Urlaubspiraten, Travelfree, Fly4free) | **funktionieren** – echte RSS-Feeds mit Aktionen und Fehlerpreisen. **Sind eingebaut.** |
+> | Trainline Stationssuche | 200 – die Suche selbst aber hinter DataDome-Captcha (403) |
+> | thetrainline, Omio, Busbud, Wanderu, Checkmybus | 403 Captcha bzw. 404 |
+> | Rome2Rio | Domain existiert nicht mehr |
+> | Kiwi skypicker | 404, abgeschaltet |
+> | Hostelworld, Booking, Hotelbeds | 404 / 401 |
+>
+> **Fazit nach fünf Runden:** Vier kostenlose, anmeldungsfreie Quellen mit
+> echten Preisen – **Ryanair**, **Skiplagged**, **FlixBus** und (mit
+> kostenlosem Token) **Travelpayouts** –, dazu drei Deal-Feeds. Für **Bahn**
+> und **Hotel** gibt es keine: die Bahn blockt ihre eigene App-API
+> serverseitig, und auch die Wiederverkäufer, die DB-Preise hätten, sitzen
+> hinter einem Captcha.
+>
+> **Zur Währung bei Skiplagged:** die API nennt keine und ignoriert einen
+> `currency`-Parameter. Statt zu raten wurde es belegt – die Seite zeigt „$",
+> und BER→BCN kostete dort 62,00 an einem Tag, an dem Ryanair 53,36 EUR
+> nannte (Verhältnis 0,86 = der damalige EUR/USD-Kurs). Preise werden
+> deshalb **umgerechnet**, nicht umetikettiert.
 >
 > **Die Einschränkung, die dazugehört:** Ryanair kennt nur Ryanair-Strecken.
 > Hamburg–Lyon fliegt Ryanair nicht, also hilft es dort nicht. Deshalb werden
@@ -130,6 +151,11 @@ auf einem Dashboard die besten aktuellen Optionen pro Strecke zeigt.
   zirkulär über Mitternacht hinweg berechnet. Angebote außerhalb des
   Fensters werden herausgefiltert - auch die "später fahren spart X€"-
   Empfehlung schlägt nie eine Zeit außerhalb dieses Fensters vor.
+- **Flughäfen im Umkreis** (`nearby_km`): Hamburg→Lyon hat kaum Preise,
+  Bremen→Genf schon. Auf Wunsch werden Nachbarflughäfen bis 100/150/250 km
+  mitgesucht, und jedes Angebot von dort trägt sichtbar „ab BRE · +103 km
+  Anfahrt". Ob ein Umweg das wert ist, entscheidet niemand außer dir - genau
+  deshalb wird er angezeigt statt eingerechnet.
 - **Von/Nach-Autocomplete:** Stadt eintippen, passenden Flughafen/Bahnhof
   auswählen - wie auf gängigen Reiseplattformen. Flug/Hotel nutzen die
   echte, öffentliche Travelpayouts-Places-API (`autocomplete.travelpayouts.com`,

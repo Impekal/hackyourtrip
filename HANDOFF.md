@@ -503,6 +503,34 @@ IndiGo/Amtrak Timeout, SBB 403, SNCF 401.
 antworten alle mit 403 `OPS_BLOCKED`. Das ist eine serverseitige Sperre, kein
 Header-Problem - nicht weiter versuchen, ohne dass sich dort etwas ändert.
 
+**Runden 4+5 (06.08.2026), Wiederverkäufer und Aggregatoren:** zwei neue
+Treffer, beide eingebaut.
+
+- **Skiplagged** (`providers/skiplagged.py`): deckt die Full-Service-Airlines
+  ab, die Ryanair nicht fliegt. Antwortstruktur ist ungewöhnlich:
+  `flights` ist ein Dict `{id: [[segmente...], dauer_sek, anzahl, token]}`,
+  `depart` eine Liste `[[preis_cent], [], token, flight_id]` - der Preis
+  steht also *nicht* beim Flug, sondern wird über die id verknüpft.
+  **Währung:** die API nennt keine und ignoriert `currency`. Belegt statt
+  geraten: die Seite rendert „$", und BER→BCN kostete 62,00, wo Ryanair
+  53,36 EUR nannte (0,86 = EUR/USD). Wird über `currency.py` umgerechnet.
+  Hidden-City-Tarife werden bewusst **nicht** angezeigt - nur die reguläre
+  `depart`-Liste.
+- **Deal-Feeds** (`dealfeeds.py`): Urlaubspiraten, Travelfree, Fly4free
+  liefern sauberes RSS. Bewusst **nicht** in Offers mit Preisen umgewandelt -
+  „Mallorca ab 39 EUR" ist eine Anzeige, keine buchbare Verbindung für die
+  Daten des Nutzers.
+
+Was weiterhin blockt: thetrainline/Omio/Busbud/Wanderu hinter DataDome-
+Captcha, Rome2Rio-Domain tot, Kiwi skypicker abgeschaltet, Hotels überall
+401/404.
+
+**Umkreissuche** (`NearbyAirportsProvider` + `geo.nearby_airports`): läuft
+als äußerster Wrapper um den Flug-Composite, damit *alle* Quellen auch die
+Nachbarflughäfen bekommen. Jedes Angebot von dort trägt `alt_origin` /
+`alt_destination` / `detour_km` - nie ungekennzeichnet, sonst sähe ein Flug
+ab Bremen aus wie einer ab Hamburg.
+
 Weiterhin offen bleibt der **Preis** für Bahn (und Hotel). DB-Wrapper regelmässig neu
 prüfen: kämen sie zurück, gäbe es dort sogar Sparpreise.
 

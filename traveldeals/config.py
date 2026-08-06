@@ -95,6 +95,7 @@ def _parse_route(raw: dict) -> RoutePreference:
         low_cost=raw.get("low_cost") or ("any" if raw.get("low_cost_airlines_ok", True) else "exclude"),
         round_trip=bool(raw.get("round_trip", False)),
         deals_only=bool(raw.get("deals_only", False)),
+        nearby_km=int(raw.get("nearby_km", 0) or 0),
         return_date=_parse_date(raw["return_date"]) if raw.get("return_date") else None,
         notes=raw.get("notes", ""),
     )

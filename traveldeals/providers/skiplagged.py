@@ -55,6 +55,19 @@ MAX_OFFERS_PER_DAY = 40
 
 BOOKING_BASE = "https://skiplagged.com/flights"
 
+# The API carries no currency field and ignores a `currency` parameter - the
+# same route answered 7600 whether EUR, USD or nothing was requested. So the
+# currency was established by evidence instead of assumption: skiplagged.com
+# renders "$" next to its prices, and BER->BCN quoted 62.00 there on a date
+# where Ryanair quoted 53.36 EUR - a ratio of 0.86, the EUR/USD rate at the
+# time. Prices are therefore USD and get converted, never relabelled.
+SOURCE_CURRENCY = "USD"
+
+
+def _convert(amount: float, to_currency: str, rates_per_eur: dict) -> float:
+    from traveldeals.currency import convert
+    return convert(amount, SOURCE_CURRENCY, to_currency.upper(), rates_per_eur)
+
 
 def _build_booking_url(route: RoutePreference, day: str) -> str:
     """Ordinary search page for the route - not a hidden-city deep link."""
@@ -64,13 +77,12 @@ def _build_booking_url(route: RoutePreference, day: str) -> str:
 class SkiplaggedFlightProvider(Provider):
     mode = Mode.FLIGHT
 
-    def __init__(self, session: requests.Session | None = None, currency: str = "EUR"):
+    def __init__(self, session: requests.Session | None = None,
+                 rates_per_eur: dict | None = None):
         self.session = session or requests.Session()
-        # The API echoes no currency field, so it is pinned via the request
-        # instead of guessed from the number - a 91 that is actually dollars
-        # displayed as euros would be exactly the kind of wrong price this
-        # project refuses to show.
-        self.currency = currency.upper()
+        # Rates are fetched once, lazily - converting per offer would hammer
+        # the FX endpoint for no reason.
+        self._rates = rates_per_eur
 
     @property
     def configured(self) -> bool:
@@ -87,7 +99,6 @@ class SkiplaggedFlightProvider(Provider):
             resp = self.session.get(SEARCH_URL, params={
                 "from": route.origin, "to": route.destination, "depart": day,
                 "return": "", "poll": "true", "sort": "cost",
-                "currency": self.currency,
             }, headers=HEADERS, timeout=30)
             resp.raise_for_status()
             payload = resp.json()
@@ -105,6 +116,12 @@ class SkiplaggedFlightProvider(Provider):
             if offer is not None:
                 offers.append(offer)
         return offers
+
+    def _rate_table(self) -> dict:
+        if self._rates is None:
+            from traveldeals.currency import get_rates_per_eur
+            self._rates = get_rates_per_eur()
+        return self._rates
 
     def _to_offer(self, entry, flights: dict, airlines: dict,
                    route: RoutePreference, day: str) -> Offer | None:
@@ -132,8 +149,8 @@ class SkiplaggedFlightProvider(Provider):
             mode=Mode.FLIGHT,
             provider="skiplagged",
             booking_site=f"{airline_name} ({flight_number})",
-            price=round(price_cents / 100, 2),
-            currency=self.currency,
+            price=_convert(round(price_cents / 100, 2), route.currency, self._rate_table()),
+            currency=route.currency.upper(),
             # Strip the offset, matching the naive-local convention used
             # everywhere else in this codebase.
             depart_time=depart_time[:19],

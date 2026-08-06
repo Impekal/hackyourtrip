@@ -22,11 +22,13 @@ from traveldeals.notifiers.email_notifier import EmailNotifier
 from traveldeals.notifiers.telegram import TelegramNotifier
 from traveldeals.pricehistory import PriceHistory
 from traveldeals.providers.amadeus import AmadeusFlightProvider
-from traveldeals.providers.base import CompositeProvider, Provider
+from traveldeals.providers.base import (CompositeProvider,
+                                         NearbyAirportsProvider, Provider)
 from traveldeals.providers.flixbus import FlixbusProvider
 from traveldeals.providers.mock import (MockBusProvider, MockFlightProvider,
                                          MockHotelProvider, MockTrainProvider)
 from traveldeals.providers.ryanair import RyanairFlightProvider
+from traveldeals.providers.skiplagged import SkiplaggedFlightProvider
 from traveldeals.providers.transitous import (TransitousBusProvider,
                                                TransitousTrainProvider)
 from traveldeals.providers.travelpayouts import TravelpayoutsFlightProvider
@@ -51,7 +53,9 @@ def _select_flight_provider(allow_mock: bool = True) -> Provider:
     with allow_mock=False not even then, because an empty result is honest
     and an invented price is not.
     """
-    real: list[Provider] = [RyanairFlightProvider()]
+    # Ryanair for its own live fares, Skiplagged for every full-service
+    # carrier neither of the others covers - the two barely overlap.
+    real: list[Provider] = [RyanairFlightProvider(), SkiplaggedFlightProvider()]
     travelpayouts = TravelpayoutsFlightProvider()
     if travelpayouts.configured:
         real.append(travelpayouts)
@@ -60,7 +64,9 @@ def _select_flight_provider(allow_mock: bool = True) -> Provider:
         real.append(amadeus)
     if allow_mock:
         real.append(MockFlightProvider())
-    return CompositeProvider(Mode.FLIGHT, real)
+    # The nearby-airport wrapper sits outermost so every source gets asked
+    # for the alternative airports too, not just one of them.
+    return NearbyAirportsProvider(Mode.FLIGHT, CompositeProvider(Mode.FLIGHT, real))
 
 
 def build_providers(real_transit: bool = True) -> dict[Mode, Provider]:
