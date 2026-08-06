@@ -111,6 +111,28 @@ Ergebnis) fällt alles graceful auf Mock-Daten zurück.
 
 ## Wichtige Konventionen / Design-Entscheidungen
 
+- **⚠️ Erfundene Preise dürfen nie wie buchbare aussehen.** Die wichtigste
+  Regel dieses Projekts, weil sie schon einmal verletzt wurde: Mock-Angebote
+  trugen echte Anbieternamen ("DB Navigator") und die Ergebnisliste war
+  pauschal als "echte Preise" beschriftet, sobald *Flüge* echt waren. Ein
+  Nutzer wollte daraufhin eine erfundene 42-EUR-Verbindung buchen, die es
+  nie gab. Deshalb gilt:
+  - Mock-Provider verwenden ausschließlich "Beispiel-…"-Namen. Echte
+    Anbieternamen dürfen **nur** aus einer echten Provider-Antwort kommen
+    (bei Travelpayouts das Feld `gate`).
+  - Jedes Angebot wird einzeln markiert (`isMock` im JS, `provider="mock-*"`
+    im Python), nie pauschal die ganze Liste.
+  - Eine Kombi mit *einem* Mock-Bein (z.B. echter Flug + erfundenes Hotel)
+    zählt komplett als Beispieldaten - die Summe wäre sonst nicht buchbar.
+  - Wer neue Anbieter "berücksichtigen" soll, für die es keine Preis-API
+    gibt: **keine Angebote erfinden**, stattdessen `PROVIDER_LINKS` in
+    `app.js` erweitern (echte Suchseiten zum Selbstprüfen).
+- **Anbieter-Links ohne erfundene Query-Parameter.** `PROVIDER_LINKS`
+  verlinkt Einstiegsseiten, weil Flixbus/Omio/Trainline interne
+  Stations-IDs brauchen, die von hier nicht auflösbar sind. Ausgedachte
+  Parameter würden Links erzeugen, die aussehen wie eine fertige Suche und
+  ins Leere führen - derselbe Fehler eine Ebene höher. Ausnahme: bahn.de
+  akzeptiert Klartext-Orte und landet im Zweifel auf der Suchmaske.
 - **Python ↔ JS Spiegelung ist Pflicht.** Es gibt keine automatisierte
   Prüfung dafür (kein gemeinsamer Codegen) - bei jeder Modell-/Engine-
   Änderung beide Seiten von Hand synchron halten, sonst driften Suche

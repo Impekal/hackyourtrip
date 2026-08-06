@@ -4,6 +4,24 @@ Bot/Webapp, der Flug-, Bahn-, Bus- und Hotel-Angebote vergleicht, dich per
 Telegram/E-Mail auf Preisverfall und mögliche Fehlerpreise hinweist und dir
 auf einem Dashboard die besten aktuellen Optionen pro Strecke zeigt.
 
+> ## ⚠️ Wichtig: Was ist echt, was ist Beispiel?
+>
+> | Modus | Datenquelle |
+> |---|---|
+> | **Flug** | **echte Preise** (Travelpayouts/Aviasales), sobald ein Token gesetzt ist |
+> | **Bahn, Bus, Hotel** | **erfundene Beispieldaten** - keine buchbaren Angebote |
+>
+> Für Bahn, Bus und Hotel existiert keine frei nutzbare Preis-API. Diese
+> Modi laufen auf generierten Zufallspreisen, mit denen die Vergleichs- und
+> Ranking-Logik getestet wird. **Solche Angebote lassen sich nirgends
+> buchen** - sie sind in der Oberfläche mit Warnbanner, durchgestrichenem
+> Preis und "Nicht buchbar"-Abzeichen gekennzeichnet, und unter den
+> Ergebnissen stehen Direktlinks zu den echten Anbietern (DB, SNCF Connect
+> für TGV, Trainline, FlixBus, BlaBlaCar Bus, Omio, Lastminute …).
+>
+> Bis Version vom 06.08.2026 trugen diese Beispielangebote echte
+> Anbieternamen wie "DB Navigator" - das war irreführend und ist behoben.
+
 > **Stand v1:** Flug läuft auf **echten, aktuell beobachteten Preisen über
 > die Travelpayouts (Aviasales) Data API**, sobald `TRAVELPAYOUTS_TOKEN`
 > gesetzt ist (siehe "Travelpayouts einrichten" unten - kostenloses
