@@ -1,0 +1,36 @@
+name: Check provider links (temporary)
+
+# One-off: confirm every URL in PROVIDER_LINKS (docs/app.js) actually
+# resolves, so the "Echte Preise direkt prüfen" section can't ship dead
+# links. The dev sandbox has no internet; a runner does. Delete afterwards.
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Resolve every provider URL
+        run: |
+          # Pull the URLs straight out of the source so this checks what is
+          # actually shipped, not a copy that could drift.
+          URLS=$(grep -oE "https://[^']+" docs/app.js \
+                 | grep -vE "travelpayouts|aviasales|frankfurter|workers\.dev|example\.invalid|search\.aviasales" \
+                 | sort -u)
+          echo "$URLS"
+          echo "-----"
+          FAILED=0
+          for u in $URLS; do
+            # Follow redirects, browser-ish UA (some sites 403 plain curl).
+            code=$(curl -sS -o /dev/null -L --max-time 25 -w '%{http_code}' \
+              -H 'User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/126 Safari/537.36' \
+              -H 'Accept-Language: de-DE,de;q=0.9' "$u" || echo "000")
+            case "$code" in
+              2*|3*) echo "OK   $code  $u" ;;
+              403)   echo "WARN $code  $u  (Bot-Schutz, im Browser i.d.R. erreichbar)" ;;
+              *)     echo "FAIL $code  $u"; FAILED=1 ;;
+            esac
+          done
+          exit $FAILED

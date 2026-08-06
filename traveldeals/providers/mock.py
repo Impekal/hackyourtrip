@@ -72,7 +72,7 @@ def _transport_comfort_fields(rnd: random.Random, mode: Mode, stops_weights: lis
 
 class MockFlightProvider(Provider):
     mode = Mode.FLIGHT
-    _BOOKING_SITES = ["Skyscanner", "Google Flights", "Kiwi.com", "Airline direct"]
+    _BOOKING_SITES = ["Beispiel-Airline A", "Beispiel-Airline B", "Beispiel-Airline C"]
     _DEPART_HOURS = [6, 9, 12, 15, 18, 21]
 
     def __init__(self, as_of: date | None = None):
@@ -121,7 +121,7 @@ class MockFlightProvider(Provider):
             offers.append(Offer(
                 mode=self.mode,
                 provider="mock-flight",
-                booking_site="Airline direct",
+                booking_site="Beispiel-Airline A",
                 price=error_fare_price,
                 currency=route.currency,
                 depart_time=depart_dt.isoformat(),
@@ -137,7 +137,7 @@ class MockFlightProvider(Provider):
 
 class MockTrainProvider(Provider):
     mode = Mode.TRAIN
-    _BOOKING_SITES = ["DB Navigator", "Trainline", "Omio"]
+    _BOOKING_SITES = ["Beispiel-Bahnanbieter A", "Beispiel-Bahnanbieter B"]
     _BAHNCARD_DISCOUNT = {"25": 0.25, "50": 0.50, "100": 1.0, None: 0.0}
 
     def __init__(self, as_of: date | None = None):
@@ -176,7 +176,7 @@ class MockTrainProvider(Provider):
 
 class MockBusProvider(Provider):
     mode = Mode.BUS
-    _BOOKING_SITES = ["FlixBus", "Omio"]
+    _BOOKING_SITES = ["Beispiel-Busanbieter A", "Beispiel-Busanbieter B"]
 
     def __init__(self, as_of: date | None = None):
         self.as_of = as_of or date.today()
@@ -210,7 +210,7 @@ class MockBusProvider(Provider):
 
 class MockHotelProvider(Provider):
     mode = Mode.HOTEL
-    _BOOKING_SITES = ["Booking.com", "Trivago", "Hotels.com", "Airbnb"]
+    _BOOKING_SITES = ["Beispiel-Hotelportal A", "Beispiel-Hotelportal B"]
 
     def __init__(self, as_of: date | None = None):
         self.as_of = as_of or date.today()

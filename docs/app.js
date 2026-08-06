@@ -165,11 +165,19 @@ function isoDay(date) { return date.toISOString().slice(0, 10); }
  * including the hotel-amenity and transport-comfort fields, just running
  * client-side so the search tab needs no backend at all.
  * ===================================================================== */
+// Deliberately NOT real booking-site names any more. Mock offers used to be
+// labelled "DB Navigator", "FlixBus" etc., which made an invented price look
+// like a bookable fare - a user went to DB Navigator to book a 42 EUR
+// connection this app had made up, and of course found nothing. Generic
+// placeholder names plus the per-offer "Beispiel" badge make the difference
+// impossible to miss. Real booking-site names may only come from a real
+// provider response (see travelpayoutsRawToOffer, which uses the actual
+// `gate` field).
 const BOOKING_SITES = {
-  flight: ['Skyscanner', 'Google Flights', 'Kiwi.com', 'Airline direct'],
-  train: ['DB Navigator', 'Trainline', 'Omio'],
-  bus: ['FlixBus', 'Omio'],
-  hotel: ['Booking.com', 'Trivago', 'Hotels.com', 'Airbnb'],
+  flight: ['Beispiel-Airline A', 'Beispiel-Airline B', 'Beispiel-Airline C'],
+  train: ['Beispiel-Bahnanbieter A', 'Beispiel-Bahnanbieter B'],
+  bus: ['Beispiel-Busanbieter A', 'Beispiel-Busanbieter B'],
+  hotel: ['Beispiel-Hotelportal A', 'Beispiel-Hotelportal B'],
 };
 const BAHNCARD_DISCOUNT = { '25': 0.25, '50': 0.5, '100': 1.0, '': 0.0 };
 const LEGROOM_RANGE = { flight: [66, 96], train: [85, 120], bus: [70, 100] };
@@ -260,7 +268,7 @@ function mockFlightOffers(route) {
       const depart = atHour(day, hour, rngChoice(rng, [0, 15, 30, 45]));
       const [finalPrice, returnDepart] = roundTripAddon(rng, route, price, hours);
       offers.push({
-        mode: 'flight', bookingSite: rngChoice(rng, BOOKING_SITES.flight),
+        mode: 'flight', isMock: true, bookingSite: rngChoice(rng, BOOKING_SITES.flight),
         price: finalPrice, currency: route.currency, depart, durationHours: duration,
         bagFee, isLowCost, returnDepart, ...transportComfortFields(rng, 'flight', [0.55, 0.35, 0.10]),
       });
@@ -283,7 +291,7 @@ function mockTrainOffers(route) {
       const basePrice2 = route.bahncard === '100' ? 0 : price;
       const [finalPrice, returnDepart] = roundTripAddon(rng, route, basePrice2, hours);
       offers.push({
-        mode: 'train', bookingSite: rngChoice(rng, BOOKING_SITES.train),
+        mode: 'train', isMock: true, bookingSite: rngChoice(rng, BOOKING_SITES.train),
         price: finalPrice, currency: route.currency,
         depart, durationHours: duration, bagFee: 0, isLowCost: false, returnDepart,
         ...transportComfortFields(rng, 'train', [0.75, 0.20, 0.05]),
@@ -305,7 +313,7 @@ function mockBusOffers(route) {
       const depart = atHour(day, hour, rngChoice(rng, [0, 30]));
       const [finalPrice, returnDepart] = roundTripAddon(rng, route, price, hours);
       offers.push({
-        mode: 'bus', bookingSite: rngChoice(rng, BOOKING_SITES.bus),
+        mode: 'bus', isMock: true, bookingSite: rngChoice(rng, BOOKING_SITES.bus),
         price: finalPrice, currency: route.currency, depart, durationHours: duration,
         bagFee: 0, isLowCost: false, returnDepart,
         ...transportComfortFields(rng, 'bus', [0.65, 0.30, 0.05]),
@@ -324,7 +332,7 @@ function mockHotelOffers(route) {
     for (let i = 0; i < 3; i++) {
       const perNight = round2(basePerNight * rngFloat(rng, 0.85, 1.3));
       offers.push({
-        mode: 'hotel', bookingSite: rngChoice(rng, BOOKING_SITES.hotel),
+        mode: 'hotel', isMock: true, bookingSite: rngChoice(rng, BOOKING_SITES.hotel),
         price: round2(perNight * nights), currency: route.currency,
         depart: checkin, durationHours: nights * 24, bagFee: 0, isLowCost: false,
         nights,
@@ -860,6 +868,7 @@ async function runSearch(route) {
 }
 
 function fmtHM(date) { return date.toTimeString().slice(0, 5); }
+function fmtDay(date) { return date.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' }); }
 function fmtShort(date) { return date.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }) + ' ' + fmtHM(date); }
 
 // Mock offers either have no url at all (JS mocks) or a placeholder
@@ -1103,32 +1112,150 @@ function readRouteFromForm() {
   };
 }
 
+/* =========================================================================
+ * Direktlinks zu echten Anbietern.
+ *
+ * Für Bahn, Bus und Hotel gibt es keine frei nutzbare Preis-API - deshalb
+ * erfindet diese App dort Beispielpreise (siehe BOOKING_SITES). Statt die
+ * Fälschung realistischer zu machen, verlinkt dieser Block die echten
+ * Anbieter, damit der tatsächliche Preis einen Klick entfernt ist.
+ *
+ * Bewusst nur Einstiegsseiten statt vorbefüllter Suchparameter: Flixbus,
+ * Omio & Co. adressieren Orte über interne Stations-IDs, die sich von hier
+ * aus nicht auflösen lassen. Erfundene Query-Parameter würden Links
+ * erzeugen, die zwar aussehen wie eine fertige Suche, aber im Nichts landen
+ * - exakt der Fehler, der bei den Beispielpreisen behoben wurde. Einzige
+ * Ausnahme ist bahn.de, dessen Deep-Link Klartext-Ortsnamen akzeptiert und
+ * im Zweifel auf der normalen Suchmaske landet.
+ * ===================================================================== */
+const PROVIDER_LINKS = {
+  flight: [
+    ['Skyscanner', 'https://www.skyscanner.de/'],
+    ['Kayak', 'https://www.kayak.de/flights'],
+    ['Google Flights', 'https://www.google.com/travel/flights'],
+    ['Lastminute', 'https://www.lastminute.de/'],
+  ],
+  train: [
+    ['DB (ICE & Co.)', 'https://www.bahn.de/'],
+    ['SNCF Connect (TGV)', 'https://www.sncf-connect.com/'],
+    ['Trainline (ICE + TGV kombiniert)', 'https://www.thetrainline.com/'],
+    ['Omio', 'https://www.omio.de/'],
+    ['Interrail/Eurail', 'https://www.interrail.eu/de'],
+  ],
+  bus: [
+    ['FlixBus', 'https://global.flixbus.com/'],
+    ['BlaBlaCar Bus', 'https://www.blablacar.de/bus'],
+    ['Omio', 'https://www.omio.de/'],
+  ],
+  hotel: [
+    ['Booking.com', 'https://www.booking.com/'],
+    ['Trivago', 'https://www.trivago.de/'],
+    ['Lastminute', 'https://www.lastminute.de/'],
+    ['HRS', 'https://www.hrs.de/'],
+  ],
+};
+
+// bahn.de accepts plain place names in its hash deep link; if the format
+// ever changes the user still lands on the DB search page.
+function bahnDeepLink(route) {
+  if (!route.origin || !route.destination) return null;
+  const day = isoDay(route.departFrom);
+  const time = route.transportPrefs.preferredDepartTime || '09:00';
+  const params = new URLSearchParams({
+    sts: 'true', so: route.origin, zo: route.destination, hd: `${day}T${time}:00`,
+  });
+  return `https://www.bahn.de/buchung/fahrplan/suche#${params.toString()}`;
+}
+
+// Which provider groups are worth showing for the active mode.
+const MODE_PROVIDER_GROUPS = {
+  flight: ['flight'], train: ['train'], bus: ['bus'], hotel: ['hotel'],
+  train_or_bus: ['train', 'bus'],
+  flight_or_train: ['flight', 'train'],
+  flight_or_bus: ['flight', 'bus'],
+  flight_hotel: ['flight', 'hotel'],
+  train_hotel: ['train', 'hotel'],
+  bus_hotel: ['bus', 'hotel'],
+};
+const GROUP_TITLES = { flight: '✈️ Flug', train: '🚆 Bahn', bus: '🚌 Bus', hotel: '🏨 Hotel' };
+
+function renderProviderLinks(route) {
+  const groups = MODE_PROVIDER_GROUPS[route.mode] || [];
+  if (!groups.length) return '';
+  const routeLine = route.origin
+    ? `${route.origin} → ${route.destination}, ${fmtDay(route.departFrom)}`
+    : `${route.destination}, ab ${fmtDay(route.departFrom)}`;
+  const bahn = bahnDeepLink(route);
+  return `
+    <div class="provider-links">
+      <h3>Echte Preise direkt prüfen</h3>
+      <p class="provider-note">Für Bahn, Bus und Hotel gibt es keine frei nutzbare Preis-API - die Preise oben sind
+      dort Beispieldaten. Hier die echten Anbieter für <strong>${routeLine}</strong>:</p>
+      ${groups.map(g => `
+        <div class="provider-group">
+          <span class="provider-title">${GROUP_TITLES[g]}</span>
+          <span class="provider-list">${PROVIDER_LINKS[g].map(([name, url]) => {
+            const href = (g === 'train' && name.startsWith('DB') && bahn) ? bahn : url;
+            return `<a href="${href}" target="_blank" rel="noopener">${name}</a>`;
+          }).join('')}</span>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+// An option counts as example data if ANY of its legs is mock - a
+// flight+hotel combo with a real flight but an invented hotel price is not a
+// bookable total, so it must not look like one.
+function isMockOption(opt) {
+  return opt.offers.some(o => o.isMock);
+}
+
 function renderResults(route, options, usedRealFlightData) {
   const label = route.origin ? `${route.origin} → ${route.destination}` : route.destination;
-  const sourceLabel = usedRealFlightData ? 'echte Travelpayouts-Preise' : 'Mock-Daten, Stand heute';
+  const mockCount = options.filter(isMockOption).length;
+  const realCount = options.length - mockCount;
+  // Report both counts instead of one blanket label: the old version said
+  // "echte Travelpayouts-Preise" for the whole list as soon as *flights*
+  // were real, which mislabelled every invented train/bus/hotel row.
+  const parts = [];
+  if (realCount) parts.push(`${realCount} mit echten Preisen`);
+  if (mockCount) parts.push(`${mockCount} Beispieldaten`);
   const dealsLabel = route.dealsOnly ? ', nur Deals' : '';
-  searchMetaEl.textContent = `${options.length} Angebote gefunden für ${label} (${sourceLabel}${dealsLabel})`;
+  searchMetaEl.textContent = `${options.length} Angebote für ${label} (${parts.join(', ')}${dealsLabel})`;
+
   if (!options.length) {
     searchResultsEl.innerHTML = route.dealsOnly
       ? '<p class="empty">Keine Angebote, die deutlich unter dem Durchschnitt dieser Suche liegen - auf "Alle Angebote" umstellen oder das Zeitfenster (Flex-Tage) erweitern.</p>'
       : '<p class="empty">Keine Angebote in diesem Budget/Zeitrahmen/Filter gefunden - Filter lockern und erneut suchen.</p>';
     return;
   }
+
+  const warning = mockCount ? `
+    <p class="mock-warning">⚠️ <strong>${mockCount} dieser Angebote sind Beispieldaten</strong> - erfundene Preise zum Testen
+    der Vergleichslogik, keine buchbaren Verbindungen. Echte Preise gibt es aktuell nur für Flüge.
+    Für Bahn, Bus und Hotel unten direkt beim jeweiligen Anbieter nachsehen.</p>` : '';
+
   searchResultsEl.innerHTML = `
+    ${warning}
     <div class="route">
-      ${options.map((opt, i) => `
-        <div class="option">
+      ${options.map((opt, i) => {
+        const mock = isMockOption(opt);
+        return `
+        <div class="option${mock ? ' is-mock' : ''}">
           <span class="rank mono">${i + 1}</span>
           <div class="price-row">
             <span class="price mono">${opt.price.toFixed(2)} ${route.currency}</span>
+            ${mock ? '<span class="badge warn">Beispieldaten – nicht buchbar</span>' : ''}
             ${opt.isBelowMedian ? '<span class="badge good">Deal</span>' : ''}
           </div>
           <span class="subline mono">${opt.mode} · ${fmtShort(opt.offers[0].depart)}${opt.offers[0].returnDepart ? ` · zurück ${fmtShort(opt.offers[0].returnDepart)}` : ''} · ${opt.durationHours}h · ${opt.offers.map(o => bookingSiteHtml(o.bookingSite, o.url)).join(', ')}</span>
           <div class="chips">${opt.offers.flatMap(offerChips).map(c => `<span class="chip">${c}</span>`).join('')}</div>
           ${opt.recommendations.length ? `<ul class="recs">${opt.recommendations.map(r => `<li>${r}</li>`).join('')}</ul>` : ''}
-        </div>
-      `).join('')}
+        </div>`;
+      }).join('')}
     </div>
+    ${renderProviderLinks(route)}
   `;
 }
 
@@ -1315,18 +1442,24 @@ async function loadAlerts() {
     <div class="route">
       <div class="route-head"><h2>${route.origin} → ${route.destination}</h2></div>
       ${route.notes ? `<p class="notes">${route.notes}</p>` : ''}
-      ${!route.options.length ? '<p class="empty">Keine Angebote gefunden.</p>' : route.options.map((opt, i) => `
-        <div class="option">
+      ${!route.options.length ? '<p class="empty">Keine Angebote gefunden.</p>' : route.options.map((opt, i) => {
+        // The cron writes provider="mock-*" for every generated offer, so
+        // the dashboard can flag invented prices the same way the live
+        // search does.
+        const mock = opt.offers.some(o => (o.provider || '').startsWith('mock'));
+        return `
+        <div class="option${mock ? ' is-mock' : ''}">
           <span class="rank mono">${i + 1}</span>
           <div class="price-row">
             <span class="price mono">${opt.total_price.toFixed(2)} ${opt.currency}</span>
+            ${mock ? '<span class="badge warn">Beispieldaten – nicht buchbar</span>' : ''}
             ${opt.is_error_fare ? '<span class="badge alert">Fehlerpreis</span>' : ''}
             ${opt.is_price_drop ? '<span class="badge good">Preis gefallen</span>' : ''}
           </div>
           <span class="subline mono">${opt.mode} · ${opt.total_duration_hours > 0 ? opt.total_duration_hours + 'h' : 'Dauer unbekannt'}${opt.offers[0].return_depart_time ? ` · zurück ${opt.offers[0].return_depart_time.slice(0, 16).replace('T', ' ')}` : ''} · ${opt.offers.map(o => bookingSiteHtml(o.booking_site, o.url)).join(', ')}</span>
           ${opt.recommendations.length ? `<ul class="recs">${opt.recommendations.map(r => `<li>${r}</li>`).join('')}</ul>` : ''}
-        </div>
-      `).join('')}
+        </div>`;
+      }).join('')}
     </div>
   `).join('');
 }
