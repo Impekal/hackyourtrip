@@ -1139,13 +1139,13 @@ const PROVIDER_LINKS = {
     ['DB (ICE & Co.)', 'https://www.bahn.de/'],
     ['SNCF Connect (TGV)', 'https://www.sncf-connect.com/'],
     ['Trainline (ICE + TGV kombiniert)', 'https://www.thetrainline.com/'],
-    ['Omio', 'https://www.omio.de/'],
+    ['Omio', 'https://www.omio.com/'],
     ['Interrail/Eurail', 'https://www.interrail.eu/de'],
   ],
   bus: [
     ['FlixBus', 'https://global.flixbus.com/'],
     ['BlaBlaCar Bus', 'https://www.blablacar.de/bus'],
-    ['Omio', 'https://www.omio.de/'],
+    ['Omio', 'https://www.omio.com/'],
   ],
   hotel: [
     ['Booking.com', 'https://www.booking.com/'],
