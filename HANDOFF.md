@@ -397,6 +397,14 @@ verifiziert, Antwortstruktur per Wegwerf-Workflow abgegriffen):
   wie Transitous es sich wünscht.
 - Es gibt **keine Buchungs-URL** für eine MOTIS-Verbindung, deshalb bleibt
   `url` leer und die `PROVIDER_LINKS` unter den Ergebnissen übernehmen das.
+- **Zwei User-Agent-Fallen, beide live erlebt:** Transitous weist Anfragen
+  ohne eigenen User-Agent mit 403 ab ("Generic user-agent headers are not
+  allowed") - deshalb der `USER_AGENT`/`TRANSIT_USER_AGENT`-Header. Und
+  umgekehrt blockt *Cloudflare* den Standard-UA von Pythons `urllib` vor dem
+  eigenen Worker mit 403 "error code: 1010". Ein Smoke-Test ohne gesetzten
+  UA schlägt also fehl, ohne den Worker je erreicht zu haben - das sah eine
+  Runde lang nach einem kaputten Proxy aus, betraf aber genauso `/cheap`,
+  das per `curl` einwandfrei lief.
 - **Nicht abgedeckt:** In den Kombi-Modi "Flug oder Bahn"/"Flug oder Bus"
   steht im Von/Nach-Feld ein IATA-Code ("BER"), den der Transitous-Geocoder
   nicht als Haltestelle auflöst - dort fällt das Bahn-/Bus-Bein weiterhin
