@@ -59,6 +59,34 @@ const TRANSIT_FORWARDABLE_PARAMS = {
 // touch about traffic rather than just blocking it.
 const TRANSIT_USER_AGENT = "HackYourTrip/1.0 (+https://github.com/kalivolut/hackyourtrip)";
 
+// Ryanair's own fare finder: public, no key, no account - and unlike the
+// Travelpayouts index these are *live, bookable* fares straight from the
+// airline. Verified against the live service (HTTP 200 with real fares for
+// BER->BCN); `availability` needs a booking session and is deliberately not
+// used, `cheapestPerDay` came back empty and is skipped too.
+//
+// Obvious limit: Ryanair only knows Ryanair routes. It is merged with the
+// Travelpayouts results rather than replacing them.
+const RYANAIR_UPSTREAM = {
+  oneWayFares: "https://services-api.ryanair.com/farfnd/v4/oneWayFares",
+  roundTripFares: "https://services-api.ryanair.com/farfnd/v4/roundTripFares",
+  airports: "https://www.ryanair.com/api/views/locate/5/airports/de/active",
+};
+const RYANAIR_FORWARDABLE_PARAMS = [
+  "departureAirportIataCode", "arrivalAirportIataCode",
+  "outboundDepartureDateFrom", "outboundDepartureDateTo",
+  "inboundDepartureDateFrom", "inboundDepartureDateTo",
+  "currency", "language", "limit", "market", "offset",
+];
+// A plain script user-agent gets 403 on some of Ryanair's hosts, so the
+// proxy presents itself as an ordinary browser - the same request a visitor
+// clicking through ryanair.com would make.
+const RYANAIR_HEADERS = {
+  "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
+  Accept: "application/json, text/plain, */*",
+  "Accept-Language": "de-DE,de;q=0.9,en;q=0.8",
+};
+
 // Only these may be forwarded upstream - keeps the proxy from being turned
 // into an open relay for arbitrary Travelpayouts query parameters.
 const FORWARDABLE_PARAMS = [
@@ -283,6 +311,61 @@ async function handleTransitRequest(incoming, request, ctx, allowedOrigin) {
   return response;
 }
 
+/**
+ * GET /ryanair/{oneWayFares|roundTripFares|airports} - Ryanair passthrough.
+ *
+ * Like /transit/*, this needs no secret and therefore sits in front of the
+ * TRAVELPAYOUTS_TOKEN check: real airline fares must work on a deployment
+ * that has no Travelpayouts token at all.
+ */
+async function handleRyanairRequest(incoming, request, ctx, allowedOrigin) {
+  const kind = incoming.pathname.replace(/^\/+|\/+$/g, "").slice("ryanair/".length);
+  if (!RYANAIR_UPSTREAM[kind]) {
+    return jsonResponse({
+      error: "Unknown Ryanair endpoint. Use /ryanair/oneWayFares, /ryanair/roundTripFares or /ryanair/airports.",
+    }, 404, allowedOrigin);
+  }
+
+  const upstream = new URL(RYANAIR_UPSTREAM[kind]);
+  if (kind !== "airports") {
+    for (const name of RYANAIR_FORWARDABLE_PARAMS) {
+      const value = incoming.searchParams.get(name);
+      if (value) upstream.searchParams.set(name, value);
+    }
+    if (!(upstream.searchParams.get("departureAirportIataCode")
+          && upstream.searchParams.get("arrivalAirportIataCode"))) {
+      return jsonResponse({
+        error: "Fare lookup needs departureAirportIataCode and arrivalAirportIataCode.",
+      }, 400, allowedOrigin);
+    }
+  }
+
+  const cache = caches.default;
+  const cacheKey = new Request(incoming.toString(), request);
+  const cached = await cache.match(cacheKey);
+  if (cached) return cached;
+
+  let upstreamResponse;
+  try {
+    upstreamResponse = await fetch(upstream.toString(), { headers: RYANAIR_HEADERS });
+  } catch (err) {
+    return jsonResponse({ error: `Ryanair request failed: ${err.message}` }, 502, allowedOrigin);
+  }
+
+  const response = new Response(await upstreamResponse.text(), {
+    status: upstreamResponse.status,
+    headers: {
+      "Content-Type": "application/json",
+      "Cache-Control": `public, max-age=${CACHE_TTL_SECONDS}`,
+      ...corsHeaders(allowedOrigin),
+    },
+  });
+  if (upstreamResponse.ok) {
+    ctx.waitUntil(cache.put(cacheKey, response.clone()));
+  }
+  return response;
+}
+
 export default {
   async fetch(request, env, ctx) {
     const allowedOrigin = env.ALLOWED_ORIGIN || "*";
@@ -297,8 +380,12 @@ export default {
       return jsonResponse({ error: "Only GET is supported." }, 405, allowedOrigin);
     }
     const requestUrl = new URL(request.url);
-    if (requestUrl.pathname.replace(/^\/+/, "").startsWith("transit/")) {
+    const path = requestUrl.pathname.replace(/^\/+/, "");
+    if (path.startsWith("transit/")) {
       return handleTransitRequest(requestUrl, request, ctx, allowedOrigin);
+    }
+    if (path.startsWith("ryanair/")) {
+      return handleRyanairRequest(requestUrl, request, ctx, allowedOrigin);
     }
     if (!env.TRAVELPAYOUTS_TOKEN) {
       return jsonResponse({ error: "Proxy is not configured (missing TRAVELPAYOUTS_TOKEN secret)." }, 500, allowedOrigin);

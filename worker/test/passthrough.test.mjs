@@ -1,6 +1,7 @@
-// Exercises the Worker's /transit/* passthrough to Transitous against a
-// stubbed fetch: parameter whitelisting, validation, and the fact that it
-// works without any secret at all.
+// Exercises the Worker's key-less passthroughs against a stubbed fetch:
+// /transit/* (Transitous timetables) and /ryanair/* (real airline fares).
+// Checks parameter whitelisting, validation, the outgoing headers each
+// upstream demands, and that both work without any secret at all.
 import { readFileSync } from 'node:fs';
 
 const src = readFileSync(new URL('../src/index.js', import.meta.url), 'utf8');
@@ -102,6 +103,59 @@ stubFetch({ success: true, data: [] });
 {
   const { resp } = await call('/cheap?origin=BER&destination=BCN');
   report(resp.status === 500, 'flight endpoint still requires the token');
+}
+
+// ---- Ryanair passthrough -------------------------------------------------
+
+stubFetch({ fares: [{ outbound: { flightNumber: 'FR132', price: { value: 53.36 } } }] });
+{
+  const { resp, body, last } = await call(
+    '/ryanair/oneWayFares?departureAirportIataCode=BER&arrivalAirportIataCode=BCN'
+    + '&outboundDepartureDateFrom=2026-09-01&outboundDepartureDateTo=2026-09-30&currency=EUR&limit=200');
+  const params = new URL(last.url).searchParams;
+  report(resp.status === 200 && body.fares.length === 1
+    && last.url.startsWith('https://services-api.ryanair.com/farfnd/v4/oneWayFares')
+    && params.get('departureAirportIataCode') === 'BER'
+    && params.get('outboundDepartureDateTo') === '2026-09-30',
+    'ryanair oneWayFares forwards the date range', last?.url);
+}
+
+{
+  const { last } = await call(
+    '/ryanair/roundTripFares?departureAirportIataCode=BER&arrivalAirportIataCode=BCN'
+    + '&inboundDepartureDateFrom=2026-09-21&inboundDepartureDateTo=2026-09-21');
+  report(last.url.includes('/roundTripFares')
+    && new URL(last.url).searchParams.get('inboundDepartureDateFrom') === '2026-09-21',
+    'ryanair roundTripFares forwards the inbound window', last?.url);
+}
+
+{
+  // A plain script UA gets 403 on some Ryanair hosts.
+  const { last } = await call('/ryanair/oneWayFares?departureAirportIataCode=BER&arrivalAirportIataCode=BCN');
+  report(/Mozilla/.test(last.init.headers['User-Agent']),
+    'ryanair request looks like a browser', JSON.stringify(last?.init?.headers));
+}
+
+{
+  const { last } = await call('/ryanair/oneWayFares?departureAirportIataCode=BER&arrivalAirportIataCode=BCN&evil=1');
+  report(!new URL(last.url).searchParams.has('evil'),
+    'ryanair drops non-whitelisted params', last?.url);
+}
+
+{
+  const { resp } = await call('/ryanair/oneWayFares?departureAirportIataCode=BER');
+  report(resp.status === 400, 'ryanair fare lookup without destination -> 400');
+}
+
+{
+  const { resp } = await call('/ryanair/somethingElse');
+  report(resp.status === 404, 'unknown /ryanair/* endpoint -> 404');
+}
+
+{
+  // Works with no secrets at all - same rule as /transit/*.
+  const { resp } = await call('/ryanair/airports');
+  report(resp.status === 200, 'ryanair airports works without TRAVELPAYOUTS_TOKEN');
 }
 
 globalThis.fetch = realFetch;

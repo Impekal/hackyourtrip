@@ -22,9 +22,10 @@ from traveldeals.notifiers.email_notifier import EmailNotifier
 from traveldeals.notifiers.telegram import TelegramNotifier
 from traveldeals.pricehistory import PriceHistory
 from traveldeals.providers.amadeus import AmadeusFlightProvider
-from traveldeals.providers.base import Provider
+from traveldeals.providers.base import CompositeProvider, Provider
 from traveldeals.providers.mock import (MockBusProvider, MockFlightProvider,
                                          MockHotelProvider, MockTrainProvider)
+from traveldeals.providers.ryanair import RyanairFlightProvider
 from traveldeals.providers.transitous import (TransitousBusProvider,
                                                TransitousTrainProvider)
 from traveldeals.providers.travelpayouts import TravelpayoutsFlightProvider
@@ -35,19 +36,30 @@ DEFAULT_DATA_DIR = REPO_ROOT / "data"
 DEFAULT_DASHBOARD_JSON = REPO_ROOT / "docs" / "data" / "deals.json"
 
 
-def _select_flight_provider() -> Provider:
-    # Travelpayouts is the recommended real source (free self-serve signup,
-    # see README) and wins if configured. Amadeus is kept working for anyone
-    # with an Enterprise account (its free self-service tier was
-    # decommissioned in July 2026) as a second real option. Mock is the
-    # final fallback so `check` always produces something to look at.
+def _select_flight_provider(allow_mock: bool = True) -> Provider:
+    """All available real flight sources at once, merged.
+
+    Ryanair needs no credentials at all and returns live, bookable fares -
+    but only for its own routes, so it is a complement, never a replacement.
+    Travelpayouts covers many airlines (free self-serve token, see README)
+    as a cache of recently seen fares. Amadeus stays supported for anyone
+    with an Enterprise account; its free self-service tier was decommissioned
+    in July 2026.
+
+    Only if none of them can answer does the mock generator step in - and
+    with allow_mock=False not even then, because an empty result is honest
+    and an invented price is not.
+    """
+    real: list[Provider] = [RyanairFlightProvider()]
     travelpayouts = TravelpayoutsFlightProvider()
     if travelpayouts.configured:
-        return travelpayouts
+        real.append(travelpayouts)
     amadeus = AmadeusFlightProvider()
     if amadeus.configured:
-        return amadeus
-    return MockFlightProvider()
+        real.append(amadeus)
+    if allow_mock:
+        real.append(MockFlightProvider())
+    return CompositeProvider(Mode.FLIGHT, real)
 
 
 def build_providers(real_transit: bool = True) -> dict[Mode, Provider]:
@@ -59,7 +71,7 @@ def build_providers(real_transit: bool = True) -> dict[Mode, Provider]:
     e.g. for an offline demo run.
     """
     return {
-        Mode.FLIGHT: _select_flight_provider(),
+        Mode.FLIGHT: _select_flight_provider(allow_mock=not real_transit),
         Mode.TRAIN: TransitousTrainProvider() if real_transit else MockTrainProvider(),
         Mode.BUS: TransitousBusProvider() if real_transit else MockBusProvider(),
         Mode.HOTEL: MockHotelProvider(),

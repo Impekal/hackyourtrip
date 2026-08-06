@@ -4,7 +4,7 @@
 // guessing: if this doesn't match, the browser is running a cached old
 // app.js and any "the fix didn't work" report is about the old file. Bump
 // together with the ?v= in index.html.
-const BUILD_STAMP = '2026-08-06-3';
+const BUILD_STAMP = '2026-08-06-4';
 document.getElementById('buildStamp').textContent = BUILD_STAMP;
 
 /* =========================================================================
@@ -636,6 +636,21 @@ async function fetchRealFlightOffers(route) {
   const offers = [];
   const seen = new Set();
 
+  // Ryanair first: live bookable fares from the airline itself beat a cache
+  // of fares somebody saw once. It only knows its own routes, so whatever it
+  // returns is added to - never substituted for - the Travelpayouts results.
+  for (const offer of await fetchRyanairOffers(route)) {
+    if (!wantedDays.has(isoDay(offer.depart))) continue;
+    seen.add(`${offer.depart.toISOString()}|${offer.bookingSite}|${offer.price}`);
+    offers.push(offer);
+  }
+  // Ryanair serves only its own routes, so its failures are the least
+  // informative thing that could be reported. Park the reason and let the
+  // other sources speak first - otherwise one Ryanair hiccup replaces
+  // "keine Preise für dieses Datum" with a bare "HTTP 500".
+  const ryanairError = lastProxyError;
+  lastProxyError = '';
+
   // Offers the API did return for this route, but on a day outside the flex
   // window. They used to be dropped without trace, which is why a search
   // with 0 Flex-Tagen on a thin route looked like "no data at all" - the
@@ -709,6 +724,97 @@ async function fetchRealFlightOffers(route) {
       .slice(0, 3)
       .map(o => `${fmtDay(o.depart)} ab ${o.price.toFixed(0)} ${o.currency}`);
     lastProxyError = `Für dieses Datum sind dort keine Preise hinterlegt – wohl aber für ${nearest.join(', ')}`;
+  }
+  // Only fall back to Ryanair's reason when no other source had anything to
+  // say at all.
+  if (!offers.length && !lastProxyError && ryanairError) lastProxyError = ryanairError;
+  return offers;
+}
+
+/* =========================================================================
+ * Real, bookable Ryanair fares - free, no key, no account.
+ * Mirrors traveldeals/providers/ryanair.py.
+ *
+ * Unlike the Travelpayouts index (a cache of fares recently *seen*), these
+ * come straight from the airline and are live and bookable. The catch is
+ * stated rather than hidden: Ryanair only knows Ryanair routes, so this
+ * complements Travelpayouts instead of replacing it - both pools are merged.
+ *
+ * One request covers the whole flex window, because the fare finder takes a
+ * date range directly.
+ * ===================================================================== */
+const RYANAIR_FARES_PER_REQUEST = 200;
+// The airline's own search URL, built from the parameters its site uses. A
+// wrong guess lands on the search form rather than an error page - the same
+// trade-off already documented for the bahn.de links.
+const RYANAIR_BOOKING_BASE = 'https://www.ryanair.com/de/de/trip/flights/select';
+
+function ryanairBookingUrl(route, departDay, returnDay) {
+  const params = new URLSearchParams({
+    adults: '1', teens: '0', children: '0', infants: '0',
+    originIata: route.origin, destinationIata: route.destination,
+    dateOut: departDay, isConnectedFlight: 'false', discount: '0',
+    isReturn: returnDay ? 'true' : 'false',
+  });
+  if (returnDay) params.set('dateIn', returnDay);
+  return `${RYANAIR_BOOKING_BASE}?${params.toString()}`;
+}
+
+function ryanairFareToOffer(fare, route, roundTrip) {
+  const outbound = fare.outbound || {};
+  if (!outbound.departureDate || !outbound.arrivalDate) return null;
+  // For a round trip the combined total lives in summary.price; the per-leg
+  // price would understate what the trip actually costs.
+  const priceBlock = roundTrip ? ((fare.summary || {}).price || {}) : (outbound.price || {});
+  if (priceBlock.value == null) return null;
+
+  const inbound = fare.inbound || {};
+  const depart = new Date(outbound.departureDate);
+  const arrive = new Date(outbound.arrivalDate);
+  const flightNumber = outbound.flightNumber || 'FR';
+  return {
+    mode: 'flight',
+    bookingSite: `Ryanair (${flightNumber})`,
+    lineLabel: flightNumber,
+    price: Number(priceBlock.value),
+    currency: (priceBlock.currencyCode || route.currency).toUpperCase(),
+    depart,
+    durationHours: round2((arrive - depart) / 3600000),
+    // Ryanair sells the seat only; the checked-bag fee depends on route and
+    // season, so it stays 0 rather than being guessed at.
+    bagFee: 0,
+    isLowCost: true,
+    stops: 0, // the fare finder returns non-stop fares only
+    wifiOnboard: false, powerOutlets: false, legroomCm: null, punctualityPct: null,
+    url: ryanairBookingUrl(route, outbound.departureDate.slice(0, 10),
+                            inbound.departureDate ? inbound.departureDate.slice(0, 10) : null),
+    returnDepart: inbound.departureDate ? new Date(inbound.departureDate) : null,
+  };
+}
+
+async function fetchRyanairOffers(route) {
+  if (!PROXY_URL) return [];
+  const days = dayCandidates(route);
+  if (!days.length) return [];
+  const roundTrip = Boolean(route.roundTrip && route.returnDate);
+
+  const params = new URLSearchParams({
+    departureAirportIataCode: route.origin,
+    arrivalAirportIataCode: route.destination,
+    outboundDepartureDateFrom: isoDay(days[0]),
+    outboundDepartureDateTo: isoDay(days[days.length - 1]),
+    currency: route.currency.toUpperCase(),
+    language: 'de', market: 'de-de', limit: String(RYANAIR_FARES_PER_REQUEST),
+  });
+  if (roundTrip) {
+    params.set('inboundDepartureDateFrom', isoDay(route.returnDate));
+    params.set('inboundDepartureDateTo', isoDay(route.returnDate));
+  }
+  const payload = await fetchProxyJson(roundTrip ? 'ryanair/roundTripFares' : 'ryanair/oneWayFares', params);
+  const offers = [];
+  for (const fare of (payload && payload.fares) || []) {
+    const offer = ryanairFareToOffer(fare, route, roundTrip);
+    if (offer) offers.push(offer);
   }
   return offers;
 }
@@ -1047,6 +1153,16 @@ async function runSearch(route) {
   // Why flights fell back to example data, in the user's words - empty when
   // they didn't fall back at all.
   let flightFallbackReason = '';
+  // Invented prices are opt-in now, and off by default. They exist to
+  // exercise the ranking logic, not to fill a results list - and filling the
+  // list was actively harmful: a search that found no real fares showed
+  // three fabricated ones instead, so "keine echten Preise" arrived wrapped
+  // in three prices that looked like an answer. Nothing beats an empty list
+  // plus the reason.
+  const allowMock = Boolean(route.showMockData);
+  const mockFor = { flight: mockFlightOffers, train: mockTrainOffers, bus: mockBusOffers, hotel: mockHotelOffers };
+  const fallback = (mode) => (allowMock ? mockFor[mode](route) : []);
+
   async function pool(mode) {
     if (pools[mode]) return pools[mode];
     if (mode === 'flight') {
@@ -1058,18 +1174,18 @@ async function runSearch(route) {
         flightFallbackReason = !PROXY_URL
           ? 'Kein Proxy konfiguriert'
           : (lastProxyError || 'Für diese Strecke und diesen Zeitraum sind dort keine Preise hinterlegt');
-        pools[mode] = mockFlightOffers(route);
+        pools[mode] = fallback('flight');
       }
     } else if (mode === 'train' || mode === 'bus') {
-      // Real timetables without prices beat invented prices; the mock
-      // generators only step in when Transitous can't resolve the stops or
-      // is unreachable.
+      // Real timetables without prices beat invented prices; anything else
+      // only appears if example data is explicitly switched on.
       const real = await fetchRealTransitOffers(route, mode);
-      pools[mode] = (real && real.length)
-        ? real
-        : (mode === 'train' ? mockTrainOffers : mockBusOffers)(route);
+      pools[mode] = (real && real.length) ? real : fallback(mode);
     } else {
-      pools[mode] = mockHotelOffers(route);
+      // No free hotel source exists at all, so this mode is empty unless
+      // example data is switched on - the provider links below are the
+      // honest answer for hotels.
+      pools[mode] = fallback('hotel');
     }
     return pools[mode];
   }
@@ -1446,6 +1562,9 @@ function readRouteFromForm() {
     deutschlandticket: document.getElementById('deutschlandticket').checked,
     lowCost: document.getElementById('lowCost').value,
     dealsOnly: document.getElementById('dealsOnly').value === 'deals',
+    // Off by default: invented prices are for exercising the ranking logic,
+    // not for filling a results list. See the mock rule in HANDOFF.md.
+    showMockData: document.getElementById('showMockData').value === 'mock',
     roundTrip: cfg.roundTrip && document.getElementById('roundTrip').checked,
     returnDate: (cfg.roundTrip && document.getElementById('roundTrip').checked && document.getElementById('returnDate').value)
       ? new Date(document.getElementById('returnDate').value) : null,
@@ -1548,8 +1667,9 @@ function renderProviderLinks(route) {
   return `
     <div class="provider-links">
       <h3>Echte Preise direkt prüfen</h3>
-      <p class="provider-note">Für Bahn, Bus und Hotel gibt es keine frei nutzbare Preis-API - die Preise oben sind
-      dort Beispieldaten. Hier die echten Anbieter für <strong>${routeLine}</strong>:</p>
+      <p class="provider-note">Kein kostenloser Zugang deckt alle Anbieter ab - Ryanair und Travelpayouts liefern
+      echte Flugpreise, Transitous echte Fahrpläne ohne Preis, für Hotels gibt es gar keine freie Quelle.
+      Hier die Anbieter selbst, für <strong>${routeLine}</strong>:</p>
       ${groups.map(g => `
         <div class="provider-group">
           <span class="provider-title">${GROUP_TITLES[g]}</span>
@@ -1605,9 +1725,21 @@ function renderResults(route, options, usedRealFlightData, flightFallbackReason)
   searchMetaEl.textContent = `${options.length} Angebote für ${label} (${parts.join(', ')}${dealsLabel})`;
 
   if (!options.length) {
-    searchResultsEl.innerHTML = route.dealsOnly
-      ? '<p class="empty">Keine Angebote, die deutlich unter dem Durchschnitt dieser Suche liegen - auf "Alle Angebote" umstellen oder das Zeitfenster (Flex-Tage) erweitern.</p>'
-      : '<p class="empty">Keine Angebote in diesem Budget/Zeitrahmen/Filter gefunden - Filter lockern und erneut suchen.</p>';
+    // With example data off (the default) this is the normal outcome for a
+    // route no free source covers - so it has to be genuinely useful: the
+    // reason, what to try, and links to check the price for real. Returning
+    // just "keine Angebote" here would repeat the old mistake in reverse.
+    const why = route.dealsOnly
+      ? 'Keine Angebote, die deutlich unter dem Durchschnitt dieser Suche liegen - auf "Alle Angebote" umstellen oder das Zeitfenster (Flex-Tage) erweitern.'
+      : (flightFallbackReason
+          ? `Keine echten Preise gefunden. ${flightFallbackReason}.`
+          : 'Keine Angebote in diesem Budget/Zeitrahmen/Filter gefunden - Filter lockern und erneut suchen.');
+    searchResultsEl.innerHTML = `
+      <p class="empty">${why}</p>
+      <p class="empty">Es werden nur echte Daten angezeigt. Über <strong>Datenquelle → „Auch Beispieldaten"</strong>
+      lassen sich erfundene Preise einblenden, um die Sortier- und Filterlogik zu testen - buchbar ist davon nichts.</p>
+      ${renderProviderLinks(route)}
+    `;
     return;
   }
 

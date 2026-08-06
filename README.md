@@ -8,7 +8,7 @@ auf einem Dashboard die besten aktuellen Optionen pro Strecke zeigt.
 >
 > | Modus | Datenquelle |
 > |---|---|
-> | **Flug** | **echte Preise** (Travelpayouts/Aviasales), sobald ein Token gesetzt ist |
+> | **Flug** | **echte Preise** – **Ryanair** liefert live buchbare Fares ganz ohne Zugangsdaten, **Travelpayouts/Aviasales** (mit Token) ergänzt alle anderen Airlines |
 > | **Bahn, Bus** | **echte Verbindungen, aber ohne Preis** (Transitous/MOTIS): richtige Linie (ICE 1007), Abfahrtszeit, Gleis, Umstiege – nur **kein Preis**, weil die Quelle keinen führt. Dort steht "Preis unbekannt" statt einer erfundenen Zahl. |
 > | **Hotel** | **erfundene Beispieldaten** - keine buchbaren Angebote |
 >
@@ -24,6 +24,22 @@ auf einem Dashboard die besten aktuellen Optionen pro Strecke zeigt.
 > | **`api.transitous.org`** (MOTIS) | **funktioniert** – echte Verbindungen/Zeiten, aber `fares: 0`, also **keine Preise**. **Ist jetzt eingebaut** (siehe unten). |
 > | `v6.vbb` / `v6.bvg.transport.rest` | 200, aber nur Berliner Nahverkehr |
 > | OpenTripMap (Hotels) | 401 – Schlüssel erforderlich |
+>
+> Zweite Runde (06.08.2026), diesmal für **Flugpreise**:
+>
+> | Quelle | Ergebnis |
+> |---|---|
+> | **`services-api.ryanair.com/farfnd/v4`** | **funktioniert ohne Schlüssel** – echte, buchbare Preise inkl. Flugnummer. **Ist eingebaut.** |
+> | Ryanair `availability` | 409 „Availability declined" – braucht Buchungs-Session |
+> | Ryanair `cheapestPerDay` | 200, aber leere Antwort |
+> | `bahn.de` Sparpreise (inoffiziell) | 403 `OPS_BLOCKED` |
+> | Lufthansa Open API | 596 Service Not Found |
+> | SNCF / Navitia | 401 – Token nötig |
+> | Wizz Air, easyJet | kein öffentlicher Endpunkt, nur kostenpflichtige Scraper-Dienste |
+>
+> **Die Einschränkung, die dazugehört:** Ryanair kennt nur Ryanair-Strecken.
+> Hamburg–Lyon fliegt Ryanair nicht, also hilft es dort nicht. Deshalb werden
+> beide Quellen **gemischt**, nicht gegeneinander ausgetauscht.
 >
 > **Was daraus geworden ist:** Bahn und Bus laufen nicht mehr auf erfundenen
 > Preisen, sondern auf echten Fahrplandaten von Transitous - ohne Schlüssel,
@@ -223,6 +239,13 @@ antwortet `providers/transitous.py` mit echten Verbindungen, und die
 Mock-Generatoren springen nur ein, wenn Transitous die Haltestellen nicht
 auflösen kann oder nicht erreichbar ist. Übrig bleibt **Hotel** als einziger
 Modus, der grundsätzlich auf erfundenen Preisen läuft.
+
+**Beispieldaten sind seit 06.08.2026 standardmäßig aus.** Im Suche-Tab steht
+dafür „Datenquelle → Nur echte Daten" (Voreinstellung). Findet keine echte
+Quelle etwas, bleibt die Liste leer und nennt den Grund plus die Anbieter zum
+Selbstprüfen – statt drei erfundene Preise anzuzeigen, die wie eine Antwort
+aussehen. Wer die Sortier- und Filterlogik testen will, schaltet auf „Auch
+Beispieldaten".
 
 **Die Regel dahinter:** Ein erfundener Preis darf nie wie ein buchbarer
 aussehen. Kennt eine Quelle die Verbindung, aber nicht den Preis, wird

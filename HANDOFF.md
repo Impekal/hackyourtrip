@@ -137,6 +137,18 @@ Ergebnis) fällt alles graceful auf Mock-Daten zurück.
     Sortieren immer hinter allen bepreisten Optionen (sonst stünde eine
     unbekannte Verbindung bei "Preis aufsteigend" ganz oben, als wäre sie
     gratis).
+- **Beispieldaten sind Opt-in (`route.showMockData`), Voreinstellung aus.**
+  Vorher füllten die Mock-Generatoren jede Lücke, und eine Suche ohne echte
+  Treffer zeigte drei erfundene Preise statt einer ehrlichen Leermeldung -
+  genau das, was der Nutzer wiederholt als „die Flüge sind immer noch fake"
+  gemeldet hat. Der Leerzustand in `renderResults` ist deshalb kein
+  Nebenschauplatz mehr, sondern der Normalfall für Strecken ohne freie
+  Quelle: Grund + Anbieter-Links gehören dort hinein.
+- **Reihenfolge der Fehlermeldungen beachten.** `lastProxyError` ist global;
+  eine später scheiternde Quelle würde die aussagekräftigere Meldung einer
+  früheren überschreiben. Ryanair läuft zuerst und kennt nur eigene Strecken,
+  deshalb wird sein Fehler geparkt (`ryanairError`) und nur verwendet, wenn
+  sonst niemand etwas zu sagen hat. Bei neuen Quellen genauso verfahren.
 - **Dünne Strecken sind der Normalfall, nicht die Ausnahme.** Live gemessen
   (06.08.2026): BER->BCN liefert 28-45 Angebote pro Monat, HAM->LYS genau
   **3** - und keines davon am gewünschten Tag. Mit `flex_days = 0` sieht das
@@ -451,6 +463,25 @@ verifiziert, Antwortstruktur per Wegwerf-Workflow abgegriffen):
   bleiben `wifiOnboard`/`powerOutlets` auf `false` ("nicht bestätigt", nicht
   "nicht vorhanden"); eine Suche mit *Pflicht*-WLAN filtert diese
   Verbindungen deshalb weg.
+
+**Zweite Recherche-Runde (06.08.2026), Flugpreise, ebenfalls live geprüft:**
+
+| Quelle | Ergebnis |
+|---|---|
+| **`services-api.ryanair.com/farfnd/v4/oneWayFares` + `/roundTripFares`** | **HTTP 200 ohne Schlüssel**, echte buchbare Preise. Eingebaut als `providers/ryanair.py`. |
+| Ryanair `booking/v4/.../availability` | 409 „Availability declined" - braucht Buchungs-Session |
+| Ryanair `farfnd/v4/.../cheapestPerDay` | 200, aber `fares: []` |
+| `services-api.ryanair.com/locate/3/routes/{IATA}` | 403 |
+| `www.ryanair.com/api/views/locate/5/airports/de/active` | 200, 224 Flughäfen mit Koordinaten |
+| `bahn.de` Sparpreise (inoffiziell) | 403 `OPS_BLOCKED` |
+| Lufthansa Open API | 596 |
+| SNCF / Navitia | 401 |
+
+Wichtig für Ryanair: ein normaler Skript-User-Agent bekommt auf manchen
+Hosts 403, deshalb gibt sich der Worker als Browser aus. Und die Grenze
+ehrlich benennen - Ryanair kennt **nur Ryanair-Strecken**; HAM->LYS fliegt
+Ryanair nicht. `CompositeProvider` mischt deshalb mehrere Quellen, statt eine
+auszuwählen.
 
 Weiterhin offen bleibt der **Preis** für Bahn/Bus. DB-Wrapper regelmässig neu
 prüfen: kämen sie zurück, gäbe es dort sogar Sparpreise.

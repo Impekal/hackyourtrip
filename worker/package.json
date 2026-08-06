@@ -4,7 +4,7 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "test": "node test/ai.test.mjs && node test/transit.test.mjs"
+    "test": "node test/ai.test.mjs && node test/passthrough.test.mjs"
   },
   "devDependencies": {
     "wrangler": "^4.0.0"

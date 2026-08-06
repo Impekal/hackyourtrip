@@ -33,6 +33,41 @@ class Provider(ABC):
         raise NotImplementedError
 
 
+class CompositeProvider(Provider):
+    """Merges several providers for one mode into a single offer pool.
+
+    No free source covers a mode on its own: Travelpayouts knows many
+    airlines but only as a cache of recently *seen* fares, while Ryanair
+    returns live bookable prices for its own routes and nothing else. Asking
+    both and merging is strictly better than choosing one.
+
+    A failing provider must not take the others down with it - a partial
+    result beats an empty one, and every mode already copes with "no offers".
+    """
+
+    def __init__(self, mode: Mode, providers: list[Provider]):
+        self.mode = mode
+        self.providers = providers
+
+    def search(self, route: RoutePreference) -> list[Offer]:
+        offers: list[Offer] = []
+        seen: set[tuple] = set()
+        for provider in self.providers:
+            try:
+                found = provider.search(route)
+            except Exception as exc:  # noqa: BLE001 - one bad source must not sink the search
+                print(f"[composite] {type(provider).__name__} failed: {exc}")
+                continue
+            for offer in found:
+                # The same flight can appear in both pools; keep the first.
+                key = (offer.depart_time, offer.booking_site, round(offer.price, 2))
+                if key in seen:
+                    continue
+                seen.add(key)
+                offers.append(offer)
+        return offers
+
+
 class NotConfiguredProvider(Provider):
     """Stand-in for a real API adapter that needs credentials which aren't
     set up yet. Returns no offers instead of crashing the whole pipeline, so

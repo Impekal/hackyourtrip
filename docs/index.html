@@ -339,6 +339,13 @@
           </select>
         </div>
         <div class="field">
+          <label for="showMockData">Datenquelle</label>
+          <select id="showMockData">
+            <option value="real" selected>Nur echte Daten</option>
+            <option value="mock">Auch Beispieldaten (nur zum Testen)</option>
+          </select>
+        </div>
+        <div class="field">
           <label for="priority">Sortieren nach</label>
           <select id="priority">
             <option value="best_value" selected>Bestes Verhältnis</option>
@@ -571,6 +578,6 @@
 <!-- The ?v= is deliberate: GitHub Pages lets browsers cache app.js, so a
      fix could ship and the visitor would keep running the old file. Bump
      this whenever app.js changes in a way users need to see. -->
-<script src="./app.js?v=2026-08-06-3"></script>
+<script src="./app.js?v=2026-08-06-4"></script>
 </body>
 </html>
