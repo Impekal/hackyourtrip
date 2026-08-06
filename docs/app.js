@@ -791,7 +791,13 @@ async function runSearch(route) {
   candidates = candidates.filter(c => {
     if (route.budget != null && c.price > route.budget) return false;
     if (route.maxDuration != null && c.durationHours > route.maxDuration && c.mode !== 'hotel') return false;
-    if (!route.lowCostOk && c.offers.some(o => o.isLowCost)) return false;
+    if (route.lowCost === 'exclude' && c.offers.some(o => o.isLowCost)) return false;
+    if (route.lowCost === 'only') {
+      // Only transport legs can be low-cost; a hotel leg in a combo must
+      // not disqualify the option.
+      const transport = c.offers.filter(o => ['flight', 'train', 'bus'].includes(o.mode));
+      if (!transport.length || !transport.every(o => o.isLowCost)) return false;
+    }
     for (const o of c.offers) {
       if (o.mode === 'hotel' && !meetsHotelPrefs(o, route.hotelPrefs)) return false;
       if (['flight', 'train', 'bus'].includes(o.mode) && !meetsTransportPrefs(o, route.transportPrefs)) return false;
@@ -1087,7 +1093,7 @@ function readRouteFromForm() {
       ? null : Number(document.getElementById('carryOnMaxKg').value || 8),
     bahncard: document.getElementById('bahncard').value,
     deutschlandticket: document.getElementById('deutschlandticket').checked,
-    lowCostOk: document.getElementById('lowCostOk').checked,
+    lowCost: document.getElementById('lowCost').value,
     dealsOnly: document.getElementById('dealsOnly').value === 'deals',
     roundTrip: cfg.roundTrip && document.getElementById('roundTrip').checked,
     returnDate: (cfg.roundTrip && document.getElementById('roundTrip').checked && document.getElementById('returnDate').value)
@@ -1133,7 +1139,9 @@ const PROVIDER_LINKS = {
     ['Skyscanner', 'https://www.skyscanner.de/'],
     ['Kayak', 'https://www.kayak.de/flights'],
     ['Google Flights', 'https://www.google.com/travel/flights'],
+    ['Opodo', 'https://www.opodo.de/'],
     ['Lastminute', 'https://www.lastminute.de/'],
+    ['FlyThisWeekend', 'https://flythisweekend.com/de/'],
   ],
   train: [
     ['DB (ICE & Co.)', 'https://www.bahn.de/'],
@@ -1299,7 +1307,7 @@ ${HOTEL_AMENITY_REQUIREMENTS.map(([prefFlag, , yamlKey]) => `      ${yamlKey}: $
       min_punctuality_pct: ${tp.minPunctuality ?? 'null'}
       preferred_depart_time: ${tp.preferredDepartTime ? `"${tp.preferredDepartTime}"` : 'null'}
       depart_time_flex_minutes: ${tp.departTimeFlexMinutes || 0}
-    low_cost_airlines_ok: ${route.lowCostOk}
+    low_cost: ${route.lowCost}
     deals_only: ${route.dealsOnly || false}
     round_trip: ${route.roundTrip || false}
     return_date: ${route.roundTrip && route.returnDate ? fmt(route.returnDate) : 'null'}

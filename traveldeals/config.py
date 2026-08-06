@@ -90,7 +90,9 @@ def _parse_route(raw: dict) -> RoutePreference:
             preferred_depart_time=transport_raw.get("preferred_depart_time"),
             depart_time_flex_minutes=int(transport_raw.get("depart_time_flex_minutes", 0)),
         ),
-        low_cost_airlines_ok=bool(raw.get("low_cost_airlines_ok", True)),
+        # Backwards compatible: an old low_cost_airlines_ok: false still
+        # means "exclude", so existing routes.yaml files keep working.
+        low_cost=raw.get("low_cost") or ("any" if raw.get("low_cost_airlines_ok", True) else "exclude"),
         round_trip=bool(raw.get("round_trip", False)),
         deals_only=bool(raw.get("deals_only", False)),
         return_date=_parse_date(raw["return_date"]) if raw.get("return_date") else None,

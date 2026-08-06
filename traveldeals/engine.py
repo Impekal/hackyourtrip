@@ -13,9 +13,10 @@ from __future__ import annotations
 from datetime import date, datetime
 
 from traveldeals.currency import convert, get_rates_per_eur
-from traveldeals.models import (MEAL_PLAN_TIERS, OR_COMBO_MODES, HotelPref,
-                                 Mode, Offer, Priority, RoutePreference,
-                                 TransportPref, TripOption)
+from traveldeals.models import (MEAL_PLAN_TIERS, OR_COMBO_MODES,
+                                 TRANSPORT_MODES, HotelPref, Mode, Offer,
+                                 Priority, RoutePreference, TransportPref,
+                                 TripOption)
 from traveldeals.pricehistory import PriceHistory
 from traveldeals.providers.base import Provider
 
@@ -270,8 +271,14 @@ class DealEngine:
             # hotel-only trips have no transport duration constraint
             if option.mode != Mode.HOTEL:
                 return False
-        if not route.low_cost_airlines_ok and any(o.is_low_cost for o in option.offers):
+        if route.low_cost == "exclude" and any(o.is_low_cost for o in option.offers):
             return False
+        if route.low_cost == "only":
+            # Only transport legs can be low-cost; a hotel leg in a combo
+            # must not disqualify the option.
+            transport = [o for o in option.offers if o.mode in TRANSPORT_MODES]
+            if not transport or not all(o.is_low_cost for o in transport):
+                return False
         for offer in option.offers:
             if offer.mode == Mode.HOTEL and not _meets_hotel_constraints(offer, route.hotel):
                 return False

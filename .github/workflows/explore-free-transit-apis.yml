@@ -1,9 +1,10 @@
 name: Explore free transit APIs (temporary)
 
-# Research: are there genuinely free, registration-free APIs that could
-# replace the invented train/bus prices? Candidates below are all
-# community-run wrappers or open endpoints that claim to need no API key.
-# The dev sandbox has no internet, a runner does. Delete once evaluated.
+# Round 2. Round 1 said: transitous geocode works (no key), flixbus wrapper
+# does not exist (NXDOMAIN), v5.db.transport.rest is 503, OpenTripMap needs
+# a key. The DB journeys test failed on an empty response - could be the
+# API or could be my script, so this round prints raw status + body instead
+# of assuming. Delete once evaluated.
 
 on:
   workflow_dispatch: {}
@@ -12,71 +13,58 @@ jobs:
   explore:
     runs-on: ubuntu-latest
     steps:
-      - name: "DB: v6.db.transport.rest - station lookup"
+      - name: "DB v6: is the service up at all?"
         continue-on-error: true
         run: |
-          curl -sS --max-time 30 "https://v6.db.transport.rest/locations?query=Berlin%20Hbf&results=3" \
-            | python3 -c "import json,sys; d=json.load(sys.stdin); print(json.dumps([{k:v for k,v in x.items() if k in ('type','id','name')} for x in d], ensure_ascii=False, indent=1))"
-
-      - name: "DB: v6.db.transport.rest - journeys WITH PRICES (the decisive test)"
-        continue-on-error: true
-        run: |
-          FROM=$(curl -sS --max-time 30 "https://v6.db.transport.rest/locations?query=Berlin%20Hbf&results=1" | python3 -c "import json,sys; print(json.load(sys.stdin)[0]['id'])")
-          TO=$(curl -sS --max-time 30 "https://v6.db.transport.rest/locations?query=M%C3%BCnchen%20Hbf&results=1" | python3 -c "import json,sys; print(json.load(sys.stdin)[0]['id'])")
-          WHEN=$(date -u -d '+21 days 09:00' +%Y-%m-%dT%H:%M:%S%z)
-          echo "from=$FROM to=$TO when=$WHEN"
-          curl -sS --max-time 45 --get "https://v6.db.transport.rest/journeys" \
-            --data-urlencode "from=$FROM" --data-urlencode "to=$TO" \
-            --data-urlencode "departure=$WHEN" --data-urlencode "results=6" \
-            --data-urlencode "tickets=true" --data-urlencode "language=de" \
-            > journeys.json
-          python3 - <<'EOF'
-          import json
-          d = json.load(open('journeys.json'))
-          js = d.get('journeys', [])
-          print('JOURNEYS:', len(js))
-          for j in js[:6]:
-              legs = j.get('legs', [])
-              lines = [l.get('line', {}).get('name') for l in legs if l.get('line')]
-              print(' price=', j.get('price'), '| changes=', max(len(legs) - 1, 0),
-                    '| lines=', lines,
-                    '| dep=', legs[0].get('departure') if legs else None)
-          print('PRICE FIELD PRESENT ON ANY:', any(j.get('price') for j in js))
-          EOF
-
-      - name: "Transitous (open journey planner, no key)"
-        continue-on-error: true
-        run: |
-          curl -sS --max-time 30 "https://api.transitous.org/api/v1/geocode?text=Berlin%20Hbf" | head -c 600
+          curl -sS --max-time 25 -o /dev/null -w 'root HTTP:%{http_code}\n' https://v6.db.transport.rest/ || true
+          echo "--- locations ---"
+          curl -sS --max-time 25 -w '\nHTTP:%{http_code}\n' \
+            "https://v6.db.transport.rest/locations?query=Berlin%20Hbf&results=2" | head -c 800
           echo
 
-      - name: "FlixBus community wrapper"
+      - name: "DB v6: journeys, raw output (no parsing assumptions)"
         continue-on-error: true
         run: |
-          curl -sS --max-time 20 -o /dev/null -w 'flixbus.transport.rest HTTP:%{http_code}\n' https://flixbus.transport.rest/ || true
-          curl -sS --max-time 20 -o /dev/null -w 'v1.flixbus.transport.rest HTTP:%{http_code}\n' https://v1.flixbus.transport.rest/ || true
+          WHEN=$(date -u -d '+21 days' +%Y-%m-%d)T09:00:00+02:00
+          echo "when=$WHEN"
+          curl -sS --max-time 60 -w '\nHTTP:%{http_code}\n' --get \
+            "https://v6.db.transport.rest/journeys" \
+            --data-urlencode "from=8011160" --data-urlencode "to=8000261" \
+            --data-urlencode "departure=$WHEN" --data-urlencode "results=4" \
+            --data-urlencode "tickets=true" > out.txt 2>&1 || true
+          echo "bytes: $(wc -c < out.txt)"
+          head -c 1200 out.txt
+          echo
+          echo "--- price fields found ---"
+          grep -o '"price":[^,}]*[,}]' out.txt | head -10 || echo "(keine)"
+          grep -o '"amount":[0-9.]*' out.txt | head -10 || echo "(keine amount)"
 
-      - name: "DB alternative: db-vendo / bahn.de public search endpoint"
+      - name: "Transitous: kann es Verbindungen planen (nicht nur geocodieren)?"
         continue-on-error: true
         run: |
-          curl -sS --max-time 25 -o /dev/null -w 'v5.db.transport.rest HTTP:%{http_code}\n' https://v5.db.transport.rest/ || true
-          curl -sS --max-time 25 -o /dev/null -w 'vendo HTTP:%{http_code}\n' https://vendo-prof-db.dbrail.de/ || true
+          FROM=$(curl -sS --max-time 25 "https://api.transitous.org/api/v1/geocode?text=Berlin%20Hbf" \
+                 | python3 -c "import json,sys; d=json.load(sys.stdin); print(d[0]['id'])")
+          TO=$(curl -sS --max-time 25 "https://api.transitous.org/api/v1/geocode?text=M%C3%BCnchen%20Hbf" \
+               | python3 -c "import json,sys; d=json.load(sys.stdin); print(d[0]['id'])")
+          WHEN=$(date -u -d '+21 days' +%Y-%m-%d)T07:00:00Z
+          echo "from=$FROM"; echo "to=$TO"; echo "when=$WHEN"
+          curl -sS --max-time 60 -w '\nHTTP:%{http_code}\n' --get \
+            "https://api.transitous.org/api/v1/plan" \
+            --data-urlencode "fromPlace=$FROM" --data-urlencode "toPlace=$TO" \
+            --data-urlencode "time=$WHEN" --data-urlencode "numItineraries=3" > plan.txt 2>&1 || true
+          echo "bytes: $(wc -c < plan.txt)"
+          head -c 900 plan.txt
+          echo
+          echo "--- enthaelt es Preise/Fares? ---"
+          grep -io 'fare\|price\|amount' plan.txt | sort | uniq -c | head || echo "(keine Preisfelder)"
 
-      - name: "Hotels: any free no-key price source?"
+      - name: "Weitere DB-Instanzen / Spiegel"
         continue-on-error: true
         run: |
-          for u in "https://api.opentripmap.com/0.1/en/places/geoname?name=Berlin" \
-                   "https://nominatim.openstreetmap.org/search?q=hotel+berlin&format=json&limit=2"; do
-            code=$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' -H 'User-Agent: hackyourtrip-research' "$u" || echo 000)
-            echo "$code  $u"
+          for h in "https://db.transport.rest/" \
+                   "https://dbf.finalrewind.org/" \
+                   "https://v6.vbb.transport.rest/" \
+                   "https://v6.bvg.transport.rest/"; do
+            code=$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' "$h" || echo 000)
+            echo "$code  $h"
           done
-
-      - name: "Flythisweekend erreichbar?"
-        continue-on-error: true
-        run: |
-          curl -sS --max-time 25 -o /dev/null -L -w 'flythisweekend.com/de/ HTTP:%{http_code}\n' \
-            -H 'User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/126 Safari/537.36' \
-            "https://flythisweekend.com/de/" || true
-          curl -sS --max-time 25 -o /dev/null -L -w 'opodo.de HTTP:%{http_code}\n' \
-            -H 'User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/126 Safari/537.36' \
-            "https://www.opodo.de/" || true

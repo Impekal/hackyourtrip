@@ -71,16 +71,47 @@ def test_budget_filters_out_offers_over_limit(tmp_path):
     assert result == []
 
 
-def test_low_cost_excluded_when_not_allowed(tmp_path):
-    offers = [
-        Offer(mode=Mode.FLIGHT, provider="p", booking_site="A", price=50, currency="EUR",
+def _lowcost_offers():
+    return [
+        Offer(mode=Mode.FLIGHT, provider="p", booking_site="billig", price=50, currency="EUR",
               depart_time="2026-09-10T09:00:00", arrive_time="2026-09-10T11:00:00", duration_hours=2,
               is_low_cost=True),
+        Offer(mode=Mode.FLIGHT, provider="p", booking_site="normal", price=180, currency="EUR",
+              depart_time="2026-09-10T12:00:00", arrive_time="2026-09-10T14:00:00", duration_hours=2,
+              is_low_cost=False),
     ]
-    engine = make_engine({Mode.FLIGHT: FakeProvider(Mode.FLIGHT, offers)}, tmp_path)
-    route = make_route(low_cost_airlines_ok=False)
-    result = engine.search(route)
-    assert result == []
+
+
+def test_low_cost_exclude_drops_low_cost_offers(tmp_path):
+    engine = make_engine({Mode.FLIGHT: FakeProvider(Mode.FLIGHT, _lowcost_offers())}, tmp_path)
+    result = engine.search(make_route(low_cost="exclude"))
+    assert [o.booking_sites[0] for o in result] == ["normal"]
+
+
+def test_low_cost_only_keeps_just_low_cost_offers(tmp_path):
+    engine = make_engine({Mode.FLIGHT: FakeProvider(Mode.FLIGHT, _lowcost_offers())}, tmp_path)
+    result = engine.search(make_route(low_cost="only"))
+    assert [o.booking_sites[0] for o in result] == ["billig"]
+
+
+def test_low_cost_any_keeps_everything(tmp_path):
+    engine = make_engine({Mode.FLIGHT: FakeProvider(Mode.FLIGHT, _lowcost_offers())}, tmp_path)
+    assert len(engine.search(make_route(low_cost="any"))) == 2
+
+
+def test_low_cost_only_ignores_the_hotel_leg_of_a_combo(tmp_path):
+    # A hotel is never "low cost"; requiring it to be would wipe out every
+    # flight+hotel combo, which is not what the filter means.
+    flight = Offer(mode=Mode.FLIGHT, provider="p", booking_site="billig", price=50, currency="EUR",
+                   depart_time="2026-09-10T09:00:00", arrive_time="2026-09-10T11:00:00",
+                   duration_hours=2, is_low_cost=True)
+    hotel = Offer(mode=Mode.HOTEL, provider="p", booking_site="hotel", price=100, currency="EUR",
+                  depart_time="2026-09-10T00:00:00", arrive_time="2026-09-12T00:00:00",
+                  duration_hours=48)
+    engine = make_engine({Mode.FLIGHT: FakeProvider(Mode.FLIGHT, [flight]),
+                          Mode.HOTEL: FakeProvider(Mode.HOTEL, [hotel])}, tmp_path)
+    route = make_route(modes=[Mode.FLIGHT_HOTEL], low_cost="only", min_nights=2)
+    assert len(engine.search(route)) == 1
 
 
 def test_most_expensive_priority_reverses_price_order(tmp_path):

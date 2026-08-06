@@ -90,6 +90,9 @@
   .checks label { display: flex; align-items: center; gap: 0.4rem; text-transform: none; letter-spacing: normal; font-size: 0.85rem; color: var(--text); }
   .checks input { width: auto; padding: 0; }
   .row3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 0.9rem; }
+  /* Round-trip toggle sits inside the departure-date field, right under the input. */
+  .inline-toggle { margin-top: 0.4rem; }
+  .inline-toggle label { font-size: 0.82rem; }
 
   .autocomplete-wrap { position: relative; }
   .autocomplete-list {
@@ -269,6 +272,16 @@
         <div class="field">
           <label for="departFrom" id="departFromLabel">Datum von</label>
           <input type="date" id="departFrom" required>
+          <!-- Directly under the first date on purpose: deciding one-way vs
+               round-trip belongs next to the outbound date, not in a
+               separate block further down the form. -->
+          <div class="checks inline-toggle" data-group="roundTripGroup">
+            <label><input type="checkbox" id="roundTrip"> Hin und zurück</label>
+          </div>
+        </div>
+        <div class="field" data-group="returnDateGroup">
+          <label for="returnDate">Rückreisedatum</label>
+          <input type="date" id="returnDate">
         </div>
         <div class="field" data-group="departUntilGroup">
           <label for="departUntil" id="departUntilLabel">Datum bis</label>
@@ -299,6 +312,14 @@
           <label for="maxDuration">Max. Reisezeit (h)</label>
           <input type="number" id="maxDuration" min="0" step="0.5" placeholder="ohne Limit">
         </div>
+        <div class="field" data-group="lowCostGroup">
+          <label for="lowCost">Anbieter-Typ</label>
+          <select id="lowCost">
+            <option value="any" selected>Alle Anbieter</option>
+            <option value="only">Nur Low-Cost</option>
+            <option value="exclude">Keine Low-Cost</option>
+          </select>
+        </div>
         <div class="field">
           <label for="dealsOnly">Angebote</label>
           <select id="dealsOnly">
@@ -325,19 +346,6 @@
           <input type="number" id="maxNights" min="0" value="0">
         </div>
       </div>
-
-      <fieldset data-group="roundTripGroup">
-        <legend>Hin- und Rückreise</legend>
-        <div class="checks">
-          <label><input type="checkbox" id="roundTrip"> Hin und zurück</label>
-        </div>
-        <div class="row3" style="margin-top:0.7rem">
-          <div class="field" data-group="returnDateGroup">
-            <label for="returnDate">Rückreisedatum</label>
-            <input type="date" id="returnDate">
-          </div>
-        </div>
-      </fieldset>
 
       <fieldset data-group="flightGroup">
         <legend>Flug-Optionen</legend>
@@ -370,7 +378,7 @@
           <label><input type="checkbox" id="carryOnMaxKgAny"> Gewicht egal</label>
         </div>
         <div class="checks" style="margin-top:0.7rem">
-          <label><input type="checkbox" id="lowCostOk" checked> Low-Cost-Airlines ok</label>
+
         </div>
       </fieldset>
 

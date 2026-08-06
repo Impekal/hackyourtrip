@@ -155,7 +155,10 @@ class RoutePreference:
     rail: RailPref = field(default_factory=RailPref)
     hotel: HotelPref = field(default_factory=HotelPref)
     transport: TransportPref = field(default_factory=TransportPref)
-    low_cost_airlines_ok: bool = True
+    # "any" = alle Anbieter, "only" = ausschließlich Low-Cost,
+    # "exclude" = keine Low-Cost. Ersetzt das frühere
+    # low_cost_airlines_ok-Flag, das kein "nur Low-Cost" ausdrücken konnte.
+    low_cost: str = "any"
     # Only meaningful for flight/train/bus (and their OR-combos) - *_hotel
     # combos already have an implicit return via checkin+nights, and Hotel
     # has no transport leg at all.
