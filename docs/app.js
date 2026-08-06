@@ -4,7 +4,7 @@
 // guessing: if this doesn't match, the browser is running a cached old
 // app.js and any "the fix didn't work" report is about the old file. Bump
 // together with the ?v= in index.html.
-const BUILD_STAMP = '2026-08-06-2';
+const BUILD_STAMP = '2026-08-06-3';
 document.getElementById('buildStamp').textContent = BUILD_STAMP;
 
 /* =========================================================================
@@ -636,10 +636,20 @@ async function fetchRealFlightOffers(route) {
   const offers = [];
   const seen = new Set();
 
+  // Offers the API did return for this route, but on a day outside the flex
+  // window. They used to be dropped without trace, which is why a search
+  // with 0 Flex-Tagen on a thin route looked like "no data at all" - the
+  // data existed, just two days over. Kept so the fallback message can name
+  // the dates that would actually work.
+  const nearMisses = [];
+
   const push = (offer) => {
     // The month query deliberately over-fetches; the flex window decides
     // what actually counts, and identical itineraries collapse to one.
-    if (!wantedDays.has(isoDay(offer.depart))) return;
+    if (!wantedDays.has(isoDay(offer.depart))) {
+      nearMisses.push(offer);
+      return;
+    }
     const key = `${offer.depart.toISOString()}|${offer.bookingSite}|${offer.price}`;
     if (seen.has(key)) return;
     seen.add(key);
@@ -679,6 +689,26 @@ async function fetchRealFlightOffers(route) {
         if (raw && raw.value) push(latestRawToOffer(raw, currency, route));
       }
     }
+  }
+
+  // Nothing on the requested days, but something on nearby ones: say which,
+  // instead of leaving the user with "keine echten Preise" for a route that
+  // demonstrably has some. Thin routes often have fares on only a handful of
+  // days per month, and with 0 Flex-Tagen that is easy to miss by two days.
+  if (!offers.length && nearMisses.length) {
+    const cheapestPerDay = new Map();
+    for (const o of nearMisses) {
+      const day = isoDay(o.depart);
+      if (!cheapestPerDay.has(day) || o.price < cheapestPerDay.get(day).price) {
+        cheapestPerDay.set(day, o);
+      }
+    }
+    const target = dayCandidates(route)[0];
+    const nearest = [...cheapestPerDay.values()]
+      .sort((a, b) => Math.abs(a.depart - target) - Math.abs(b.depart - target))
+      .slice(0, 3)
+      .map(o => `${fmtDay(o.depart)} ab ${o.price.toFixed(0)} ${o.currency}`);
+    lastProxyError = `Für dieses Datum sind dort keine Preise hinterlegt – wohl aber für ${nearest.join(', ')}`;
   }
   return offers;
 }

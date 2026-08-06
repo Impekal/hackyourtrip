@@ -137,6 +137,13 @@ Ergebnis) fällt alles graceful auf Mock-Daten zurück.
     Sortieren immer hinter allen bepreisten Optionen (sonst stünde eine
     unbekannte Verbindung bei "Preis aufsteigend" ganz oben, als wäre sie
     gratis).
+- **Dünne Strecken sind der Normalfall, nicht die Ausnahme.** Live gemessen
+  (06.08.2026): BER->BCN liefert 28-45 Angebote pro Monat, HAM->LYS genau
+  **3** - und keines davon am gewünschten Tag. Mit `flex_days = 0` sieht das
+  aus wie "gar keine Daten". Die Monatsabfrage holt diese Tage aber mit;
+  `nearMisses` in `fetchRealFlightOffers` hält sie fest und der Warnkasten
+  nennt sie ("wohl aber für 24.08.2026 ab 137 EUR"). Wer hier weiterbaut:
+  nie stillschweigend wegfiltern, was die API schon geliefert hat.
 - **Cache-Busting nicht vergessen.** `docs/index.html` lädt
   `./app.js?v=<Stand>`, und `BUILD_STAMP` oben in `app.js` schreibt denselben
   Wert in die Fußzeile. **Beide zusammen hochzählen**, wenn sich an `app.js`
