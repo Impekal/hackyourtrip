@@ -560,10 +560,17 @@
 </div>
 
 <footer>
-  <span>Ranking: <span class="mono">cheapest</span> / <span class="mono">fastest</span> / <span class="mono">best_value</span> · v1 läuft auf Mock-Daten</span>
-  <span>github.com/kalivolut/hackyourtrip</span>
+  <span>Ranking: <span class="mono">cheapest</span> / <span class="mono">fastest</span> / <span class="mono">best_value</span>
+    · Flug: echte Preise · Bahn/Bus: echter Fahrplan ohne Preis · Hotel: Beispieldaten</span>
+  <!-- Which build is actually loaded. Without it there's no way to tell a
+       genuine bug from a stale app.js sitting in the browser cache, which
+       cost a round of confusion once. app.js overwrites it on load. -->
+  <span>Stand: <span class="mono" id="buildStamp">–</span> · github.com/kalivolut/hackyourtrip</span>
 </footer>
 
-<script src="./app.js"></script>
+<!-- The ?v= is deliberate: GitHub Pages lets browsers cache app.js, so a
+     fix could ship and the visitor would keep running the old file. Bump
+     this whenever app.js changes in a way users need to see. -->
+<script src="./app.js?v=2026-08-06-2"></script>
 </body>
 </html>

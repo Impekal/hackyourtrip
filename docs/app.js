@@ -1,5 +1,12 @@
 'use strict';
 
+// Stamped into the footer so a support question can be answered without
+// guessing: if this doesn't match, the browser is running a cached old
+// app.js and any "the fix didn't work" report is about the old file. Bump
+// together with the ?v= in index.html.
+const BUILD_STAMP = '2026-08-06-2';
+document.getElementById('buildStamp').textContent = BUILD_STAMP;
+
 /* =========================================================================
  * Main tabs (Suche / Meine Alerts)
  * ===================================================================== */
@@ -1533,6 +1540,24 @@ function isMockOption(opt) {
   return opt.offers.some(o => o.isMock);
 }
 
+const MODE_LABELS = { flight: 'Flug', train: 'Bahn', bus: 'Bus', hotel: 'Hotel' };
+
+// Which modes the invented prices actually belong to. "9 Angebote sind
+// Beispieldaten" alone is ambiguous - a user on a Flug+Hotel search reads it
+// as "the flights are fake" when only the hotel leg is, and there was no way
+// to tell the two apart from the outside.
+function mockModeLabels(options) {
+  const modes = [];
+  for (const opt of options) {
+    for (const offer of opt.offers) {
+      if (!offer.isMock) continue;
+      const label = MODE_LABELS[offer.mode];
+      if (label && !modes.includes(label)) modes.push(label);
+    }
+  }
+  return modes;
+}
+
 function renderResults(route, options, usedRealFlightData, flightFallbackReason) {
   const label = route.origin ? `${route.origin} → ${route.destination}` : route.destination;
   const mockCount = options.filter(isMockOption).length;
@@ -1563,10 +1588,12 @@ function renderResults(route, options, usedRealFlightData, flightFallbackReason)
     <br><br><strong>Warum bei Flügen keine echten Preise?</strong> ${flightFallbackReason}.
     Tipp: Von/Nach aus der Vorschlagsliste auswählen, ein anderes Datum oder mehr Flex-Tage probieren -
     oder die Strecke unten direkt beim Anbieter prüfen.` : '';
+  const mockModes = mockModeLabels(options);
+  const affected = mockModes.length ? ` – betrifft: <strong>${mockModes.join(', ')}</strong>` : '';
   const warning = mockCount ? `
-    <p class="mock-warning">⚠️ <strong>${mockCount} dieser Angebote sind Beispieldaten</strong> - erfundene Preise zum Testen
-    der Vergleichslogik, keine buchbaren Verbindungen. Echte Preise gibt es aktuell nur für Flüge.
-    Für Bahn, Bus und Hotel unten direkt beim jeweiligen Anbieter nachsehen.${flightReasonHtml}</p>` : '';
+    <p class="mock-warning">⚠️ <strong>${mockCount === 1 ? 'Eines dieser Angebote enthält' : `${mockCount} dieser Angebote enthalten`} Beispieldaten</strong>${affected}.
+    Erfundene Preise zum Testen der Vergleichslogik, keine buchbaren Verbindungen -
+    beim jeweiligen Anbieter unten nachsehen.${flightReasonHtml}</p>` : '';
   const timetableNote = timetableCount ? `
     <p class="timetable-note">🕓 <strong>${timetableCount} echte Verbindungen ohne Preis</strong> - Fahrplandaten von
     <a href="https://transitous.org" target="_blank" rel="noopener">Transitous</a> (offizielle Verkehrsverbund-Feeds,

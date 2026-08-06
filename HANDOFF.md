@@ -137,6 +137,17 @@ Ergebnis) fällt alles graceful auf Mock-Daten zurück.
     Sortieren immer hinter allen bepreisten Optionen (sonst stünde eine
     unbekannte Verbindung bei "Preis aufsteigend" ganz oben, als wäre sie
     gratis).
+- **Cache-Busting nicht vergessen.** `docs/index.html` lädt
+  `./app.js?v=<Stand>`, und `BUILD_STAMP` oben in `app.js` schreibt denselben
+  Wert in die Fußzeile. **Beide zusammen hochzählen**, wenn sich an `app.js`
+  etwas ändert, das Nutzer sehen sollen. GitHub Pages lässt Browser die Datei
+  sonst weitercachen - ein Fix ist dann live, der Nutzer sieht aber die alte
+  Datei, und der Fußzeilen-Stempel ist die einzige Möglichkeit, das ohne
+  Raten auseinanderzuhalten.
+- **Beispieldaten immer mit Modus benennen.** "9 Angebote sind Beispieldaten"
+  allein ist mehrdeutig: bei einer Flug+Hotel-Suche liest sich das als "die
+  Flüge sind erfunden", obwohl nur das Hotel-Bein es ist. `mockModeLabels()`
+  hängt deshalb "betrifft: Hotel" an.
 - **Stiller Rückfall auf Mock-Daten ist selbst ein Fehler.** Wenn eine
   echte Quelle nichts liefert, springen die Mock-Generatoren ein - das ist
   richtig, aber der Nutzer sah dann nur "Beispieldaten - nicht buchbar" und
