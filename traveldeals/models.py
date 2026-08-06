@@ -169,6 +169,11 @@ class RoutePreference:
     # history, or notably below the median of what this search found.
     # False = show everything, deal or not.
     deals_only: bool = False
+    # Also search airports within this many km of origin/destination (0 =
+    # off). The single biggest saving lever this tool has that a metasearch
+    # engine can't match, because only the user knows what a detour is worth
+    # to them - see providers/geo.nearby_airports.
+    nearby_km: int = 0
     notes: str = ""
 
 
@@ -202,6 +207,13 @@ class Offer:
     # and its handling in engine.py. Inventing a plausible number instead is
     # exactly what once made the UI show a 42 EUR train that did not exist.
     price_known: bool = True
+    # Set only by the nearby-airport search: this offer leaves from / lands
+    # at a *different* airport than the one searched for, and `detour_km` is
+    # how far that is from it. Never hidden - only the traveller knows
+    # whether 100 km of driving is worth the saving.
+    alt_origin: str = ""
+    alt_destination: str = ""
+    detour_km: float = 0.0
     # Human-readable line/leg description for timetable sources, e.g.
     # "ICE 1007" or "ICE 599 -> TGV 9575" - empty for price-only sources
     # (Travelpayouts) that don't say which vehicle it is.

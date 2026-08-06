@@ -91,3 +91,31 @@ def estimate_direct_flight_duration_hours(origin: str, destination: str) -> floa
         return None
     distance_km = _haversine_km(*origin_coords, *dest_coords)
     return round(distance_km / AVERAGE_BLOCK_SPEED_KMH + FIXED_OVERHEAD_HOURS, 1)
+
+
+def nearby_airports(code: str, radius_km: float, limit: int = 3) -> list[tuple[str, float]]:
+    """Airports within `radius_km` of `code`, nearest first, excluding it.
+
+    This is the "aber ab Bremen wäre es billiger"-lever: thin routes often
+    have no fare at all from the obvious airport while a neighbour 100 km
+    away is served daily. Metasearch engines do a loose version of this;
+    doing it explicitly - with the detour distance shown - is something a
+    personal tool can do better, because only the user knows whether 118 km
+    of driving is worth 80 EUR.
+
+    `limit` is a hard cap on purpose: each extra airport costs a full round
+    of provider requests, so a wide radius must not turn one search into
+    twenty.
+    """
+    origin = AIRPORT_COORDS.get(code.upper())
+    if not origin or radius_km <= 0:
+        return []
+    found = []
+    for other, coords in AIRPORT_COORDS.items():
+        if other == code.upper():
+            continue
+        distance = _haversine_km(*origin, *coords)
+        if distance <= radius_km:
+            found.append((other, round(distance)))
+    found.sort(key=lambda pair: pair[1])
+    return found[:limit]

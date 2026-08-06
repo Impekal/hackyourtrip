@@ -1,5 +1,4 @@
-# Temporary: do resellers/aggregators expose what the operators block?
-# Rome2Rio, Trainline, Omio, Skiplagged, Busbud, Hostelworld & co.
+# Temporary: Skiplagged response shape + deal feeds. Deleted after use.
 name: probe-resellers
 
 on:
@@ -9,7 +8,7 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
-      - name: Probe resellers
+      - name: Shape of the hits
         run: |
           cat > probe.py <<'PY'
           import json, urllib.parse, urllib.request
@@ -21,82 +20,54 @@ jobs:
               "Accept-Language": "de-DE,de;q=0.9,en;q=0.8",
           }
 
-          def probe(label, url, headers=None, data=None, show=600):
-              hdr = dict(BROWSER); hdr.update(headers or {})
-              body = json.dumps(data).encode() if data is not None else None
-              if body is not None:
-                  hdr.setdefault("Content-Type", "application/json")
+          def get(url):
+              with urllib.request.urlopen(
+                      urllib.request.Request(url, headers=BROWSER), timeout=40) as resp:
+                  return resp.read().decode("utf-8", "replace")
+
+          print("##### SKIPLAGGED HAM -> LYS #####")
+          raw = get("https://skiplagged.com/api/search.php?" + urllib.parse.urlencode({
+              "from": "HAM", "to": "LYS", "depart": "2026-09-15", "return": "",
+              "poll": "true", "sort": "cost"}))
+          data = json.loads(raw)
+          print("top-level:", list(data))
+          for key in list(data):
+              value = data[key]
+              kind = f"dict[{len(value)}]" if isinstance(value, dict) else (
+                     f"list[{len(value)}]" if isinstance(value, list) else type(value).__name__)
+              print(f"  {key}: {kind}")
+
+          flights = data.get("flights") or {}
+          print("\n-- flights: ", len(flights), "Eintraege")
+          for fid, flight in list(flights.items())[:2]:
+              print("  id:", fid)
+              print("  ", json.dumps(flight, ensure_ascii=False)[:1100])
+
+          for key in ("itineraries", "depart", "cities", "trips"):
+              if key in data:
+                  blob = data[key]
+                  print(f"\n-- {key}:")
+                  print("  ", json.dumps(blob, ensure_ascii=False)[:1400])
+
+          print("\n##### DEAL-FEEDS #####")
+          for label, url in [
+              ("Urlaubspiraten", "https://www.urlaubspiraten.de/feed"),
+              ("Travelfree", "https://travelfree.info/feed/"),
+              ("Fly4free", "https://www.fly4free.com/feed/"),
+              ("Secret Flying (RSS-Pfad?)", "https://www.secretflying.com/feed/rss/"),
+          ]:
               try:
-                  with urllib.request.urlopen(
-                          urllib.request.Request(url, data=body, headers=hdr), timeout=35) as resp:
-                      text = resp.read().decode("utf-8", "replace")
-                      print(f"[OK  {resp.status}] {label}  ({len(text)} bytes)")
-                      print("        ", text[:show].replace("\n", " "))
-                      return text
-              except urllib.error.HTTPError as exc:
-                  print(f"[HTTP {exc.code}] {label}  {exc.read()[:220].decode('utf-8','replace')}")
+                  body = get(url)
+                  # First item title+link, to confirm it's really parseable.
+                  import re
+                  item = re.search(r"<item>(.*?)</item>", body, re.S)
+                  title = re.search(r"<title>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?</title>", item.group(1), re.S) if item else None
+                  link = re.search(r"<link>(.*?)</link>", item.group(1), re.S) if item else None
+                  print(f"[OK] {label}: {len(body)} bytes")
+                  if title:
+                      print("     erster Eintrag:", title.group(1).strip()[:120])
+                      print("     link:", (link.group(1).strip() if link else "-")[:110])
               except Exception as exc:
-                  print(f"[FAIL   ] {label}  {type(exc).__name__}: {exc}")
-              return None
-
-          print("########## ROME2RIO - multimodal weltweit, mit Preisen ##########")
-          for key in ("", "?key=demo"):
-              probe(f"rome2rio free api{key or ' (ohne key)'}",
-                    "https://free.rome2rio.com/api/1.4/json/Search?" + urllib.parse.urlencode({
-                        "oName": "Hamburg", "dName": "Lyon", "currencyCode": "EUR", "languageCode": "de",
-                    }) + ("&key=demo" if key else ""))
-          probe("rome2rio autocomplete",
-                "https://free.rome2rio.com/api/1.4/json/Autocomplete?query=Hamburg&languageCode=de")
-
-          print("\n########## SKIPLAGGED - Fluege inkl. versteckter Tarife ##########")
-          probe("skiplagged search",
-                "https://skiplagged.com/api/search.php?" + urllib.parse.urlencode({
-                    "from": "HAM", "to": "LYS", "depart": "2026-09-15",
-                    "return": "", "poll": "true", "sort": "cost"}))
-
-          print("\n########## BAHN UEBER WIEDERVERKAEUFER ##########")
-          probe("Trainline EU search",
-                "https://www.trainline.eu/api/v5_1/search",
-                data={"search": {"departure_date": "2026-09-15T08:00:00+02:00",
-                                  "return_date": None, "departure_station_id": "4916",
-                                  "arrival_station_id": "5769", "systems": ["db", "sncf"],
-                                  "passengers": [{"id": "1", "age": 30}]}})
-          probe("Trainline stations",
-                "https://www.trainline.eu/api/v5_1/stations?query=Hamburg")
-          probe("thetrainline journey-search",
-                "https://www.thetrainline.com/api/journey-search/",
-                data={"passengers": [{"dateOfBirth": "1996-01-01"}],
-                      "isEurope": True, "transitDefinitions": [
-                          {"direction": "outward", "origin": "urn:trainline:generic:loc:HAM",
-                           "destination": "urn:trainline:generic:loc:MUC",
-                           "journeyDate": {"type": "departAfter", "time": "2026-09-15T08:00:00"}}],
-                      "type": "single"})
-          probe("Omio gtsapi",
-                "https://www.omio.de/gtsapi/search/positions?departurePositionKey=&arrivalPositionKey=")
-          probe("Omio autocomplete",
-                "https://www.omio.de/gtsapi/positions/autocomplete/de?searchTerm=Hamburg")
-          probe("Checkmybus", "https://www.checkmybus.de/api/v1/search?from=Hamburg&to=Lyon&date=2026-09-15")
-          probe("Busbud", "https://www.busbud.com/api/search?origin=Hamburg&destination=Lyon")
-          probe("Wanderu", "https://www.wanderu.com/api/v1/search?origin=Hamburg&destination=Lyon")
-          probe("Distribusion", "https://api.distribusion.com/retailers/v4/connections")
-          probe("Interrail Fahrplan", "https://timetable.eurail.com/api/v1/journeys?from=Hamburg&to=Lyon")
-
-          print("\n########## HOTELS ##########")
-          probe("Hostelworld properties",
-                "https://api.hostelworld.com/2.2/cities/1/properties/?guests=1&date-start=2026-09-15&date-end=2026-09-18",
-                headers={"Accept": "application/json"})
-          probe("Hostelworld suggestions",
-                "https://api.hostelworld.com/2.2/suggestions/?query=Barcelona")
-          probe("Booking demand api", "https://demandapi.booking.com/3.1/accommodations/search")
-          probe("Hotelbeds test", "https://api.test.hotelbeds.com/hotel-api/1.0/status")
-          probe("OpenStreetMap Overpass (Hotels, ohne Preis)",
-                "https://overpass-api.de/api/interpreter?data=" + urllib.parse.quote(
-                    '[out:json][timeout:10];node["tourism"="hotel"](41.37,2.14,41.40,2.18);out 3;'))
-
-          print("\n########## DEALS / FEHLERPREISE ##########")
-          probe("Secret Flying RSS", "https://www.secretflying.com/feed/", show=300)
-          probe("Urlaubspiraten RSS", "https://www.urlaubspiraten.de/feed", show=300)
-          probe("Travelfree RSS", "https://travelfree.info/feed/", show=300)
-          probe("Fly4free RSS", "https://www.fly4free.com/feed/", show=300)
+                  print(f"[FAIL] {label}: {type(exc).__name__}: {exc}")
           PY
           python3 probe.py
