@@ -1,0 +1,46 @@
+name: Probe FlixBus autocomplete
+
+# Wegwerf-Workflow: prueft, wie die FlixBus-Staedte-Autovervollstaendigung
+# auf Bahnhofsnamen ("Berlin Hbf") gegenueber Stadtnamen ("Berlin") reagiert.
+# Wird nach der Auswertung wieder geloescht.
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Autocomplete-Antworten vergleichen
+        run: |
+          python3 - <<'PY'
+          import json, urllib.parse, urllib.request
+
+          BASE = "https://hackyourtrip-proxy.iamanamelessman.workers.dev"
+          HDRS = {"User-Agent": "HackYourTrip-Probe/1.0"}
+
+          def cities(q):
+              url = f"{BASE}/flixbus/cities?{urllib.parse.urlencode({'q': q, 'lang': 'de'})}"
+              try:
+                  with urllib.request.urlopen(urllib.request.Request(url, headers=HDRS), timeout=45) as r:
+                      return json.load(r)
+              except Exception as exc:
+                  return {"__error__": str(exc)}
+
+          queries = [
+              "Berlin", "Berlin Hbf", "Berlin Hauptbahnhof",
+              "Hamburg", "Hamburg Hbf",
+              "Muenchen", "München", "München Hbf",
+              "Frankfurt(Main) Hbf", "Frankfurt",
+              "Koeln Hbf", "Köln Hbf", "Köln",
+              "Halle(Saale)Hbf", "Münster(Westf) Hbf",
+              "BER", "HAM",
+          ]
+          for q in queries:
+              res = cities(q)
+              if isinstance(res, dict):
+                  print(f"{q!r:26} FEHLER {res}")
+                  continue
+              names = [(h.get("name"), h.get("id")) for h in res[:3] if isinstance(h, dict)]
+              print(f"{q!r:26} {len(res):3} Treffer  {names}")
+          PY
