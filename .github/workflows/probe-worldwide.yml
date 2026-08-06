@@ -1,5 +1,5 @@
-# Temporary: broad sweep for free, key-less LIVE price sources worldwide.
-# Deleted again after use; results go into README/HANDOFF.
+# Temporary: round 2 - chase the near-misses from the first sweep.
+# FlixBus wants UUIDs, DB moved hosts, Hotellook may want the token.
 name: probe-worldwide
 
 on:
@@ -9,10 +9,12 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
-      - name: Sweep candidates
+      - name: Chase near-misses
+        env:
+          TRAVELPAYOUTS_TOKEN: ${{ secrets.TRAVELPAYOUTS_TOKEN }}
         run: |
           cat > probe.py <<'PY'
-          import json, urllib.parse, urllib.request
+          import json, os, urllib.parse, urllib.request
 
           BROWSER = {
               "User-Agent": ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
@@ -20,14 +22,14 @@ jobs:
               "Accept": "application/json, text/plain, */*",
               "Accept-Language": "de-DE,de;q=0.9,en;q=0.8",
           }
+          FLIX = {"X-API-Authentication": "3vJKYJVSDF9ZLcTAKX4V"}
 
-          def probe(label, url, headers=None, data=None, method=None, show=420):
-              hdr = dict(BROWSER)
-              hdr.update(headers or {})
+          def probe(label, url, headers=None, data=None, show=700):
+              hdr = dict(BROWSER); hdr.update(headers or {})
               body = json.dumps(data).encode() if data is not None else None
               if body is not None:
                   hdr.setdefault("Content-Type", "application/json")
-              req = urllib.request.Request(url, data=body, headers=hdr, method=method)
+              req = urllib.request.Request(url, data=body, headers=hdr)
               try:
                   with urllib.request.urlopen(req, timeout=40) as resp:
                       text = resp.read().decode("utf-8", "replace")
@@ -35,90 +37,70 @@ jobs:
                       print("        ", text[:show].replace("\n", " "))
                       return text
               except urllib.error.HTTPError as exc:
-                  detail = exc.read()[:200].decode("utf-8", "replace").replace("\n", " ")
-                  print(f"[HTTP {exc.code}] {label}  {detail}")
+                  print(f"[HTTP {exc.code}] {label}  {exc.read()[:250].decode('utf-8','replace')}")
               except Exception as exc:
                   print(f"[FAIL   ] {label}  {type(exc).__name__}: {exc}")
               return None
 
-          print("########## METASUCHE (weltweit, viele Airlines) ##########")
-          probe("Kiwi skypicker (legacy, keyless?)",
-                "https://api.skypicker.com/flights?" + urllib.parse.urlencode({
-                    "flyFrom": "HAM", "to": "LYS", "dateFrom": "14/08/2026", "dateTo": "20/08/2026",
-                    "partner": "picky", "curr": "EUR", "limit": 5, "v": 3}))
-          probe("Kiwi umbrella api",
-                "https://api.tequila.kiwi.com/v2/search?fly_from=HAM&fly_to=LYS&date_from=14/08/2026&date_to=20/08/2026")
+          print("########## FLIXBUS mit UUIDs ##########")
+          def flix_city(name):
+              raw = probe(f"autocomplete {name}",
+                          "https://global.api.flixbus.com/search/autocomplete/cities?" +
+                          urllib.parse.urlencode({"q": name, "lang": "de"}),
+                          headers=FLIX, show=120)
+              if not raw:
+                  return None
+              for hit in json.loads(raw):
+                  if hit.get("id"):
+                      print(f"         -> {hit['name']}: {hit['id']}")
+                      return hit["id"]
+              return None
 
-          print("\n########## HOTELS ##########")
-          probe("Hotellook lookup (Orte)",
-                "https://engine.hotellook.com/api/v2/lookup.json?" + urllib.parse.urlencode({
-                    "query": "Barcelona", "lang": "de", "lookFor": "both", "limit": 5}))
-          probe("Hotellook cache (Preise!)",
-                "https://engine.hotellook.com/api/v2/cache.json?" + urllib.parse.urlencode({
-                    "location": "Barcelona", "currency": "eur",
-                    "checkIn": "2026-09-15", "checkOut": "2026-09-18", "limit": 5}))
+          a, b = flix_city("Berlin"), flix_city("München")
+          if a and b:
+              probe("FlixBus Suche mit UUID (PREISE?)",
+                    "https://global.api.flixbus.com/search/service/v4/search?" +
+                    urllib.parse.urlencode({
+                        "from_city_id": a, "to_city_id": b,
+                        "departure_date": "15.09.2026", "products": '{"adult":1}',
+                        "currency": "EUR", "locale": "de", "search_by": "cities",
+                        "include_after_midnight_rides": 1}),
+                    headers=FLIX, show=1400)
 
-          print("\n########## AIRLINES ##########")
-          probe("easyJet lowest daily fares",
-                "https://www.easyjet.com/api/routepricing/v3/searchfares/GetLowestDailyFares?" +
-                urllib.parse.urlencode({"departureAirport": "BER", "arrivalAirport": "BCN",
-                                        "currency": "EUR", "departureDateFrom": "2026-09-01",
-                                        "departureDateTo": "2026-09-30"}))
-          probe("Wizz Air metadata", "https://be.wizzair.com/Api/asset/map?languageCode=de-de")
-          probe("Wizz Air farechart", "https://be.wizzair.com/Api/asset/farechart",
-                data={"flightList": [{"departureStation": "BER", "arrivalStation": "BCN",
-                                       "date": "2026-09-15"}], "priceType": "regular",
-                      "adultCount": 1, "childCount": 0, "infantCount": 0})
-          probe("Vueling low fare",
-                "https://tickets.vueling.com/api/lowfare/getlowfares?" + urllib.parse.urlencode({
-                    "origin": "BCN", "destination": "PAR", "month": "2026-09"}))
-          probe("Norwegian low fare",
-                "https://www.norwegian.com/api/booking/lowfare/get?" + urllib.parse.urlencode({
-                    "origin": "OSL", "destination": "BCN", "outboundDate": "2026-09-15",
-                    "adultCount": 1, "currency": "EUR"}))
-          probe("Transavia (key?)",
-                "https://api.transavia.com/v2/flightoffers/?origin=AMS&destination=BCN")
-          probe("Volotea", "https://www.volotea.com/api/flights/search?origin=VCE&destination=BCN")
-          probe("Southwest (US)",
-                "https://www.southwest.com/api/air-booking/v1/air-booking/page/air/booking/shopping")
-          probe("Pegasus (TR)", "https://web.flypgs.com/pgs-web/api/cheapFare/getCheapFareList")
-          probe("AirAsia (Asien)", "https://www.airasia.com/api/flights/search")
-          probe("IndiGo (Indien)", "https://www.goindigo.in/api/flight/search")
+          print("\n########## DEUTSCHE BAHN, neue Hosts ##########")
+          for host in ("https://int.bahn.de/web/api/angebote/fahrplan",
+                       "https://www.bahn.de/web/api/angebote/fahrplan",
+                       "https://int.bahn.de/web/api/angebote/tagesbestpreis"):
+              probe(host, host,
+                    data={"abfahrtsHalt": "A=1@O=Hamburg Hbf@X=10006909@Y=53552733@U=80@L=8002549@",
+                          "anfrageZeitpunkt": "2026-09-15T08:00:00",
+                          "ankunftsHalt": "A=1@O=München Hbf@X=11558339@Y=48140229@U=80@L=8000261@",
+                          "ankunftSuche": "ABFAHRT", "klasse": "KLASSE_2",
+                          "produktgattungen": ["ICE", "EC_IC", "IR", "REGIONAL", "SBAHN"],
+                          "reisende": [{"typ": "ERWACHSENER", "ermaessigungen": [{"art": "KEINE_ERMAESSIGUNG", "klasse": "KLASSENLOS"}], "alter": [], "anzahl": 1}],
+                          "schnelleVerbindungen": True, "sitzplatzOnly": False,
+                          "bikeCarriage": False, "reservierungsKontingenteVorhanden": False},
+                    show=500)
+          probe("bahn.de Bahnhofssuche",
+                "https://int.bahn.de/web/api/reiseloesung/orte?suchbegriff=Hamburg%20Hbf&typ=ALL&limit=3", show=400)
 
-          print("\n########## BAHN ##########")
-          probe("DB vendo Fahrplan+Preise",
-                "https://app.vendo.noncd.db.de/mob/angebote/fahrplan",
-                headers={"Accept": "application/x.db.vendo.mob.verbindungssuche.v8+json",
-                         "Content-Type": "application/x.db.vendo.mob.verbindungssuche.v8+json",
-                         "X-Correlation-ID": "hackyourtrip"},
-                data={"autonomeReservierung": False, "einstiegsTypList": ["STANDARD"],
-                      "klasse": "KLASSE_2",
-                      "reisegruppe": {"reisendenListe": [{"reisendenTyp": "ERWACHSENER", "ermaessigungen": [{"art": "KEINE_ERMAESSIGUNG", "klasse": "KLASSENLOS"}]}]},
-                      "reiseHin": {"wunsch": {"abgangsLocationId": "A=1@O=Hamburg Hbf@X=10006909@Y=53552733@U=80@L=8002549@",
-                                               "zeitWunsch": {"reiseDatum": "2026-09-15T08:00:00", "zeitPunktArt": "ABFAHRT"},
-                                               "zielLocationId": "A=1@O=München Hbf@X=11558339@Y=48140229@U=80@L=8000261@",
-                                               "verkehrsmittel": ["ALL"]}}})
-          probe("Trenitalia lefrecce",
-                "https://www.lefrecce.it/Channels.Website.BFF.WEB/website/ticket/solutions?" +
-                urllib.parse.urlencode({"origin": "ROMA TERMINI", "destination": "MILANO CENTRALE",
-                                        "arflag": "A", "adultNo": 1, "direction": "A",
-                                        "departureTime": "2026-09-15T08:00:00.000+02:00"}))
-          probe("ÖBB Fahrplan", "https://fahrplan.oebb.at/bin/mgate.exe")
-          probe("SBB open journey planner", "https://api.opentransportdata.swiss/ojp2020")
-          probe("Amtrak (US)", "https://www.amtrak.com/services/journeysearch")
+          print("\n########## HOTELS: Hotellook-Varianten ##########")
+          token = os.environ.get("TRAVELPAYOUTS_TOKEN", "")
+          for label, url in [
+              ("lookup v2 (neu?)", "https://engine.hotellook.com/api/v2/lookup.json?query=Barcelona&lang=de&lookFor=both&limit=5"),
+              ("cache v2", "https://engine.hotellook.com/api/v2/cache.json?location=Barcelona&currency=eur&checkIn=2026-09-15&checkOut=2026-09-18&limit=5"),
+              ("yasen dump", "https://yasen.hotellook.com/tp/public/widget_location_dump.json?lang=de&flag=&limit=3&type=popularity"),
+              ("hotellook static", "https://photo.hotellook.com/static/cities_pl.json"),
+              ("tp hotel prices", f"https://api.travelpayouts.com/v1/hotels/prices?location=Barcelona&checkIn=2026-09-15&checkOut=2026-09-18&currency=eur&token={token}"),
+              ("tp hotel lookup", f"https://api.travelpayouts.com/v1/hotels/lookup?query=Barcelona&lang=de&lookFor=city&limit=3&token={token}"),
+          ]:
+              probe(label, url, show=400)
 
-          print("\n########## BUS ##########")
-          probe("FlixBus Städte-Autocomplete",
-                "https://global.api.flixbus.com/search/autocomplete/cities?" +
-                urllib.parse.urlencode({"q": "Berlin", "lang": "de"}),
-                headers={"X-API-Authentication": "3vJKYJVSDF9ZLcTAKX4V"})
-          probe("FlixBus Suche (Preise!)",
-                "https://global.api.flixbus.com/search/service/v4/search?" +
-                urllib.parse.urlencode({"from_city_id": "88", "to_city_id": "1374",
-                                        "departure_date": "15.09.2026", "products": '{"adult":1}',
-                                        "currency": "EUR", "locale": "de", "search_by": "cities",
-                                        "include_after_midnight_rides": 1}),
-                headers={"X-API-Authentication": "3vJKYJVSDF9ZLcTAKX4V"})
-          probe("BlaBlaCar Bus", "https://bus-api.blablacar.com/v3/search?origin_id=1&destination_id=2")
+          print("\n########## SONSTIGE ZWEITE CHANCE ##########")
+          probe("Trenitalia (korrekter BFF)",
+                "https://www.lefrecce.it/Channels.Website.BFF.WEB/website/locations/search?name=ROMA&limit=3",
+                headers={"Accept-Encoding": "identity"}, show=300)
+          probe("Ryanair Flughafenliste (für Umkreissuche)",
+                "https://www.ryanair.com/api/views/locate/5/airports/de/active", show=200)
           PY
           python3 probe.py
