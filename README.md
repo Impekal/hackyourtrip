@@ -169,7 +169,7 @@ auf einem Dashboard die besten aktuellen Optionen pro Strecke zeigt.
   Empfehlung schlägt nie eine Zeit außerhalb dieses Fensters vor.
 - **Umkreis Start/Ziel** (`nearby_km`): Hamburg→Lyon hat kaum Preise,
   Bremen→Genf schon. Auf Wunsch werden Nachbar-**Flughäfen und -Bahnhöfe**
-  bis 90/100/250 km mitgesucht, und jedes Angebot von dort trägt sichtbar
+  bis 100/150/250 km mitgesucht, und jedes Angebot von dort trägt sichtbar
   „ab BRE · +103 km Anfahrt". Ob ein Umweg das wert ist, entscheidet niemand
   außer dir - genau deshalb wird er angezeigt statt eingerechnet.
   Für Bahnhöfe gibt es **keine** Koordinatentabelle im Code: jeder Kandidat
