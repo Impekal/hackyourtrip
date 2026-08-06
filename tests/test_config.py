@@ -100,3 +100,54 @@ routes:
     baggage = load_routes(path)[0].baggage
     assert baggage.carry_on_count == 1
     assert baggage.carry_on_max_kg == 8.0
+
+
+def test_separate_nearby_radii_are_read(tmp_path: Path):
+    yaml_content = """
+routes:
+  - id: r1
+    origin: HAM
+    destination: LYS
+    depart_date_from: 2026-09-10
+    depart_date_until: 2026-09-10
+    nearby_origin_km: 150
+    nearby_destination_km: 20
+"""
+    path = tmp_path / "routes.yaml"
+    path.write_text(yaml_content)
+    route = load_routes(path)[0]
+    assert route.nearby_origin_km == 150
+    assert route.nearby_destination_km == 20
+
+
+def test_old_single_nearby_km_still_applies_to_both_ends(tmp_path: Path):
+    # Bestehende routes.yaml-Dateien duerfen sich nicht still veraendern.
+    yaml_content = """
+routes:
+  - id: r1
+    origin: HAM
+    destination: LYS
+    depart_date_from: 2026-09-10
+    depart_date_until: 2026-09-10
+    nearby_km: 100
+"""
+    path = tmp_path / "routes.yaml"
+    path.write_text(yaml_content)
+    route = load_routes(path)[0]
+    assert route.nearby_origin_km == 100
+    assert route.nearby_destination_km == 100
+
+
+def test_nearby_defaults_to_off(tmp_path: Path):
+    yaml_content = """
+routes:
+  - id: r1
+    origin: HAM
+    destination: LYS
+    depart_date_from: 2026-09-10
+    depart_date_until: 2026-09-10
+"""
+    path = tmp_path / "routes.yaml"
+    path.write_text(yaml_content)
+    route = load_routes(path)[0]
+    assert route.nearby_origin_km == 0 and route.nearby_destination_km == 0

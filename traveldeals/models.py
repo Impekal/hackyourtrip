@@ -169,11 +169,17 @@ class RoutePreference:
     # history, or notably below the median of what this search found.
     # False = show everything, deal or not.
     deals_only: bool = False
-    # Also search airports within this many km of origin/destination (0 =
-    # off). The single biggest saving lever this tool has that a metasearch
-    # engine can't match, because only the user knows what a detour is worth
-    # to them - see providers/geo.nearby_airports.
-    nearby_km: int = 0
+    # Also search airports/stations within this many km of the start and of
+    # the destination (0 = off). The single biggest saving lever this tool
+    # has that a metasearch engine can't match, because only the traveller
+    # knows what a detour is worth to them - see providers/geo.nearby_airports.
+    #
+    # Separate per side on purpose: the detour to the departure airport is
+    # driven in one's own car, the one at the destination is done with
+    # luggage and without one - the same 100 km are simply not worth the same
+    # at both ends.
+    nearby_origin_km: int = 0
+    nearby_destination_km: int = 0
     notes: str = ""
 
 

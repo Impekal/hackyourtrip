@@ -555,7 +555,12 @@ Was weiterhin blockt: thetrainline/Omio/Busbud/Wanderu hinter DataDome-
 Captcha, Rome2Rio-Domain tot, Kiwi skypicker abgeschaltet, Hotels überall
 401/404.
 
-**Umkreissuche** (`NearbyAirportsProvider` + `geo.nearby_airports`): läuft
+**Umkreissuche** (`NearbyAirportsProvider` + `geo.nearby_airports`): seit
+der Trennung zwei Felder, `nearby_origin_km` und `nearby_destination_km`
+(JS: `nearbyOriginKm`/`nearbyDestinationKm`) - der Umweg am Start wiegt
+anders als der am Ziel. `config.py` liest ein altes `nearby_km` weiterhin
+als Wert für beide Seiten, damit bestehende `routes.yaml` gleich bleiben.
+Läuft
 als äußerster Wrapper um den Flug-Composite, damit *alle* Quellen auch die
 Nachbarflughäfen bekommen. Jedes Angebot von dort trägt `alt_origin` /
 `alt_destination` / `detour_km` - nie ungekennzeichnet, sonst sähe ein Flug

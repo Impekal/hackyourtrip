@@ -50,7 +50,7 @@ class PricedStub(Provider):
 
 def test_neighbour_airports_are_searched_and_tagged():
     inner = PricedStub()
-    offers = NearbyAirportsProvider(Mode.FLIGHT, inner).search(make_route(nearby_km=150))
+    offers = NearbyAirportsProvider(Mode.FLIGHT, inner).search(make_route(nearby_origin_km=150, nearby_destination_km=150))
 
     assert ("BRE", "LYS") in inner.searched
     cheap = next(o for o in offers if o.booking_site == "BRE-LYS")
@@ -60,7 +60,7 @@ def test_neighbour_airports_are_searched_and_tagged():
 
 
 def test_the_searched_airport_itself_is_never_tagged_as_a_detour():
-    offers = NearbyAirportsProvider(Mode.FLIGHT, PricedStub()).search(make_route(nearby_km=150))
+    offers = NearbyAirportsProvider(Mode.FLIGHT, PricedStub()).search(make_route(nearby_origin_km=150, nearby_destination_km=150))
     home = [o for o in offers if o.booking_site == "HAM-LYS"]
     assert len(home) == 1
     assert not home[0].alt_origin and not home[0].alt_destination and home[0].detour_km == 0
@@ -72,8 +72,29 @@ def test_the_searched_airport_itself_is_never_tagged_as_a_detour():
 
 def test_without_the_option_only_the_chosen_airport_is_searched():
     inner = PricedStub()
-    NearbyAirportsProvider(Mode.FLIGHT, inner).search(make_route(nearby_km=0))
+    NearbyAirportsProvider(Mode.FLIGHT, inner).search(make_route(nearby_origin_km=0, nearby_destination_km=0))
     assert inner.searched == [("HAM", "LYS")]
+
+
+def test_start_and_destination_radius_are_independent():
+    """Der eigentliche Zweck der Trennung: 150 km Anfahrt zum eigenen
+    Startflughafen ist eine Autofahrt, 150 km am Ziel sind es mit Gepaeck
+    und ohne Auto nicht."""
+    inner = PricedStub()
+    NearbyAirportsProvider(Mode.FLIGHT, inner).search(
+        make_route(nearby_origin_km=150, nearby_destination_km=0))
+
+    assert ("BRE", "LYS") in inner.searched          # Umkreis Start greift
+    assert not [s for s in inner.searched if s[1] != "LYS"]  # Ziel bleibt fest
+
+
+def test_destination_radius_alone_also_works():
+    inner = PricedStub()
+    NearbyAirportsProvider(Mode.FLIGHT, inner).search(
+        make_route(nearby_origin_km=0, nearby_destination_km=150))
+
+    assert ("HAM", "GVA") in inner.searched          # Umkreis Ziel greift
+    assert not [s for s in inner.searched if s[0] != "HAM"]  # Start bleibt fest
 
 
 def test_a_failing_variant_does_not_sink_the_search():
@@ -83,7 +104,7 @@ def test_a_failing_variant_does_not_sink_the_search():
                 raise RuntimeError("boom")
             return super().search(route)
 
-    offers = NearbyAirportsProvider(Mode.FLIGHT, Flaky()).search(make_route(nearby_km=150))
+    offers = NearbyAirportsProvider(Mode.FLIGHT, Flaky()).search(make_route(nearby_origin_km=150, nearby_destination_km=150))
     assert offers  # HAM and HAJ still came through
 
 

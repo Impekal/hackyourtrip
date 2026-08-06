@@ -361,10 +361,26 @@
             <option value="deals">Nur Deals/Aktionen</option>
           </select>
         </div>
+        <!-- Getrennt, weil der Umweg an den beiden Enden selten gleich viel
+             wert ist: zum Startflughafen fährt man selbst, am Ziel steht man
+             ohne Auto da. -->
         <div class="field" id="nearbyGroup">
-          <label for="nearbyKm">Umkreis Start/Ziel</label>
-          <select id="nearbyKm">
+          <label for="nearbyOriginKm">Umkreis Start</label>
+          <select id="nearbyOriginKm">
             <option value="0" selected>Nur der gewählte Ort</option>
+            <option value="20">bis 20 km</option>
+            <option value="50">bis 50 km</option>
+            <option value="100">bis 100 km</option>
+            <option value="150">bis 150 km</option>
+            <option value="250">bis 250 km</option>
+          </select>
+        </div>
+        <div class="field" id="nearbyDestinationGroup">
+          <label for="nearbyDestinationKm">Umkreis Ziel</label>
+          <select id="nearbyDestinationKm">
+            <option value="0" selected>Nur der gewählte Ort</option>
+            <option value="20">bis 20 km</option>
+            <option value="50">bis 50 km</option>
             <option value="100">bis 100 km</option>
             <option value="150">bis 150 km</option>
             <option value="250">bis 250 km</option>
@@ -622,6 +638,6 @@
 <!-- The ?v= is deliberate: GitHub Pages lets browsers cache app.js, so a
      fix could ship and the visitor would keep running the old file. Bump
      this whenever app.js changes in a way users need to see. -->
-<script src="./app.js?v=2026-08-06-13"></script>
+<script src="./app.js?v=2026-08-06-14"></script>
 </body>
 </html>

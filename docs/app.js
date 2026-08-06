@@ -4,7 +4,7 @@
 // guessing: if this doesn't match, the browser is running a cached old
 // app.js and any "the fix didn't work" report is about the old file. Bump
 // together with the ?v= in index.html.
-const BUILD_STAMP = '2026-08-06-13';
+const BUILD_STAMP = '2026-08-06-14';
 document.getElementById('buildStamp').textContent = BUILD_STAMP;
 
 /* =========================================================================
@@ -681,12 +681,12 @@ async function groundOffersFor(route, mode) {
 
 async function fetchGroundOffersWithNeighbours(route, mode) {
   const base = await groundOffersFor(route, mode);
-  if (!route.nearbyKm) return base;
+  if (!route.nearbyOriginKm && !route.nearbyDestinationKm) return base;
 
   const offers = [...base];
   const [origins, destinations] = await Promise.all([
-    fetchNearbyStations(route.origin, route.nearbyKm),
-    fetchNearbyStations(route.destination, route.nearbyKm),
+    fetchNearbyStations(route.origin, route.nearbyOriginKm),
+    fetchNearbyStations(route.destination, route.nearbyDestinationKm),
   ]);
   for (const [origin, originKm] of [[route.origin, 0], ...origins]) {
     for (const [destination, destinationKm] of [[route.destination, 0], ...destinations]) {
@@ -707,11 +707,11 @@ async function fetchGroundOffersWithNeighbours(route, mode) {
 // can silently look like a departure from the airport that was searched.
 async function fetchFlightOffersWithNeighbours(route) {
   const base = await fetchRealFlightOffers(route);
-  if (!route.nearbyKm) return base;
+  if (!route.nearbyOriginKm && !route.nearbyDestinationKm) return base;
 
   const offers = base ? [...base] : [];
-  const origins = [[route.origin, 0], ...nearbyAirports(route.origin, route.nearbyKm)];
-  const destinations = [[route.destination, 0], ...nearbyAirports(route.destination, route.nearbyKm)];
+  const origins = [[route.origin, 0], ...nearbyAirports(route.origin, route.nearbyOriginKm)];
+  const destinations = [[route.destination, 0], ...nearbyAirports(route.destination, route.nearbyDestinationKm)];
   for (const [origin, originKm] of origins) {
     for (const [destination, destinationKm] of destinations) {
       if (!originKm && !destinationKm) continue; // already searched
@@ -2161,7 +2161,10 @@ function readRouteFromForm() {
     // Off by default: invented prices are for exercising the ranking logic,
     // not for filling a results list. See the mock rule in HANDOFF.md.
     showMockData: document.getElementById('showMockData').value === 'mock',
-    nearbyKm: Number(document.getElementById('nearbyKm').value || 0),
+    // Getrennt pro Seite: der Umweg zum Startflughafen (eigenes Auto) wiegt
+    // anders als der am Ziel (Mietwagen, Bahn, Gepäck).
+    nearbyOriginKm: Number(document.getElementById('nearbyOriginKm').value || 0),
+    nearbyDestinationKm: Number(document.getElementById('nearbyDestinationKm').value || 0),
     roundTrip: cfg.roundTrip && document.getElementById('roundTrip').checked,
     returnDate: (cfg.roundTrip && document.getElementById('roundTrip').checked && document.getElementById('returnDate').value)
       ? new Date(document.getElementById('returnDate').value) : null,
@@ -2633,6 +2636,8 @@ ${HOTEL_AMENITY_REQUIREMENTS.map(([prefFlag, , yamlKey]) => `      ${yamlKey}: $
       depart_time_flex_minutes: ${tp.departTimeFlexMinutes || 0}
     low_cost: ${route.lowCost}
     deals_only: ${route.dealsOnly || false}
+    nearby_origin_km: ${route.nearbyOriginKm || 0}
+    nearby_destination_km: ${route.nearbyDestinationKm || 0}
     round_trip: ${route.roundTrip || false}
     return_date: ${route.roundTrip && route.returnDate ? fmt(route.returnDate) : 'null'}
 `;

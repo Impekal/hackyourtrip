@@ -86,14 +86,16 @@ class NearbyStationsProvider(Provider):
 
     def search(self, route: RoutePreference) -> list[Offer]:
         offers = list(self.inner.search(route))
-        if not route.nearby_km:
+        if not (route.nearby_origin_km or route.nearby_destination_km):
             return offers
 
         from traveldeals.providers.transitous import (TransitousTrainProvider,
                                                        nearby_stations)
         resolver = TransitousTrainProvider()
-        origins = [(route.origin, 0)] + nearby_stations(resolver, route.origin, route.nearby_km, self.limit_per_side)
-        destinations = [(route.destination, 0)] + nearby_stations(resolver, route.destination, route.nearby_km, self.limit_per_side)
+        origins = [(route.origin, 0)] + nearby_stations(
+            resolver, route.origin, route.nearby_origin_km, self.limit_per_side)
+        destinations = [(route.destination, 0)] + nearby_stations(
+            resolver, route.destination, route.nearby_destination_km, self.limit_per_side)
 
         for origin, origin_km in origins:
             for destination, destination_km in destinations:
@@ -146,15 +148,17 @@ class NearbyAirportsProvider(Provider):
 
     def search(self, route: RoutePreference) -> list[Offer]:
         offers = list(self.inner.search(route))
-        if not route.nearby_km:
+        if not (route.nearby_origin_km or route.nearby_destination_km):
             return offers
 
         # Imported here to keep providers/base free of a hard geo dependency
         # for callers that never use this wrapper.
         from traveldeals.providers.geo import nearby_airports
 
-        origins = [(route.origin, 0)] + nearby_airports(route.origin, route.nearby_km, self.limit_per_side)
-        destinations = [(route.destination, 0)] + nearby_airports(route.destination, route.nearby_km, self.limit_per_side)
+        origins = [(route.origin, 0)] + nearby_airports(
+            route.origin, route.nearby_origin_km, self.limit_per_side)
+        destinations = [(route.destination, 0)] + nearby_airports(
+            route.destination, route.nearby_destination_km, self.limit_per_side)
 
         for origin, origin_km in origins:
             for destination, destination_km in destinations:

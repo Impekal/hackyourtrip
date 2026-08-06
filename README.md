@@ -167,11 +167,18 @@ auf einem Dashboard die besten aktuellen Optionen pro Strecke zeigt.
   zirkulär über Mitternacht hinweg berechnet. Angebote außerhalb des
   Fensters werden herausgefiltert - auch die "später fahren spart X€"-
   Empfehlung schlägt nie eine Zeit außerhalb dieses Fensters vor.
-- **Umkreis Start/Ziel** (`nearby_km`): Hamburg→Lyon hat kaum Preise,
-  Bremen→Genf schon. Auf Wunsch werden Nachbar-**Flughäfen und -Bahnhöfe**
-  bis 100/150/250 km mitgesucht, und jedes Angebot von dort trägt sichtbar
+- **Umkreis Start / Umkreis Ziel** (`nearby_origin_km`,
+  `nearby_destination_km`): Hamburg→Lyon hat kaum Preise, Bremen→Genf schon.
+  Auf Wunsch werden Nachbar-**Flughäfen und -Bahnhöfe** bis
+  20/50/100/150/250 km mitgesucht, und jedes Angebot von dort trägt sichtbar
   „ab BRE · +103 km Anfahrt". Ob ein Umweg das wert ist, entscheidet niemand
   außer dir - genau deshalb wird er angezeigt statt eingerechnet.
+  **Getrennt je Seite**, weil der Umweg an den beiden Enden selten gleich
+  viel wert ist: zum Startflughafen fährt man im eigenen Auto, am Ziel steht
+  man mit Gepäck und ohne Auto da. 150 km Anfahrt zu Hause und 20 km am Ziel
+  ist eine völlig normale Kombination - ein einzelner Regler konnte sie nicht
+  ausdrücken. Ein altes `nearby_km` in einer bestehenden `routes.yaml` gilt
+  weiterhin für beide Seiten.
   Für Bahnhöfe gibt es **keine** Koordinatentabelle im Code: jeder Kandidat
   wird über Transitous aufgelöst, das die echte Haltestelle mit echten
   Koordinaten liefert. Eine aus Flughafenpositionen gebastelte Tabelle würde

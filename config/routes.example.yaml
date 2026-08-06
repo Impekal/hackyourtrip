@@ -68,6 +68,11 @@ routes:
       depart_time_flex_minutes: 0   # Zeitfenster +/- um preferred_depart_time (nur falls gesetzt)
     low_cost: any            # any | only (nur Low-Cost) | exclude (keine Low-Cost)
     deals_only: false         # true = nur Deals/Aktionen zeigen, false = alle Angebote
+    # Nachbar-Flughäfen/-Bahnhöfe mitsuchen. Getrennt je Seite, weil der
+    # Umweg am Start (eigenes Auto) anders wiegt als der am Ziel (Gepäck,
+    # kein Auto). 0 = aus. Ein altes nearby_km gilt weiterhin für beide.
+    nearby_origin_km: 0       # 0 | 20 | 50 | 100 | 150 | 250
+    nearby_destination_km: 0
     round_trip: true          # hin und zurück (nur relevant fuer flight/train/bus + deren Kombis)
     return_date: 2026-09-17   # nur gelesen wenn round_trip: true
     notes: "Herbstferien, Datum ist flexibel"
