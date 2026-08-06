@@ -4,7 +4,7 @@
 // guessing: if this doesn't match, the browser is running a cached old
 // app.js and any "the fix didn't work" report is about the old file. Bump
 // together with the ?v= in index.html.
-const BUILD_STAMP = '2026-08-06-4';
+const BUILD_STAMP = '2026-08-06-5';
 document.getElementById('buildStamp').textContent = BUILD_STAMP;
 
 /* =========================================================================
@@ -820,6 +820,90 @@ async function fetchRyanairOffers(route) {
 }
 
 /* =========================================================================
+ * Real, bookable FlixBus fares - free, no key, no account.
+ * Mirrors traveldeals/providers/flixbus.py.
+ *
+ * This is what finally gives the *ground* modes a real price to compare
+ * against a flight. Transitous knows the trains but not what they cost;
+ * FlixBus knows both. Verified live: Berlin -> Munich 21.48 EUR fare /
+ * 22.47 EUR with booking fee, 07:15 -> 17:35, 50 seats left.
+ *
+ * City UUIDs are mandatory - the numeric legacy_id from the same
+ * autocomplete response is rejected with "Signature ... is invalid".
+ * ===================================================================== */
+const FLIXBUS_MAX_DAYS = 4;
+const FLIXBUS_BOOKING_BASE = 'https://shop.flixbus.de/search';
+
+async function flixbusResolveCity(name) {
+  const payload = await fetchProxyJson('flixbus/cities', new URLSearchParams({ q: name, lang: 'de' }));
+  const hits = Array.isArray(payload) ? payload : [];
+  return hits.find(h => h && h.id) || null;
+}
+
+function flixbusResultToOffer(result, route, origin, destination, day) {
+  // Sold out or otherwise unbookable rides are not offers.
+  if (result.status !== 'available') return null;
+  const price = result.price || {};
+  // What the customer actually pays, not the headline fare - a price that
+  // grows at checkout is exactly the surprise this project avoids.
+  const total = price.total_with_platform_fee ?? price.total;
+  const depart = (result.departure || {}).date;
+  const arrive = (result.arrival || {}).date;
+  if (total == null || !depart || !arrive) return null;
+
+  const duration = result.duration || {};
+  const legs = result.legs || [];
+  const params = new URLSearchParams({
+    departureCity: origin.id, arrivalCity: destination.id,
+    rideDate: fmtDay(day), adult: '1',
+  });
+  return {
+    mode: 'bus',
+    bookingSite: `FlixBus (${(result.provider || 'flixbus')})`,
+    price: Number(total),
+    currency: route.currency.toUpperCase(),
+    // The offset is already the stop's local time, which is the convention
+    // everywhere else here - so it is dropped, not converted.
+    depart: new Date(depart.slice(0, 19)),
+    durationHours: round2((duration.hours || 0) + (duration.minutes || 0) / 60),
+    bagFee: 0,
+    isLowCost: true,
+    stops: Math.max(legs.length - 1, 0),
+    wifiOnboard: false, powerOutlets: false, legroomCm: null, punctualityPct: null,
+    url: `${FLIXBUS_BOOKING_BASE}?${params.toString()}`,
+    returnDepart: null,
+    seatsLeft: (result.available || {}).seats ?? null,
+  };
+}
+
+async function fetchFlixbusOffers(route) {
+  if (!PROXY_URL) return [];
+  const [origin, destination] = await Promise.all([
+    flixbusResolveCity(route.origin),
+    flixbusResolveCity(route.destination),
+  ]);
+  if (!origin || !destination) return [];
+
+  const offers = [];
+  for (const day of dayCandidates(route).slice(0, FLIXBUS_MAX_DAYS)) {
+    const payload = await fetchProxyJson('flixbus/search', new URLSearchParams({
+      from_city_id: origin.id, to_city_id: destination.id,
+      departure_date: fmtDay(day), products: '{"adult":1}',
+      currency: route.currency.toUpperCase(), locale: 'de',
+      search_by: 'cities', include_after_midnight_rides: '1',
+    }));
+    for (const trip of (payload && payload.trips) || []) {
+      // `results` is a dict keyed by trip uid, not a list.
+      for (const result of Object.values(trip.results || {})) {
+        const offer = flixbusResultToOffer(result, route, origin, destination, day);
+        if (offer) offers.push(offer);
+      }
+    }
+  }
+  return offers;
+}
+
+/* =========================================================================
  * Real train/bus connections via Transitous (MOTIS) - free, no key, no
  * account. Mirrors traveldeals/providers/transitous.py.
  *
@@ -1177,10 +1261,14 @@ async function runSearch(route) {
         pools[mode] = fallback('flight');
       }
     } else if (mode === 'train' || mode === 'bus') {
-      // Real timetables without prices beat invented prices; anything else
-      // only appears if example data is explicitly switched on.
-      const real = await fetchRealTransitOffers(route, mode);
-      pools[mode] = (real && real.length) ? real : fallback(mode);
+      // Bus has a genuinely priced source now, so ask FlixBus first and let
+      // Transitous fill in the coaches and regional buses it doesn't run.
+      // Real timetables without prices still beat invented prices; example
+      // data only appears when explicitly switched on.
+      const priced = mode === 'bus' ? await fetchFlixbusOffers(route) : [];
+      const timetable = await fetchRealTransitOffers(route, mode);
+      const merged = [...priced, ...(timetable || [])];
+      pools[mode] = merged.length ? merged : fallback(mode);
     } else {
       // No free hotel source exists at all, so this mode is empty unless
       // example data is switched on - the provider links below are the

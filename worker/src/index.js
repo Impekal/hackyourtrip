@@ -87,6 +87,30 @@ const RYANAIR_HEADERS = {
   "Accept-Language": "de-DE,de;q=0.9,en;q=0.8",
 };
 
+// FlixBus' own search backend: public, keyless, and - unlike Transitous -
+// it carries real bookable prices, seat counts and transfer info. The
+// X-API-Authentication constant below is the one their web client ships to
+// every visitor; it is not a credential of ours and not a secret.
+//
+// Verified live: Berlin -> Munich returned 21.48 EUR (22.47 with booking
+// fee). Note that city *UUIDs* are required - the numeric legacy_id in the
+// autocomplete response is rejected with "Signature ... is invalid".
+const FLIXBUS_UPSTREAM = {
+  cities: "https://global.api.flixbus.com/search/autocomplete/cities",
+  search: "https://global.api.flixbus.com/search/service/v4/search",
+};
+const FLIXBUS_FORWARDABLE_PARAMS = {
+  cities: ["q", "lang"],
+  search: ["from_city_id", "to_city_id", "departure_date", "products",
+            "currency", "locale", "search_by", "include_after_midnight_rides"],
+};
+const FLIXBUS_HEADERS = {
+  "X-API-Authentication": "3vJKYJVSDF9ZLcTAKX4V",
+  "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
+  Accept: "application/json, text/plain, */*",
+  "Accept-Language": "de-DE,de;q=0.9,en;q=0.8",
+};
+
 // Only these may be forwarded upstream - keeps the proxy from being turned
 // into an open relay for arbitrary Travelpayouts query parameters.
 const FORWARDABLE_PARAMS = [
@@ -366,6 +390,56 @@ async function handleRyanairRequest(incoming, request, ctx, allowedOrigin) {
   return response;
 }
 
+/**
+ * GET /flixbus/{cities|search} - FlixBus passthrough. No secret needed, so
+ * like /transit/* and /ryanair/* it runs in front of the token check.
+ */
+async function handleFlixbusRequest(incoming, request, ctx, allowedOrigin) {
+  const kind = incoming.pathname.replace(/^\/+|\/+$/g, "").slice("flixbus/".length);
+  if (!FLIXBUS_UPSTREAM[kind]) {
+    return jsonResponse({ error: "Unknown FlixBus endpoint. Use /flixbus/cities or /flixbus/search." }, 404, allowedOrigin);
+  }
+
+  const upstream = new URL(FLIXBUS_UPSTREAM[kind]);
+  for (const name of FLIXBUS_FORWARDABLE_PARAMS[kind]) {
+    const value = incoming.searchParams.get(name);
+    if (value) upstream.searchParams.set(name, value);
+  }
+  if (kind === "cities" && !upstream.searchParams.get("q")) {
+    return jsonResponse({ error: "cities needs q." }, 400, allowedOrigin);
+  }
+  if (kind === "search" && !(upstream.searchParams.get("from_city_id")
+                              && upstream.searchParams.get("to_city_id")
+                              && upstream.searchParams.get("departure_date"))) {
+    return jsonResponse({
+      error: "search needs from_city_id, to_city_id and departure_date.",
+    }, 400, allowedOrigin);
+  }
+
+  const cache = caches.default;
+  const cacheKey = new Request(incoming.toString(), request);
+  const cached = await cache.match(cacheKey);
+  if (cached) return cached;
+
+  let upstreamResponse;
+  try {
+    upstreamResponse = await fetch(upstream.toString(), { headers: FLIXBUS_HEADERS });
+  } catch (err) {
+    return jsonResponse({ error: `FlixBus request failed: ${err.message}` }, 502, allowedOrigin);
+  }
+
+  const response = new Response(await upstreamResponse.text(), {
+    status: upstreamResponse.status,
+    headers: {
+      "Content-Type": "application/json",
+      "Cache-Control": `public, max-age=${CACHE_TTL_SECONDS}`,
+      ...corsHeaders(allowedOrigin),
+    },
+  });
+  if (upstreamResponse.ok) ctx.waitUntil(cache.put(cacheKey, response.clone()));
+  return response;
+}
+
 export default {
   async fetch(request, env, ctx) {
     const allowedOrigin = env.ALLOWED_ORIGIN || "*";
@@ -386,6 +460,9 @@ export default {
     }
     if (path.startsWith("ryanair/")) {
       return handleRyanairRequest(requestUrl, request, ctx, allowedOrigin);
+    }
+    if (path.startsWith("flixbus/")) {
+      return handleFlixbusRequest(requestUrl, request, ctx, allowedOrigin);
     }
     if (!env.TRAVELPAYOUTS_TOKEN) {
       return jsonResponse({ error: "Proxy is not configured (missing TRAVELPAYOUTS_TOKEN secret)." }, 500, allowedOrigin);

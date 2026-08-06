@@ -9,7 +9,8 @@ auf einem Dashboard die besten aktuellen Optionen pro Strecke zeigt.
 > | Modus | Datenquelle |
 > |---|---|
 > | **Flug** | **echte Preise** – **Ryanair** liefert live buchbare Fares ganz ohne Zugangsdaten, **Travelpayouts/Aviasales** (mit Token) ergänzt alle anderen Airlines |
-> | **Bahn, Bus** | **echte Verbindungen, aber ohne Preis** (Transitous/MOTIS): richtige Linie (ICE 1007), Abfahrtszeit, Gleis, Umstiege – nur **kein Preis**, weil die Quelle keinen führt. Dort steht "Preis unbekannt" statt einer erfundenen Zahl. |
+> | **Bus** | **echte, buchbare Preise** – **FlixBus** liefert Live-Fahrpreise inkl. freier Plätze und Umstiegen |
+> | **Bahn** | **echte Verbindungen, aber ohne Preis** (Transitous/MOTIS): richtige Linie (ICE 1007), Abfahrtszeit, Gleis, Umstiege – nur **kein Preis**, weil die Quelle keinen führt. Dort steht "Preis unbekannt" statt einer erfundenen Zahl. |
 > | **Hotel** | **erfundene Beispieldaten** - keine buchbaren Angebote |
 >
 > **Belegt, nicht vermutet** (Stand 06.08.2026, gegen die Live-Endpunkte
@@ -36,6 +37,27 @@ auf einem Dashboard die besten aktuellen Optionen pro Strecke zeigt.
 > | Lufthansa Open API | 596 Service Not Found |
 > | SNCF / Navitia | 401 – Token nötig |
 > | Wizz Air, easyJet | kein öffentlicher Endpunkt, nur kostenpflichtige Scraper-Dienste |
+>
+> Dritte Runde (06.08.2026), **weltweit**, ~25 Endpunkte live angefragt:
+>
+> | Quelle | Ergebnis |
+> |---|---|
+> | **FlixBus `global.api.flixbus.com`** | **funktioniert ohne Schlüssel** – Live-Preise, freie Plätze, Umstiege. **Ist eingebaut.** |
+> | Kiwi `api.skypicker.com` (früher keylos) | 404, abgeschaltet |
+> | Kiwi Tequila | 403, `apikey` erforderlich |
+> | Hotellook / Travelpayouts-Hotels | alle Varianten 404 |
+> | easyJet, Southwest | 403 Access Denied |
+> | Norwegian, Volotea | 403 Bot-Wall („Are you human?") |
+> | Wizz Air, Vueling, AirAsia, Transavia | 404, Endpunkte existieren nicht mehr |
+> | IndiGo, Amtrak | Timeout |
+> | DB (`int.bahn.de`, `www.bahn.de`, vendo) | 403 `OPS_BLOCKED` auf **allen** Hosts |
+> | SBB, SNCF/Navitia | 403 / 401 |
+> | Trenitalia Stationssuche | 200 – Preise wären ein eigener Ausbauschritt |
+>
+> **Fazit nach drei Runden:** Es gibt genau drei kostenlose, anmeldungsfreie
+> Quellen mit echten Preisen – **Ryanair**, **FlixBus** und (mit kostenlosem
+> Token) **Travelpayouts**. Für **Bahn** und **Hotel** existiert keine; die
+> Bahn blockt ihre eigene App-API serverseitig.
 >
 > **Die Einschränkung, die dazugehört:** Ryanair kennt nur Ryanair-Strecken.
 > Hamburg–Lyon fliegt Ryanair nicht, also hilft es dort nicht. Deshalb werden

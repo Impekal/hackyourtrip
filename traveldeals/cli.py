@@ -23,6 +23,7 @@ from traveldeals.notifiers.telegram import TelegramNotifier
 from traveldeals.pricehistory import PriceHistory
 from traveldeals.providers.amadeus import AmadeusFlightProvider
 from traveldeals.providers.base import CompositeProvider, Provider
+from traveldeals.providers.flixbus import FlixbusProvider
 from traveldeals.providers.mock import (MockBusProvider, MockFlightProvider,
                                          MockHotelProvider, MockTrainProvider)
 from traveldeals.providers.ryanair import RyanairFlightProvider
@@ -73,7 +74,10 @@ def build_providers(real_transit: bool = True) -> dict[Mode, Provider]:
     return {
         Mode.FLIGHT: _select_flight_provider(allow_mock=not real_transit),
         Mode.TRAIN: TransitousTrainProvider() if real_transit else MockTrainProvider(),
-        Mode.BUS: TransitousBusProvider() if real_transit else MockBusProvider(),
+        # Bus is the one ground mode with real prices: FlixBus first,
+        # Transitous behind it for the coaches FlixBus doesn't run.
+        Mode.BUS: CompositeProvider(Mode.BUS, [FlixbusProvider(), TransitousBusProvider()])
+                   if real_transit else MockBusProvider(),
         Mode.HOTEL: MockHotelProvider(),
     }
 

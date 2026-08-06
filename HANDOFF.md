@@ -483,7 +483,27 @@ ehrlich benennen - Ryanair kennt **nur Ryanair-Strecken**; HAM->LYS fliegt
 Ryanair nicht. `CompositeProvider` mischt deshalb mehrere Quellen, statt eine
 auszuwählen.
 
-Weiterhin offen bleibt der **Preis** für Bahn/Bus. DB-Wrapper regelmässig neu
+**Dritte Runde (06.08.2026), weltweit, ~25 Endpunkte:** Der einzige neue
+Treffer ist **FlixBus** (`global.api.flixbus.com`, eingebaut als
+`providers/flixbus.py`). Zwei Fallen dabei, beide live erlebt:
+
+- Die Suche braucht die **City-UUID**; die `legacy_id` aus derselben
+  Autocomplete-Antwort wird mit `Signature "88" ... is invalid` abgelehnt.
+  Genau diese Fehlermeldung hat die Lösung verraten.
+- `trips[].results` ist ein **Dict, keyed by trip uid**, keine Liste.
+- Preis: `price.total` ist der Fahrpreis, `price.total_with_platform_fee`
+  das, was an der Kasse steht. Verwendet wird letzteres.
+
+Alles andere fiel durch: Kiwi skypicker 404 (abgeschaltet), Kiwi Tequila
+braucht Key, Hotellook in allen Varianten 404, easyJet/Southwest 403,
+Norwegian/Volotea Bot-Wall, Wizz/Vueling/AirAsia/Transavia 404,
+IndiGo/Amtrak Timeout, SBB 403, SNCF 401.
+
+**Die DB blockt hart:** `int.bahn.de`, `www.bahn.de` und die vendo-Hosts
+antworten alle mit 403 `OPS_BLOCKED`. Das ist eine serverseitige Sperre, kein
+Header-Problem - nicht weiter versuchen, ohne dass sich dort etwas ändert.
+
+Weiterhin offen bleibt der **Preis** für Bahn (und Hotel). DB-Wrapper regelmässig neu
 prüfen: kämen sie zurück, gäbe es dort sogar Sparpreise.
 
 ## Roadmap-Ideen (nicht in Arbeit, nur notiert)

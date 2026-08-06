@@ -158,5 +158,44 @@ stubFetch({ fares: [{ outbound: { flightNumber: 'FR132', price: { value: 53.36 }
   report(resp.status === 200, 'ryanair airports works without TRAVELPAYOUTS_TOKEN');
 }
 
+// ---- FlixBus passthrough -------------------------------------------------
+
+stubFetch([{ name: 'Berlin', legacy_id: 88, id: '40d8f682-8646-11e6-9066-549f350fcb0c' }]);
+{
+  const { resp, body, last } = await call('/flixbus/cities?q=Berlin&lang=de');
+  report(resp.status === 200 && body[0].id.startsWith('40d8f682')
+    && last.url.startsWith('https://global.api.flixbus.com/search/autocomplete/cities')
+    && last.init.headers['X-API-Authentication'] === '3vJKYJVSDF9ZLcTAKX4V',
+    'flixbus cities forwards q and the public API header', last?.url);
+}
+
+stubFetch({ trips: [{ results: { 'uid-1': { status: 'available', price: { total: 21.48 } } } }] });
+{
+  const { resp, body, last } = await call(
+    '/flixbus/search?from_city_id=40d8f682-8646-11e6-9066-549f350fcb0c'
+    + '&to_city_id=40d901a5-8646-11e6-9066-549f350fcb0c&departure_date=15.09.2026'
+    + '&currency=EUR&locale=de&search_by=cities');
+  const params = new URL(last.url).searchParams;
+  report(resp.status === 200 && body.trips.length === 1
+    && params.get('departure_date') === '15.09.2026'
+    && params.get('search_by') === 'cities',
+    'flixbus search forwards the routing params', last?.url);
+}
+
+{
+  const { last } = await call('/flixbus/cities?q=Berlin&evil=1');
+  report(!new URL(last.url).searchParams.has('evil'), 'flixbus drops non-whitelisted params', last?.url);
+}
+
+{
+  const { resp } = await call('/flixbus/search?from_city_id=a&to_city_id=b');
+  report(resp.status === 400, 'flixbus search without a date -> 400');
+}
+
+{
+  const { resp } = await call('/flixbus/nope?q=x');
+  report(resp.status === 404, 'unknown /flixbus/* endpoint -> 404');
+}
+
 globalThis.fetch = realFetch;
 if (failures) process.exitCode = 1;
