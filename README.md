@@ -122,20 +122,17 @@ auf einem Dashboard die besten aktuellen Optionen pro Strecke zeigt.
 > Bis Version vom 06.08.2026 trugen diese Beispielangebote echte
 > Anbieternamen wie "DB Navigator" - das war irreführend und ist behoben.
 
-> **Stand v1:** Flug läuft auf **echten, aktuell beobachteten Preisen über
-> die Travelpayouts (Aviasales) Data API**, sobald `TRAVELPAYOUTS_TOKEN`
-> gesetzt ist (siehe "Travelpayouts einrichten" unten - kostenloses
-> Selfservice-Konto, kein Vertrag). Amadeus wird als zweite echte Quelle
-> weiterhin unterstützt, aber nur für Enterprise-Zugänge - die kostenlose
-> Amadeus-Self-Service-API wurde im Juli 2026 abgeschaltet. Ohne eine dieser
-> beiden Zugangsdaten läuft der Flug-Modus auf **Mock-Providern** (siehe
-> "Warum Mock-Daten?"). **Bahn und Bus** brauchen dagegen gar keine
-> Zugangsdaten mehr: sie kommen über `providers/transitous.py` aus echten
-> Fahrplandaten - dafür ohne Preis. Nur **Hotel** ist noch komplett
-> Beispieldaten. Die komplette Pipeline (Einstellungen, Ranking,
-> Empfehlungen, Alerts, Dashboard, Cronjob) funktioniert so oder so
-> Ende-zu-Ende. Nächster Schritt: Preise für Bahn/Bus und eine echte
-> Hotel-Quelle (Roadmap unten).
+> **Stand 06.08.2026:** Für **Flug** und **Bus** liefert die App echte,
+> buchbare Preise, ganz ohne Zugangsdaten - Ryanair und Skiplagged für Flüge,
+> FlixBus für Busse. Ein kostenloser `TRAVELPAYOUTS_TOKEN` erweitert die
+> Flugsuche zusätzlich (siehe "Travelpayouts einrichten"); Amadeus wird für
+> Enterprise-Zugänge weiter unterstützt, die kostenlose Self-Service-Stufe
+> wurde im Juli 2026 abgeschaltet. **Bahn** kommt über Transitous aus echten
+> Fahrplandaten - dafür ohne Preis. Nur **Hotel** hat keine freie Quelle.
+>
+> **Beispieldaten sind standardmäßig aus.** Findet keine echte Quelle etwas,
+> bleibt die Liste leer und nennt den Grund - statt drei erfundene Preise
+> anzuzeigen, die wie eine Antwort aussehen.
 
 ## Was der Bot kann
 

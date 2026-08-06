@@ -545,6 +545,27 @@ dort etwas ändert.
 Weiterhin offen bleibt der **Preis** für Bahn (und Hotel). DB-Wrapper regelmässig neu
 prüfen: kämen sie zurück, gäbe es dort sogar Sparpreise.
 
+## Was diese App kann, das die grossen Portale nicht koennen
+
+Der Vorsprung liegt nicht in der Preisabdeckung - dort gewinnt Skyscanner mit
+bezahlten GDS-Zugaengen. Er liegt in dem, was ein *persoenliches* Werkzeug
+darf und ein Portal nicht:
+
+- **Modi gegeneinander in einer Liste.** Flug, Bahn und Bus nach denselben
+  Kriterien gerankt. Jedes Portal verkauft einen Modus und rankt entsprechend.
+- **`mixed_return`: Hin- und Rueckweg unabhaengig.** Hin fliegen, zurueck Bus.
+  Zwei Fallen dabei, beide waren zuerst falsch: die Rueckfahrt muss
+  *Ziel -> Start* gesucht werden, und sie liegt auf dem Rueckreisedatum, das
+  die normalen Pools (aus dem Hinreise-Fenster gebaut) nicht abdecken. Siehe
+  `legsFor()` in app.js.
+- **Umkreis fuer Start *und* Ziel**, Flughaefen wie Bahnhoefe. Fuer Bahnhoefe
+  gibt es bewusst keine Koordinatentabelle: die Flughafentabelle schlaegt nur
+  Kandidaten vor, aufgeloest wird ueber Transitous (echte Haltestelle, echte
+  Koordinaten), gemessen wird an denen. Eine gebastelte Tabelle haette den
+  angezeigten Umweg um zig Kilometer danebengelegt.
+- **Deal-Feeds** beantworten die Frage, die keine Preis-API kann: *wo ist
+  gerade etwas absurd billig*.
+
 ## Roadmap-Ideen (nicht in Arbeit, nur notiert)
 
 - Bahn/Bus-**Preise** (Fahrpläne laufen seit 06.08.2026 echt über

@@ -132,6 +132,32 @@ jobs:
                 first["price"]["value"], first["price"]["currencyCode"])
           PY
 
+          echo "=== /skiplagged + /deals ==="
+          python3 - "$BASE" <<'PY'
+          import json, sys, urllib.parse, urllib.request
+
+          base = sys.argv[1]
+
+          def get(path):
+              req = urllib.request.Request(f"{base}{path}",
+                                           headers={"User-Agent": "HackYourTrip-SmokeTest/1.0"})
+              with urllib.request.urlopen(req, timeout=45) as resp:
+                  return json.load(resp)
+
+          q = urllib.parse.urlencode({"from": "HAM", "to": "LYS", "depart": "2026-09-15"})
+          data = get(f"/skiplagged?{q}")
+          print("Skiplagged Verbindungen:", len(data.get("depart") or []))
+          assert data.get("depart"), "Skiplagged lieferte keine Verbindungen"
+
+          posts = get("/deals").get("posts") or []
+          print("Deal-Beitraege:", len(posts))
+          assert posts, "keine Deal-Beitraege"
+          print("erster:", posts[0]["title"][:90])
+          # The feeds double-escape their HTML; unescaped entities reaching the
+          # page would be visible gibberish.
+          assert "&lt;" not in posts[0]["title"] and "&amp;" not in posts[0]["title"]
+          PY
+
           # Print the body, not just the status: 501 means "no AI key set"
           # (fine, the feature is optional) but 502 carries the provider's
           # actual reason - which is the only thing that makes it fixable.
