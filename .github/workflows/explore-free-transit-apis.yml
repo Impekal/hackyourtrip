@@ -1,0 +1,82 @@
+name: Explore free transit APIs (temporary)
+
+# Research: are there genuinely free, registration-free APIs that could
+# replace the invented train/bus prices? Candidates below are all
+# community-run wrappers or open endpoints that claim to need no API key.
+# The dev sandbox has no internet, a runner does. Delete once evaluated.
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  explore:
+    runs-on: ubuntu-latest
+    steps:
+      - name: "DB: v6.db.transport.rest - station lookup"
+        continue-on-error: true
+        run: |
+          curl -sS --max-time 30 "https://v6.db.transport.rest/locations?query=Berlin%20Hbf&results=3" \
+            | python3 -c "import json,sys; d=json.load(sys.stdin); print(json.dumps([{k:v for k,v in x.items() if k in ('type','id','name')} for x in d], ensure_ascii=False, indent=1))"
+
+      - name: "DB: v6.db.transport.rest - journeys WITH PRICES (the decisive test)"
+        continue-on-error: true
+        run: |
+          FROM=$(curl -sS --max-time 30 "https://v6.db.transport.rest/locations?query=Berlin%20Hbf&results=1" | python3 -c "import json,sys; print(json.load(sys.stdin)[0]['id'])")
+          TO=$(curl -sS --max-time 30 "https://v6.db.transport.rest/locations?query=M%C3%BCnchen%20Hbf&results=1" | python3 -c "import json,sys; print(json.load(sys.stdin)[0]['id'])")
+          WHEN=$(date -u -d '+21 days 09:00' +%Y-%m-%dT%H:%M:%S%z)
+          echo "from=$FROM to=$TO when=$WHEN"
+          curl -sS --max-time 45 --get "https://v6.db.transport.rest/journeys" \
+            --data-urlencode "from=$FROM" --data-urlencode "to=$TO" \
+            --data-urlencode "departure=$WHEN" --data-urlencode "results=6" \
+            --data-urlencode "tickets=true" --data-urlencode "language=de" \
+            > journeys.json
+          python3 - <<'EOF'
+          import json
+          d = json.load(open('journeys.json'))
+          js = d.get('journeys', [])
+          print('JOURNEYS:', len(js))
+          for j in js[:6]:
+              legs = j.get('legs', [])
+              lines = [l.get('line', {}).get('name') for l in legs if l.get('line')]
+              print(' price=', j.get('price'), '| changes=', max(len(legs) - 1, 0),
+                    '| lines=', lines,
+                    '| dep=', legs[0].get('departure') if legs else None)
+          print('PRICE FIELD PRESENT ON ANY:', any(j.get('price') for j in js))
+          EOF
+
+      - name: "Transitous (open journey planner, no key)"
+        continue-on-error: true
+        run: |
+          curl -sS --max-time 30 "https://api.transitous.org/api/v1/geocode?text=Berlin%20Hbf" | head -c 600
+          echo
+
+      - name: "FlixBus community wrapper"
+        continue-on-error: true
+        run: |
+          curl -sS --max-time 20 -o /dev/null -w 'flixbus.transport.rest HTTP:%{http_code}\n' https://flixbus.transport.rest/ || true
+          curl -sS --max-time 20 -o /dev/null -w 'v1.flixbus.transport.rest HTTP:%{http_code}\n' https://v1.flixbus.transport.rest/ || true
+
+      - name: "DB alternative: db-vendo / bahn.de public search endpoint"
+        continue-on-error: true
+        run: |
+          curl -sS --max-time 25 -o /dev/null -w 'v5.db.transport.rest HTTP:%{http_code}\n' https://v5.db.transport.rest/ || true
+          curl -sS --max-time 25 -o /dev/null -w 'vendo HTTP:%{http_code}\n' https://vendo-prof-db.dbrail.de/ || true
+
+      - name: "Hotels: any free no-key price source?"
+        continue-on-error: true
+        run: |
+          for u in "https://api.opentripmap.com/0.1/en/places/geoname?name=Berlin" \
+                   "https://nominatim.openstreetmap.org/search?q=hotel+berlin&format=json&limit=2"; do
+            code=$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' -H 'User-Agent: hackyourtrip-research' "$u" || echo 000)
+            echo "$code  $u"
+          done
+
+      - name: "Flythisweekend erreichbar?"
+        continue-on-error: true
+        run: |
+          curl -sS --max-time 25 -o /dev/null -L -w 'flythisweekend.com/de/ HTTP:%{http_code}\n' \
+            -H 'User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/126 Safari/537.36' \
+            "https://flythisweekend.com/de/" || true
+          curl -sS --max-time 25 -o /dev/null -L -w 'opodo.de HTTP:%{http_code}\n' \
+            -H 'User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/126 Safari/537.36' \
+            "https://www.opodo.de/" || true
