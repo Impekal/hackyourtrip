@@ -200,10 +200,31 @@ auf einem Dashboard die besten aktuellen Optionen pro Strecke zeigt.
   client-seitiges Aufsummieren nötig); die Mock-Provider bilden das mit einer
   synthetisierten Rückreise nach demselben Prinzip nach. Reine Hotel-Modi
   brauchen das nicht (Checkin+Nächte bilden die Aufenthaltsdauer schon ab).
-- **Sortierung frei wählbar:** bestes Verhältnis, Preis aufsteigend, Preis
-  absteigend, Dauer, oder Präzision (`exact_date` - Angebote am exakt
-  gewünschten Datum zuerst, dann die aus dem Flex-Fenster, Preis als
-  Tie-Breaker).
+- **Drei Ergebnis-Abschnitte bei Hin+Rück:** „Nur Hinfahrt", „Nur Rückfahrt"
+  und „Hin + Zurück" - jeder mit eigener Liste und eigener Sortierung. Die
+  Kombi-Liste enthält beides nebeneinander: echte Hin-/Rückflug-Tickets (ein
+  Preis, ein Ticket) und aus zwei Einzelfahrten zusammengesetzte Reisen.
+  Genau daran hängt der Spareffekt - zwei getrennt gebuchte Einzelfahrten
+  sind regelmäßig günstiger als das Rückflugticket derselben Airline, aber
+  nur sichtbar, wenn man die drei Zahlen direkt vergleichen kann. Eine
+  einzige gemischte Liste hat das nie gezeigt.
+  Beim Zusammensetzen wird jede Hinfahrt mit der günstigsten Rückfahrt *pro
+  Verkehrsmittel* gepaart (jede gegen jede wären Tausende fast identischer
+  Zeilen ohne zusätzliche Erkenntnis), und eine Rückfahrt, die vor der
+  Hinfahrt startet, fällt raus.
+- **Sortierung frei wählbar** - und zwar *an den Ergebnissen*, nicht im
+  Suchformular: bestes Verhältnis, Preis aufsteigend, Preis absteigend,
+  Dauer, oder Präzision (`exact_date` - Angebote am exakt gewünschten Datum
+  zuerst, dann die aus dem Flex-Fenster, Preis als Tie-Breaker). Umsortieren
+  und der Wechsel zwischen den drei Abschnitten laufen komplett auf den schon
+  geladenen Angeboten: keine einzige neue Anbieter-Abfrage, kein Warten. Als
+  Suchfeld hatte jede Umsortierung eine komplette neue Runde bei allen
+  Quellen gekostet.
+  Preislose Fahrplan-Verbindungen sortieren in allen Preis-Reihenfolgen hinter
+  jedes bepreiste Angebot (ihre 0 ist ein Platzhalter, kein Preis) - außer
+  bei „Dauer", denn die Dauer, die sie mitbringen, ist echt.
+- **Maximale Reisezeit gilt pro Strecke,** nicht für die Summe: 5h hin und 5h
+  zurück ist keine „10h-Reise", die ein 8h-Limit ausblenden dürfte.
 - **Deals-Filter:** entweder alle Angebote oder nur die, die wirklich nach
   einem Deal aussehen (`deals_only`). Als Deal gilt: von der Preishistorie
   als Preisverfall/Fehlerpreis markiert - oder, solange keine Historie

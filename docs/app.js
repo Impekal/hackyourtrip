@@ -4,7 +4,7 @@
 // guessing: if this doesn't match, the browser is running a cached old
 // app.js and any "the fix didn't work" report is about the old file. Bump
 // together with the ?v= in index.html.
-const BUILD_STAMP = '2026-08-06-10';
+const BUILD_STAMP = '2026-08-06-11';
 document.getElementById('buildStamp').textContent = BUILD_STAMP;
 
 /* =========================================================================
@@ -1430,8 +1430,84 @@ const COMBO_TRANSPORT_MODE = { flight_hotel: 'flight', train_hotel: 'train', bus
 const MIXED_RETURN_MODES = ['flight', 'train', 'bus'];
 const OR_COMBO_MODES = { train_or_bus: ['train', 'bus'], flight_or_train: ['flight', 'train'], flight_or_bus: ['flight', 'bus'] };
 
+// A round trip is split into three independently sorted lists - "Nur
+// Hinfahrt", "Nur Rückfahrt", "Hin + Zurück". Booking the two directions
+// separately is regularly cheaper than any round-trip fare, but only if you
+// can see both halves next to the package, which one merged list never
+// showed.
+//
+// mixed_return builds two-leg options itself; for the single-direction
+// sections it has to be broken back down into plain one-way modes.
+function sectionModes(modes) {
+  const out = [];
+  for (const m of modes) {
+    const expanded = m === 'mixed_return' ? MIXED_RETURN_MODES : [m];
+    for (const e of expanded) if (!out.includes(e)) out.push(e);
+  }
+  return out;
+}
+
+// Which raw offer pools a set of tab modes needs fetched.
+function baseModesFor(modes) {
+  const need = [];
+  const add = (m) => { if (!need.includes(m)) need.push(m); };
+  for (const m of modes) {
+    if (['flight', 'train', 'bus', 'hotel'].includes(m)) add(m);
+    else if (COMBO_TRANSPORT_MODE[m]) { add(COMBO_TRANSPORT_MODE[m]); add('hotel'); }
+    else if (OR_COMBO_MODES[m]) OR_COMBO_MODES[m].forEach(add);
+  }
+  return need;
+}
+
+// Two transport legs in one option (out + back) - as opposed to a single
+// round-trip ticket, or a transport+hotel combo. Drives both the pairing
+// below and the "· zurück ..." line in the results.
+function returnLeg(option) {
+  if (option.offers.length !== 2) return null;
+  const [a, b] = option.offers;
+  const transport = m => ['flight', 'train', 'bus'].includes(m);
+  return transport(a.mode) && transport(b.mode) ? b : null;
+}
+
+// Pair each outbound with the cheapest return *per mode*, so "hin fliegen,
+// zurück Bus" competes with "hin Bus, zurück fliegen". Every outbound x
+// every return would be thousands of near-identical rows for no extra
+// insight - the cheapest return per mode is the one that can win.
+function pairLegs(outbound, inbound) {
+  const singles = arr => arr.filter(c => c.offers.length === 1);
+  const bestPerMode = {};
+  for (const b of singles(inbound)) {
+    const cur = bestPerMode[b.mode];
+    // Among priced returns the cheapest wins. A mode that has no priced
+    // return at all still gets one representative, so a timetable-only mode
+    // (Bahn) isn't simply missing from this section.
+    if (!cur) { bestPerMode[b.mode] = b; continue; }
+    if (cur.hasUnknownPrice && !b.hasUnknownPrice) { bestPerMode[b.mode] = b; continue; }
+    if (!b.hasUnknownPrice && !cur.hasUnknownPrice && b.price < cur.price) bestPerMode[b.mode] = b;
+  }
+  const returns = Object.values(bestPerMode);
+  const pairs = [];
+  for (const o of singles(outbound)) {
+    for (const b of returns) {
+      // A return that leaves before the outbound does is not a trip.
+      if (b.offers[0].depart <= o.offers[0].depart) continue;
+      const offers = [o.offers[0], b.offers[0]];
+      pairs.push({
+        mode: o.mode,
+        offers,
+        price: round2(o.price + b.price),
+        durationHours: round2(o.durationHours + b.durationHours),
+        hasUnknownPrice: offers.some(x => x.priceKnown === false),
+      });
+    }
+  }
+  return pairs;
+}
+
 async function runSearch(route) {
-  const pools = {};
+  // Keyed by route variant *and* mode: the outbound, the return and the
+  // round-trip search are three different queries against the same sources.
+  const poolCache = {};
   let usedRealFlightData = false;
   // Why flights fell back to example data, in the user's words - empty when
   // they didn't fall back at all.
@@ -1444,35 +1520,39 @@ async function runSearch(route) {
   // plus the reason.
   const allowMock = Boolean(route.showMockData);
   const mockFor = { flight: mockFlightOffers, train: mockTrainOffers, bus: mockBusOffers, hotel: mockHotelOffers };
-  const fallback = (mode) => (allowMock ? mockFor[mode](route) : []);
+  const fallback = (variant, mode) => (allowMock ? mockFor[mode](variant) : []);
 
-  async function pool(mode) {
-    if (pools[mode]) return pools[mode];
+  const variantKey = (v) => `${v.origin}>${v.destination}|${isoDay(v.departFrom)}..${isoDay(v.departUntil)}`
+                          + `|${v.returnDate ? isoDay(v.returnDate) : '-'}`;
+
+  async function pool(variant, mode) {
+    const key = `${variantKey(variant)}|${mode}`;
+    if (poolCache[key]) return poolCache[key];
     if (mode === 'flight') {
-      const real = await fetchFlightOffersWithNeighbours(route);
+      const real = await fetchFlightOffersWithNeighbours(variant);
       if (real && real.length) {
-        pools[mode] = real;
+        poolCache[key] = real;
         usedRealFlightData = true;
       } else {
         flightFallbackReason = !PROXY_URL
           ? 'Kein Proxy konfiguriert'
           : (lastProxyError || 'Für diese Strecke und diesen Zeitraum sind dort keine Preise hinterlegt');
-        pools[mode] = fallback('flight');
+        poolCache[key] = fallback(variant, 'flight');
       }
     } else if (mode === 'train' || mode === 'bus') {
       // FlixBus for real prices, Transitous for everything it doesn't run,
       // plus neighbouring stations when the user asked for them. Real
       // timetables without prices still beat invented prices; example data
       // only appears when explicitly switched on.
-      const merged = await fetchGroundOffersWithNeighbours(route, mode);
-      pools[mode] = merged.length ? merged : fallback(mode);
+      const merged = await fetchGroundOffersWithNeighbours(variant, mode);
+      poolCache[key] = merged.length ? merged : fallback(variant, mode);
     } else {
       // No free hotel source exists at all, so this mode is empty unless
       // example data is switched on - the provider links below are the
       // honest answer for hotels.
-      pools[mode] = fallback('hotel');
+      poolCache[key] = fallback(variant, 'hotel');
     }
-    return pools[mode];
+    return poolCache[key];
   }
 
   // Mirrors TripOption.has_unknown_price: one price-less leg makes the whole
@@ -1505,107 +1585,172 @@ async function runSearch(route) {
     return legs;
   }
 
-  let candidates = [];
-  for (const mode of route.modes) {
-    if (['flight', 'train', 'bus', 'hotel'].includes(mode)) {
-      for (const offer of await pool(mode)) candidates.push(candidate(mode, [offer], offer.price, offer.durationHours));
-    } else if (COMBO_TRANSPORT_MODE[mode]) {
-      const tMode = COMBO_TRANSPORT_MODE[mode];
-      for (const combo of buildCombos(await pool(tMode), await pool('hotel'))) {
-        candidates.push(candidate(mode, [combo.transport, combo.hotel], combo.price, combo.transport.durationHours));
-      }
-    } else if (mode === 'mixed_return') {
-      // Cheapest way out and cheapest way back, chosen independently - the
-      // combination no portal sells, because each portal sells one mode.
-      //
-      // Two things this must get right, and both were wrong at first:
-      // the return leg travels *destination -> origin*, not the same
-      // direction again; and it departs on the return date, which the normal
-      // pools (built from the outbound window) never cover.
-      if (route.returnDate) {
-        const outward = { ...route, departFrom: route.departFrom, departUntil: route.departFrom };
-        const homeward = {
-          ...route, origin: route.destination, destination: route.origin,
-          departFrom: route.returnDate, departUntil: route.returnDate,
-          roundTrip: false, returnDate: null,
-        };
-        const [out, back] = await Promise.all([legsFor(outward), legsFor(homeward)]);
-        for (const o of out) {
-          // Pair each outbound with the cheapest return *per mode*, so
-          // "fly out, bus back" competes with "bus out, fly back".
-          const cheapestPerMode = {};
-          for (const b of back) {
-            if (!cheapestPerMode[b.mode] || b.price < cheapestPerMode[b.mode].price) {
-              cheapestPerMode[b.mode] = b;
-            }
-          }
-          for (const b of Object.values(cheapestPerMode)) {
-            candidates.push(candidate(mode, [o, b], round2(o.price + b.price),
-                                       round2(o.durationHours + b.durationHours)));
+  // Everything a section needs to rank and explain itself later: the raw
+  // offer pools stay attached because the "1h später spart X" hint compares
+  // against them at render time, not here.
+  async function buildCandidates(variant, modes) {
+    const pools = {};
+    for (const m of baseModesFor(modes)) pools[m] = await pool(variant, m);
+    const candidates = [];
+    for (const mode of modes) {
+      if (['flight', 'train', 'bus', 'hotel'].includes(mode)) {
+        for (const offer of pools[mode]) candidates.push(candidate(mode, [offer], offer.price, offer.durationHours));
+      } else if (COMBO_TRANSPORT_MODE[mode]) {
+        for (const combo of buildCombos(pools[COMBO_TRANSPORT_MODE[mode]], pools.hotel)) {
+          candidates.push(candidate(mode, [combo.transport, combo.hotel], combo.price, combo.transport.durationHours));
+        }
+      } else if (mode === 'mixed_return') {
+        // Cheapest way out and cheapest way back, chosen independently - the
+        // combination no portal sells, because each portal sells one mode.
+        //
+        // Two things this must get right, and both were wrong at first:
+        // the return leg travels *destination -> origin*, not the same
+        // direction again; and it departs on the return date, which the normal
+        // pools (built from the outbound window) never cover.
+        if (variant.returnDate) {
+          const outward = { ...variant, departFrom: variant.departFrom, departUntil: variant.departFrom };
+          const homeward = {
+            ...variant, origin: variant.destination, destination: variant.origin,
+            departFrom: variant.returnDate, departUntil: variant.returnDate,
+            roundTrip: false, returnDate: null,
+          };
+          const [out, back] = await Promise.all([legsFor(outward), legsFor(homeward)]);
+          const asSingles = legs => legs.map(o => candidate(o.mode, [o], o.price, o.durationHours));
+          for (const pair of pairLegs(asSingles(out), asSingles(back))) {
+            candidates.push(candidate(mode, pair.offers, pair.price, pair.durationHours));
           }
         }
-      }
-    } else if (OR_COMBO_MODES[mode]) {
-      const [modeA, modeB] = OR_COMBO_MODES[mode];
-      for (const offer of [...(await pool(modeA)), ...(await pool(modeB))]) {
-        candidates.push(candidate(mode, [offer], offer.price, offer.durationHours));
+      } else if (OR_COMBO_MODES[mode]) {
+        const [modeA, modeB] = OR_COMBO_MODES[mode];
+        for (const offer of [...pools[modeA], ...pools[modeB]]) {
+          candidates.push(candidate(mode, [offer], offer.price, offer.durationHours));
+        }
       }
     }
+    return { candidates, pools };
   }
 
-  candidates = candidates.filter(c => {
-    // An unknown price can't blow a budget. Dropping the option would hide a
-    // real connection over a number nobody has.
-    if (route.budget != null && !c.hasUnknownPrice && c.price > route.budget) return false;
-    if (route.maxDuration != null && c.durationHours > route.maxDuration && c.mode !== 'hotel') return false;
-    if (route.lowCost === 'exclude' && c.offers.some(o => o.isLowCost)) return false;
-    if (route.lowCost === 'only') {
-      // Only transport legs can be low-cost; a hotel leg in a combo must
-      // not disqualify the option.
-      const transport = c.offers.filter(o => ['flight', 'train', 'bus'].includes(o.mode));
-      if (!transport.length || !transport.every(o => o.isLowCost)) return false;
-    }
-    for (const o of c.offers) {
-      if (o.mode === 'hotel' && !meetsHotelPrefs(o, route.hotelPrefs)) return false;
-      if (['flight', 'train', 'bus'].includes(o.mode) && !meetsTransportPrefs(o, route.transportPrefs)) return false;
-    }
-    return true;
-  });
+  function applyFilters(candidates) {
+    return candidates.filter(c => {
+      // An unknown price can't blow a budget. Dropping the option would hide a
+      // real connection over a number nobody has.
+      if (route.budget != null && !c.hasUnknownPrice && c.price > route.budget) return false;
+      if (route.maxDuration != null && c.mode !== 'hotel') {
+        // Per leg, not the sum: 5h out and 5h back is not a "10h trip" that a
+        // 8h limit should hide - and with the "Hin + Zurück" section that
+        // would now silently empty the whole list.
+        const legs = c.offers.filter(o => o.mode !== 'hotel').map(o => o.durationHours);
+        if (Math.max(...(legs.length ? legs : [c.durationHours])) > route.maxDuration) return false;
+      }
+      if (route.lowCost === 'exclude' && c.offers.some(o => o.isLowCost)) return false;
+      if (route.lowCost === 'only') {
+        // Only transport legs can be low-cost; a hotel leg in a combo must
+        // not disqualify the option.
+        const transport = c.offers.filter(o => ['flight', 'train', 'bus'].includes(o.mode));
+        if (!transport.length || !transport.every(o => o.isLowCost)) return false;
+      }
+      for (const o of c.offers) {
+        if (o.mode === 'hotel' && !meetsHotelPrefs(o, route.hotelPrefs)) return false;
+        if (['flight', 'train', 'bus'].includes(o.mode) && !meetsTransportPrefs(o, route.transportPrefs)) return false;
+      }
+      return true;
+    });
+  }
 
-  flagBelowMedian(candidates);
-  if (route.dealsOnly) candidates = candidates.filter(c => c.isBelowMedian);
+  // A finished, still-unsorted result list. Sorting deliberately happens
+  // later, at render time: it is a way of looking at these offers, not a
+  // search parameter, and re-sorting must never cost another round of API
+  // calls.
+  function makeSection(id, label, variant, built, note = '') {
+    let candidates = applyFilters(built.candidates);
+    flagBelowMedian(candidates);
+    if (route.dealsOnly) candidates = candidates.filter(c => c.isBelowMedian);
+    // Measured against this section's own dates - the return leg's "exact
+    // date" is the return date, not the outbound one.
+    for (const c of candidates) c.dateDeviation = dateDeviationDays(c, variant);
+    return { id, label, note, variant, candidates, pools: built.pools };
+  }
 
+  const isRoundTrip = Boolean(route.roundTrip && route.returnDate);
+  if (!isRoundTrip) {
+    const built = await buildCandidates(route, route.modes);
+    return {
+      sections: [makeSection('all', '', route, built)],
+      usedRealFlightData, flightFallbackReason,
+    };
+  }
+
+  const legModes = sectionModes(route.modes);
+  const outboundRoute = { ...route, roundTrip: false, returnDate: null };
+  const inboundRoute = {
+    ...route, origin: route.destination, destination: route.origin,
+    departFrom: route.returnDate, departUntil: route.returnDate,
+    roundTrip: false, returnDate: null,
+  };
+  const outBuilt = await buildCandidates(outboundRoute, legModes);
+  const backBuilt = await buildCandidates(inboundRoute, legModes);
+  // Searched as a round trip, this returns the airlines' own return fares
+  // (one ticket, one price). mixed_return pairs its legs itself.
+  const wholeBuilt = await buildCandidates(route, route.modes);
+  const combinedCandidates = route.modes.includes('mixed_return')
+    ? wholeBuilt.candidates
+    : [
+        ...wholeBuilt.candidates.filter(c => c.offers.some(o => o.returnDepart)),
+        ...pairLegs(applyFilters(outBuilt.candidates), applyFilters(backBuilt.candidates)),
+      ];
+
+  const sections = [
+    makeSection('outbound', 'Nur Hinfahrt', outboundRoute, outBuilt,
+      `Einzelpreise für ${route.origin} → ${route.destination} am ${fmtDay(route.departFrom)}.`),
+    makeSection('inbound', 'Nur Rückfahrt', inboundRoute, backBuilt,
+      `Einzelpreise für ${route.destination} → ${route.origin} am ${fmtDay(route.returnDate)}.`),
+    makeSection('combined', 'Hin + Zurück', route,
+      { candidates: combinedCandidates, pools: outBuilt.pools },
+      'Gesamtpreis für beide Richtungen: echte Hin-/Rückflug-Tickets und aus zwei Einzelfahrten zusammengesetzte Reisen. '
+      + 'Zwei Einzeltickets sind oft günstiger als ein Rückflugticket - vergleiche mit den beiden Reitern links.'),
+  ];
+  return { sections, usedRealFlightData, flightFallbackReason };
+}
+
+/* Sorting - runs on the already-fetched candidates, never triggers a search. */
+function sortCandidates(candidates, sortKey) {
   // Normalize against priced candidates only - a placeholder 0 would
   // otherwise become the price minimum and squash every real one.
   const priced = candidates.filter(c => !c.hasUnknownPrice);
-  const prices = (priced.length ? priced : candidates).map(c => c.price);
-  const durations = (priced.length ? priced : candidates).map(c => c.durationHours);
+  const basis = priced.length ? priced : candidates;
+  const prices = basis.map(c => c.price);
+  const durations = basis.map(c => c.durationHours);
   for (const c of candidates) {
-    if (route.priority === 'cheapest') c.score = c.price;
-    else if (route.priority === 'most_expensive') c.score = -c.price;  // sorted ascending, so negate
-    else if (route.priority === 'fastest') c.score = c.durationHours;
-    else if (route.priority === 'exact_date') {
+    if (sortKey === 'cheapest') c.score = c.price;
+    else if (sortKey === 'most_expensive') c.score = -c.price;  // sorted ascending, so negate
+    else if (sortKey === 'fastest') c.score = c.durationHours;
+    else if (sortKey === 'exact_date') {
       // Days outside the exactly requested window first; price breaks ties.
-      c.score = dateDeviationDays(c, route) * 100000 + c.price;
-    }
-    else {
+      c.score = (c.dateDeviation || 0) * 100000 + c.price;
+    } else {
       const discomfort = 1 - comfortScore(c);
       c.score = BEST_VALUE_PRICE_WEIGHT * normalize(c.price, prices)
               + BEST_VALUE_DURATION_WEIGHT * normalize(c.durationHours, durations)
               + BEST_VALUE_COMFORT_WEIGHT * discomfort;
     }
   }
-  // Price-less options sort behind every priced one whatever the priority
-  // is: their 0 is a placeholder, and letting it compete would park them at
-  // the very top of a "Preis aufsteigend" search as though they were free.
-  candidates.sort((a, b) => (a.hasUnknownPrice - b.hasUnknownPrice) || (a.score - b.score));
-  const top = candidates.slice(0, MAX_RESULTS_SHOWN);
+  // Price-less options sort behind every priced one in every price-based
+  // order: their 0 is a placeholder, and letting it compete would park them
+  // at the very top of a "Preis aufsteigend" list as though they were free.
+  // "Dauer" is the exception - there the number they carry is real.
+  const priceBased = sortKey !== 'fastest';
+  return [...candidates].sort((a, b) =>
+    (priceBased ? (a.hasUnknownPrice - b.hasUnknownPrice) : 0) || (a.score - b.score));
+}
 
+// Per-option hints. Runs on the handful of rows actually shown, so it is
+// redone after each re-sort instead of for hundreds of candidates upfront.
+async function addRecommendations(route, options, pools) {
   const rates = await getRatesPerEur();
-  for (const c of top) {
+  for (const c of options) {
     c.recommendations = [];
     const primary = c.offers[0];
-    const samePool = pools[primary.mode] || [];
+    const samePool = (pools && pools[primary.mode]) || [];
 
     if (c.hasUnknownPrice) {
       // Everything below is about money - savings hints, currency
@@ -1654,7 +1799,7 @@ async function runSearch(route) {
       }
     }
   }
-  return { options: top, usedRealFlightData, flightFallbackReason };
+  return options;
 }
 
 function fmtHM(date) { return date.toTimeString().slice(0, 5); }
@@ -1907,7 +2052,10 @@ function readRouteFromForm() {
     budget: numOrNull('budget'),
     currency: document.getElementById('currency').value,
     maxDuration: numOrNull('maxDuration'),
-    priority: document.getElementById('priority').value,
+    // Not a search input any more - the sort control lives at the results
+    // (#sortBy). Kept on the route object because the YAML snippet and the
+    // AI prompt still describe "how should this be ranked".
+    priority: document.getElementById('sortBy').value,
     checkedBags: Number(document.getElementById('checkedBags').value || 0),
     // null = "egal": no weight preference stated, distinct from 0 kg.
     checkedBagKg: document.getElementById('checkedBagKgAny').checked
@@ -2066,7 +2214,65 @@ function mockModeLabels(options) {
   return modes;
 }
 
-function renderResults(route, options, usedRealFlightData, flightFallbackReason) {
+/* =========================================================================
+ * Ergebnis-Ansicht.
+ *
+ * renderResults() läuft einmal pro Suche, renderActiveSection() bei jedem
+ * Sortier- oder Reiterwechsel - ohne erneute Anbieter-Abfrage. Deshalb hält
+ * `shownSearch` die vollständigen, unsortierten Kandidaten aller Abschnitte.
+ * ===================================================================== */
+const resultControlsEl = document.getElementById('resultControls');
+const legTabsEl = document.getElementById('legTabs');
+const sortByEl = document.getElementById('sortBy');
+// Everything a search produced, kept for re-sorting and section switching.
+let shownSearch = null;
+// What is on screen right now - the AI recommendation reasons about exactly
+// this list, so it follows the active section and sort order.
+let lastSearch = null;
+
+function renderResults(route, result) {
+  shownSearch = {
+    route,
+    sections: result.sections,
+    flightFallbackReason: result.flightFallbackReason,
+    // The whole trip is what was searched for, so that is what opens; the
+    // two single-direction lists are the comparison next to it.
+    sectionId: (result.sections.find(s => s.id === 'combined') || result.sections[0]).id,
+    dealsHtml: null,
+  };
+
+  const multi = result.sections.length > 1;
+  legTabsEl.hidden = !multi;
+  legTabsEl.innerHTML = !multi ? '' : result.sections.map(s => `
+    <button type="button" class="legtab${s.id === shownSearch.sectionId ? ' active' : ''}"
+            role="tab" data-section="${s.id}" aria-selected="${s.id === shownSearch.sectionId}">
+      ${s.label} <span class="count">(${s.candidates.length})</span>
+    </button>`).join('');
+  // Nothing found anywhere: a sort control over an empty list is noise.
+  resultControlsEl.hidden = !result.sections.some(s => s.candidates.length);
+  return renderActiveSection();
+}
+
+function renderActiveSection() {
+  const { route, sections, sectionId, flightFallbackReason } = shownSearch;
+  const section = sections.find(s => s.id === sectionId) || sections[0];
+  for (const btn of legTabsEl.querySelectorAll('.legtab')) {
+    const on = btn.dataset.section === section.id;
+    btn.classList.toggle('active', on);
+    btn.setAttribute('aria-selected', String(on));
+  }
+  const options = sortCandidates(section.candidates, sortByEl.value).slice(0, MAX_RESULTS_SHOWN);
+  // Keep the "dauerhaft überwachen"-snippet describing the ranking the user
+  // is actually looking at.
+  route.priority = sortByEl.value;
+  if (!trackBox.hidden) trackYaml.value = buildYamlSnippet(route);
+  return renderOptionList(route, section, options, flightFallbackReason);
+}
+
+async function renderOptionList(route, section, options, flightFallbackReason) {
+  await addRecommendations(route, options, section.pools);
+  // The AI recommendation reasons about what is actually on screen.
+  lastSearch = { route, options };
   const label = route.origin ? `${route.origin} → ${route.destination}` : route.destination;
   const mockCount = options.filter(isMockOption).length;
   const timetableCount = options.filter(o => o.hasUnknownPrice).length;
@@ -2080,7 +2286,16 @@ function renderResults(route, options, usedRealFlightData, flightFallbackReason)
   if (timetableCount) parts.push(`${timetableCount} echte Verbindungen ohne Preis`);
   if (mockCount) parts.push(`${mockCount} Beispieldaten`);
   const dealsLabel = route.dealsOnly ? ', nur Deals' : '';
-  searchMetaEl.textContent = `${options.length} Angebote für ${label} (${parts.join(', ')}${dealsLabel})`;
+  // The section, when there is more than one, is part of what the count
+  // means: "12 Angebote" for a round trip is meaningless without saying
+  // whether that is the outbound, the return, or both together.
+  const sectionLabel = section.label ? `${section.label}: ` : '';
+  // Say when the list is capped, instead of quietly reporting 40 where the
+  // section tab says 312.
+  const found = section.candidates.length;
+  const shown = found > options.length ? `${options.length} von ${found}` : `${options.length}`;
+  searchMetaEl.textContent = `${sectionLabel}${shown} Angebote für ${label} (${parts.join(', ')}${dealsLabel})`;
+  const sectionNote = section.note ? `<p class="section-note">${section.note}</p>` : '';
 
   if (!options.length) {
     // With example data off (the default) this is the normal outcome for a
@@ -2093,6 +2308,7 @@ function renderResults(route, options, usedRealFlightData, flightFallbackReason)
           ? `Keine echten Preise gefunden. ${flightFallbackReason}.`
           : 'Keine Angebote in diesem Budget/Zeitrahmen/Filter gefunden - Filter lockern und erneut suchen.');
     searchResultsEl.innerHTML = `
+      ${sectionNote}
       <p class="empty">${why}</p>
       <p class="empty">Es werden nur echte Daten angezeigt. Über <strong>Datenquelle → „Auch Beispieldaten"</strong>
       lassen sich erfundene Preise einblenden, um die Sortier- und Filterlogik zu testen - buchbar ist davon nichts.</p>
@@ -2123,6 +2339,7 @@ function renderResults(route, options, usedRealFlightData, flightFallbackReason)
     erfundenen. Zeiten, Linie und Umstiege stimmen - den Preis unten beim Anbieter prüfen.</p>` : '';
 
   searchResultsEl.innerHTML = `
+    ${sectionNote}
     ${warning}
     ${timetableNote}
     <div class="route">
@@ -2135,6 +2352,9 @@ function renderResults(route, options, usedRealFlightData, flightFallbackReason)
           ? '<span class="price price-unknown">Preis unbekannt</span>'
           : `<span class="price mono">${opt.price.toFixed(2)} ${route.currency}</span>`;
         const line = opt.offers.map(o => o.lineLabel).filter(Boolean).join(', ');
+        // Two transport legs = an option assembled from an outbound and a
+        // return, which has to say so rather than show only the outbound.
+        const back = returnLeg(opt);
         // Never let an offer from a neighbouring airport look like one from
         // the airport that was actually searched for.
         const detour = opt.offers.find(o => o.detourKm);
@@ -2151,8 +2371,8 @@ function renderResults(route, options, usedRealFlightData, flightFallbackReason)
             ${opt.isBelowMedian ? '<span class="badge good">Deal</span>' : ''}
           </div>
           <span class="subline mono">${opt.mode}${line ? ` · ${line}` : ''} · ${fmtShort(opt.offers[0].depart)}${
-            opt.mode === 'mixed_return' && opt.offers[1]
-              ? ` (${opt.offers[0].mode}) · zurück ${fmtShort(opt.offers[1].depart)} (${opt.offers[1].mode})`
+            back
+              ? ` (${opt.offers[0].mode}) · zurück ${fmtShort(back.depart)} (${back.mode})`
               : (opt.offers[0].returnDepart ? ` · zurück ${fmtShort(opt.offers[0].returnDepart)}` : '')
           } · ${opt.durationHours}h · ${opt.offers.map(o => bookingSiteHtml(o.bookingSite, o.url)).join(', ')}</span>
           <div class="chips">${opt.offers.flatMap(offerChips).map(c => `<span class="chip">${c}</span>`).join('')}</div>
@@ -2167,16 +2387,35 @@ function renderResults(route, options, usedRealFlightData, flightFallbackReason)
 }
 
 // Deals load after the results are already on screen: they are a bonus, and
-// nobody should wait for three RSS feeds before seeing their flights.
+// nobody should wait for three RSS feeds before seeing their flights. The
+// result is cached per search, so re-sorting or switching between Hin- and
+// Rückfahrt redraws the list without hitting the feeds again.
 async function renderDealsInto(route) {
   const target = document.getElementById('dealsPanel');
   if (!target) return;
+  if (shownSearch && shownSearch.dealsHtml !== null) {
+    target.innerHTML = shownSearch.dealsHtml;
+    return;
+  }
   try {
-    target.innerHTML = renderDeals(await fetchRelevantDeals(route));
+    const html = renderDeals(await fetchRelevantDeals(route));
+    if (shownSearch) shownSearch.dealsHtml = html;
+    // Guard against a re-render having replaced the node while we waited.
+    (document.getElementById('dealsPanel') || target).innerHTML = html;
   } catch (e) {
     target.innerHTML = ''; // deals are optional - never break the results
   }
 }
+
+// Sorting and section switching redraw the list from the candidates already
+// in memory - no provider is asked anything a second time.
+sortByEl.addEventListener('change', () => { if (shownSearch) renderActiveSection(); });
+legTabsEl.addEventListener('click', (ev) => {
+  const btn = ev.target.closest('.legtab');
+  if (!btn || !shownSearch) return;
+  shownSearch.sectionId = btn.dataset.section;
+  renderActiveSection();
+});
 
 /* =========================================================================
  * Deal and error-fare feeds. A price API answers "what does this route
@@ -2278,7 +2517,6 @@ ${HOTEL_AMENITY_REQUIREMENTS.map(([prefFlag, , yamlKey]) => `      ${yamlKey}: $
 const aiBox = document.getElementById('aiBox');
 const aiButton = document.getElementById('aiButton');
 const aiResultEl = document.getElementById('aiResult');
-let lastSearch = null;
 
 function buildAiPrompt(route, options) {
   const criteria = [
@@ -2357,12 +2595,13 @@ searchForm.addEventListener('submit', async (ev) => {
   aiBox.hidden = true;
   aiResultEl.hidden = true;
   aiResultEl.textContent = '';
-  const { options, usedRealFlightData, flightFallbackReason } = await runSearch(route);
-  renderResults(route, options, usedRealFlightData, flightFallbackReason);
-  lastSearch = { route, options };
+  resultControlsEl.hidden = true;
+  const result = await runSearch(route);
+  await renderResults(route, result);
   // Nothing to reason about without results, and no point offering it when
   // there's no proxy to reach Gemini through.
-  aiBox.hidden = !(PROXY_URL && options.length);
+  const total = result.sections.reduce((n, s) => n + s.candidates.length, 0);
+  aiBox.hidden = !(PROXY_URL && total);
   trackYaml.value = buildYamlSnippet(route);
   trackBox.hidden = false;
 });

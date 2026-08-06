@@ -136,7 +136,25 @@ Ergebnis) fällt alles graceful auf Mock-Daten zurück.
     der Preishistorie, kein Budget-Filter, keine Spar-Empfehlung, und beim
     Sortieren immer hinter allen bepreisten Optionen (sonst stünde eine
     unbekannte Verbindung bei "Preis aufsteigend" ganz oben, als wäre sie
-    gratis).
+    gratis). Einzige Ausnahme: bei Sortierung nach "Dauer" zählt die Dauer,
+    die diese Angebote mitbringen, und die ist echt.
+- **Sortierung ist Ansichtssache, keine Sucheingabe.** `#sortBy` und die
+  Abschnittsreiter (`#legTabs`) sitzen in `#resultControls`, außerhalb von
+  `#searchResults`, damit die Listener einen Neuaufbau der Liste überleben.
+  `runSearch()` liefert deshalb **unsortierte** Kandidaten je Abschnitt;
+  `sortCandidates()` + `addRecommendations()` laufen erst in
+  `renderActiveSection()`, auf den ~40 tatsächlich gezeigten Zeilen. Wer hier
+  wieder vorsortiert oder in `runSearch` abschneidet, macht jeden
+  Sortierwechsel wieder zu einer kompletten neuen Anbieter-Runde - genau das
+  war der Grund für den Umbau. `ui_sections.py` prüft das explizit über die
+  Zahl der abgesetzten Proxy-Requests.
+- **Hin+Rück liefert drei Abschnitte** (`outbound` / `inbound` / `combined`),
+  jeder mit eigenem Routen-Variant, eigenen Pools und eigenem
+  `dateDeviation`-Bezug (die „exakte" Datumsnähe der Rückfahrt misst gegen
+  das Rückreisedatum, nicht das Hinreisedatum). Voreingestellt ist
+  `combined` - das ist die Reise, nach der gesucht wurde. Der Pool-Cache in
+  `runSearch` ist deshalb nach Routen-Variante **und** Modus gekeyt: Hinweg,
+  Rückweg und Rundreise sind drei verschiedene Abfragen an dieselben Quellen.
 - **Beispieldaten sind Opt-in (`route.showMockData`), Voreinstellung aus.**
   Vorher füllten die Mock-Generatoren jede Lücke, und eine Suche ohne echte
   Treffer zeigte drei erfundene Preise statt einer ehrlichen Leermeldung -

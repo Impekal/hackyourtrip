@@ -75,6 +75,25 @@
   .modetab.active { color: var(--bg); background: var(--accent-dim); border-color: var(--accent-dim); }
   .modetab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
+  /* Ergebnis-Ansicht: Abschnittsreiter links, Sortierung rechts. Beides
+     wirkt rein auf die schon geladenen Angebote - keine neue Suche. */
+  .result-controls {
+    display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between;
+    gap: 0.75rem; margin-bottom: 0.9rem;
+  }
+  .legtabs { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+  .legtab {
+    appearance: none; cursor: pointer; font: inherit; font-size: 0.8rem; font-weight: 600;
+    color: var(--text-dim); background: var(--card); border: 1px solid var(--line);
+    border-radius: 999px; padding: 0.35rem 0.8rem;
+  }
+  .legtab.active { color: var(--bg); background: var(--accent-dim); border-color: var(--accent-dim); }
+  .legtab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .legtab .count { font-weight: 500; opacity: 0.75; }
+  .sort-field { display: flex; flex-direction: column; gap: 0.3rem; margin-left: auto; }
+  .sort-field select { font-size: 0.85rem; }
+  .section-note { color: var(--text-dim); font-size: 0.82rem; margin: 0 0 0.8rem; }
+
   form.search { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 1.25rem; margin-bottom: 1.5rem; }
   .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 0.9rem; }
   .field { display: flex; flex-direction: column; gap: 0.3rem; }
@@ -355,16 +374,10 @@
             <option value="mock">Auch Beispieldaten (nur zum Testen)</option>
           </select>
         </div>
-        <div class="field">
-          <label for="priority">Sortieren nach</label>
-          <select id="priority">
-            <option value="best_value" selected>Bestes Verhältnis</option>
-            <option value="cheapest">Preis aufsteigend</option>
-            <option value="most_expensive">Preis absteigend</option>
-            <option value="fastest">Dauer (schnellste zuerst)</option>
-            <option value="exact_date">Präzision (exaktes Datum zuerst)</option>
-          </select>
-        </div>
+        <!-- Sortiert wird bewusst NICHT hier, sondern erst an den Ergebnissen
+             (#resultControls): eine Sortierung ist eine Ansichtssache, keine
+             Sucheingabe. Vorher gewählt hieß sie: jede Umsortierung kostet
+             eine komplette neue Abfrage bei allen Anbietern. -->
         <div class="field" data-group="nightsGroup">
           <label for="minNights">Min. Nächte</label>
           <input type="number" id="minNights" min="0" value="2">
@@ -555,6 +568,24 @@
       <div id="aiResult" class="ai-result" hidden></div>
     </div>
 
+    <!-- Ansichts-Steuerung der Ergebnisse. Steht bewusst außerhalb von
+         #searchResults: die Liste darunter wird bei jedem Sortier- oder
+         Abschnittswechsel neu gezeichnet, dieser Block nicht - so bleiben
+         die Event-Listener und die Auswahl erhalten. -->
+    <div id="resultControls" class="result-controls" hidden>
+      <div class="legtabs" id="legTabs" hidden role="tablist" aria-label="Reiseabschnitt"></div>
+      <div class="sort-field">
+        <label for="sortBy">Sortieren nach</label>
+        <select id="sortBy">
+          <option value="best_value" selected>Bestes Verhältnis</option>
+          <option value="cheapest">Preis aufsteigend</option>
+          <option value="most_expensive">Preis absteigend</option>
+          <option value="fastest">Dauer (schnellste zuerst)</option>
+          <option value="exact_date">Präzision (exaktes Datum zuerst)</option>
+        </select>
+      </div>
+    </div>
+
     <div id="searchResults"></div>
 
     <div class="track-box" id="trackBox" hidden>
@@ -588,6 +619,6 @@
 <!-- The ?v= is deliberate: GitHub Pages lets browsers cache app.js, so a
      fix could ship and the visitor would keep running the old file. Bump
      this whenever app.js changes in a way users need to see. -->
-<script src="./app.js?v=2026-08-06-10"></script>
+<script src="./app.js?v=2026-08-06-11"></script>
 </body>
 </html>
