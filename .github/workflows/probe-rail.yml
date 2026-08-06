@@ -1,0 +1,95 @@
+# Temporary: rail retailers sell each other's tickets - does one of them
+# expose DB prices where DB itself blocks? Plus another hotel round.
+name: probe-rail
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Rail + hotel round 6
+        run: |
+          cat > probe.py <<'PY'
+          import json, urllib.parse, urllib.request
+
+          B = {"User-Agent": ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                              "(KHTML, like Gecko) Chrome/126.0 Safari/537.36"),
+               "Accept": "application/json, text/plain, */*",
+               "Accept-Language": "de-DE,de;q=0.9,en;q=0.8"}
+
+          def probe(label, url, headers=None, data=None, show=450):
+              h = dict(B); h.update(headers or {})
+              body = json.dumps(data).encode() if data is not None else None
+              if body is not None:
+                  h.setdefault("Content-Type", "application/json")
+              try:
+                  with urllib.request.urlopen(
+                          urllib.request.Request(url, data=body, headers=h), timeout=30) as r:
+                      t = r.read().decode("utf-8", "replace")
+                      print(f"[OK  {r.status}] {label} ({len(t)} B)")
+                      print("        ", t[:show].replace("\n", " "))
+                      return t
+              except urllib.error.HTTPError as e:
+                  print(f"[HTTP {e.code}] {label}  {e.read()[:180].decode('utf-8','replace')}")
+              except Exception as e:
+                  print(f"[FAIL   ] {label}  {type(e).__name__}: {e}")
+              return None
+
+          print("########## BAHN: Wiederverkaeufer quer durch Europa ##########")
+          probe("SNCF Connect places",
+                "https://www.sncf-connect.com/bff/api/v1/itineraries/places?searchTerm=Hamburg")
+          probe("SNCF Connect gateway",
+                "https://www.sncf-connect.com/bff/api/v1/itineraries",
+                data={"schedule": {"outward": {"date": "2026-09-15T08:00:00.000Z"}},
+                      "wishes": [{"mainConnection": {
+                          "origin": {"label": "Hamburg"}, "destination": {"label": "Muenchen"}}}]})
+          probe("B-Europe (SNCB, verkauft DB/TGV)",
+                "https://www.b-europe.com/api/v1/stations?q=Hamburg")
+          probe("Rail Europe stations",
+                "https://api.raileurope.com/v2/stations?q=Hamburg")
+          probe("Italo (NTV)",
+                "https://big.ntvspa.it/BIG/v7/Rest/BIGService.svc/GetLocations")
+          probe("Trenitalia solutions",
+                "https://www.lefrecce.it/Channels.Website.BFF.WEB/website/ticket/solutions?" +
+                urllib.parse.urlencode({"origin": "830008409", "destination": "830001700",
+                                         "arflag": "A", "adultNo": 1, "childNo": 0,
+                                         "direction": "A", "frecceOnly": "false",
+                                         "onlyRegional": "false",
+                                         "departureTime": "2026-09-15T08:00:00.000+02:00"}),
+                headers={"Accept-Encoding": "identity"})
+          probe("Renfe", "https://horarios.renfe.com/HIRRenfeWeb/buscar.do")
+          probe("NS (NL) reisinformatie",
+                "https://gateway.apiportal.ns.nl/reisinformatie-api/api/v3/trips?fromStation=Hamburg&toStation=Amsterdam")
+          probe("Eurostar snap", "https://api.eurostar.com/v1/journeys?origin=Hamburg")
+          probe("OEBB Ticketshop places",
+                "https://tickets.oebb.at/api/domain/v4/location?name=Hamburg")
+          probe("OEBB Ticketshop Verbindungen",
+                "https://tickets.oebb.at/api/hafas/v4/timetable")
+          probe("SBB Fahrplan (transport.opendata.ch)",
+                "https://transport.opendata.ch/v1/connections?from=Zuerich&to=Bern&limit=2")
+          probe("Interrail/Eurail",
+                "https://www.eurail.com/api/timetable/journeys?from=Hamburg&to=Muenchen")
+          probe("Omio (neuer Host?)",
+                "https://api.omio.com/api/v1/positions/autocomplete?query=Hamburg")
+          probe("Trainline (anderer Host)",
+                "https://www.trainline.com/api/locations-search?searchTerm=Hamburg")
+
+          print("\n########## HOTELS, zweite Runde ##########")
+          probe("Hostelworld (neuer Host)",
+                "https://api.m.hostelworld.com/2.2/cities/?query=Barcelona")
+          probe("Agoda autocomplete",
+                "https://www.agoda.com/api/cronos/geo/AutoComplete?searchText=Barcelona")
+          probe("Trivago graphql", "https://www.trivago.de/api/v1/suggestions?query=Barcelona")
+          probe("Kayak hotels", "https://www.kayak.de/h/mobileapis/directory/hotels?search=Barcelona")
+          probe("Expedia suggest",
+                "https://www.expedia.de/api/v4/typeahead/Barcelona?client=Homepage&lob=HOTELS")
+          probe("Hotels.com suggest",
+                "https://de.hotels.com/api/v4/typeahead/Barcelona?client=Homepage&lob=HOTELS")
+          probe("OpenStreetMap Overpass (Hotels, ohne Preis)",
+                "https://overpass-api.de/api/interpreter?data=" + urllib.parse.quote(
+                    '[out:json][timeout:15];node["tourism"="hotel"](41.37,2.14,41.40,2.18);out 3;'),
+                headers={"Accept": "*/*"})
+          PY
+          python3 probe.py
