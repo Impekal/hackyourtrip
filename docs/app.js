@@ -4,7 +4,7 @@
 // guessing: if this doesn't match, the browser is running a cached old
 // app.js and any "the fix didn't work" report is about the old file. Bump
 // together with the ?v= in index.html.
-const BUILD_STAMP = '2026-08-06-8';
+const BUILD_STAMP = '2026-08-06-9';
 document.getElementById('buildStamp').textContent = BUILD_STAMP;
 
 /* =========================================================================
