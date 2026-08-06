@@ -397,6 +397,13 @@ verifiziert, Antwortstruktur per Wegwerf-Workflow abgegriffen):
   wie Transitous es sich wünscht.
 - Es gibt **keine Buchungs-URL** für eine MOTIS-Verbindung, deshalb bleibt
   `url` leer und die `PROVIDER_LINKS` unter den Ergebnissen übernehmen das.
+- **Nicht abgedeckt:** In den Kombi-Modi "Flug oder Bahn"/"Flug oder Bus"
+  steht im Von/Nach-Feld ein IATA-Code ("BER"), den der Transitous-Geocoder
+  nicht als Haltestelle auflöst - dort fällt das Bahn-/Bus-Bein weiterhin
+  auf Beispieldaten zurück (klar als solche markiert). Sauber wäre eine
+  Code-zu-Stadt-Auflösung über die schon genutzte Travelpayouts-Places-API;
+  MOTIS akzeptiert laut Doku auch "lat,lon" als `fromPlace`, das ist hier
+  aber nicht verifiziert worden und deshalb bewusst nicht eingebaut.
 - **Nicht abgedeckt:** Hin-und-zurück liefert nur die Hinfahrt
   (`returnDepart` bleibt `null`) - eine zweite Suche in Gegenrichtung wäre
   der nächste Ausbauschritt. Und GTFS kennt keine Bordausstattung, deshalb
