@@ -1,4 +1,4 @@
-# Temporary: Skiplagged response shape + deal feeds. Deleted after use.
+# Temporary: which currency does Skiplagged answer in? Deleted after use.
 name: probe-resellers
 
 on:
@@ -8,66 +8,40 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
-      - name: Shape of the hits
+      - name: Currency check
         run: |
           cat > probe.py <<'PY'
           import json, urllib.parse, urllib.request
 
-          BROWSER = {
-              "User-Agent": ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-                             "(KHTML, like Gecko) Chrome/126.0 Safari/537.36"),
-              "Accept": "application/json, text/plain, */*",
-              "Accept-Language": "de-DE,de;q=0.9,en;q=0.8",
-          }
+          def get(url, lang="de-DE,de;q=0.9"):
+              req = urllib.request.Request(url, headers={
+                  "User-Agent": ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                                 "(KHTML, like Gecko) Chrome/126.0 Safari/537.36"),
+                  "Accept": "application/json", "Accept-Language": lang})
+              with urllib.request.urlopen(req, timeout=40) as resp:
+                  return json.loads(resp.read().decode("utf-8", "replace"))
 
-          def get(url):
-              with urllib.request.urlopen(
-                      urllib.request.Request(url, headers=BROWSER), timeout=40) as resp:
-                  return resp.read().decode("utf-8", "replace")
+          base = {"from": "HAM", "to": "LYS", "depart": "2026-09-15",
+                  "return": "", "poll": "true", "sort": "cost"}
 
-          print("##### SKIPLAGGED HAM -> LYS #####")
-          raw = get("https://skiplagged.com/api/search.php?" + urllib.parse.urlencode({
-              "from": "HAM", "to": "LYS", "depart": "2026-09-15", "return": "",
-              "poll": "true", "sort": "cost"}))
-          data = json.loads(raw)
-          print("top-level:", list(data))
-          for key in list(data):
-              value = data[key]
-              kind = f"dict[{len(value)}]" if isinstance(value, dict) else (
-                     f"list[{len(value)}]" if isinstance(value, list) else type(value).__name__)
-              print(f"  {key}: {kind}")
-
-          flights = data.get("flights") or {}
-          print("\n-- flights: ", len(flights), "Eintraege")
-          for fid, flight in list(flights.items())[:2]:
-              print("  id:", fid)
-              print("  ", json.dumps(flight, ensure_ascii=False)[:1100])
-
-          for key in ("itineraries", "depart", "cities", "trips"):
-              if key in data:
-                  blob = data[key]
-                  print(f"\n-- {key}:")
-                  print("  ", json.dumps(blob, ensure_ascii=False)[:1400])
-
-          print("\n##### DEAL-FEEDS #####")
-          for label, url in [
-              ("Urlaubspiraten", "https://www.urlaubspiraten.de/feed"),
-              ("Travelfree", "https://travelfree.info/feed/"),
-              ("Fly4free", "https://www.fly4free.com/feed/"),
-              ("Secret Flying (RSS-Pfad?)", "https://www.secretflying.com/feed/rss/"),
+          for label, extra, lang in [
+              ("default (de)", {}, "de-DE,de;q=0.9"),
+              ("currency=EUR", {"currency": "EUR"}, "de-DE,de;q=0.9"),
+              ("currency=USD", {"currency": "USD"}, "en-US,en;q=0.9"),
+              ("en-US ohne currency", {}, "en-US,en;q=0.9"),
           ]:
               try:
-                  body = get(url)
-                  # First item title+link, to confirm it's really parseable.
-                  import re
-                  item = re.search(r"<item>(.*?)</item>", body, re.S)
-                  title = re.search(r"<title>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?</title>", item.group(1), re.S) if item else None
-                  link = re.search(r"<link>(.*?)</link>", item.group(1), re.S) if item else None
-                  print(f"[OK] {label}: {len(body)} bytes")
-                  if title:
-                      print("     erster Eintrag:", title.group(1).strip()[:120])
-                      print("     link:", (link.group(1).strip() if link else "-")[:110])
+                  data = get("https://skiplagged.com/api/search.php?" +
+                             urllib.parse.urlencode({**base, **extra}), lang)
               except Exception as exc:
-                  print(f"[FAIL] {label}: {type(exc).__name__}: {exc}")
+                  print(f"{label}: FAIL {exc}"); continue
+              info = data.get("info")
+              depart = data.get("depart") or []
+              cheapest = min((d[0][0] for d in depart if d and d[0]), default=None)
+              print(f"{label}: info={json.dumps(info, ensure_ascii=False)[:300]}")
+              print(f"    billigster Eintrag (Cent?): {cheapest}   Eintraege: {len(depart)}")
+              if depart:
+                  print(f"    erster depart-Eintrag komplett: {json.dumps(depart[0], ensure_ascii=False)[:180]}")
+              print()
           PY
           python3 probe.py
