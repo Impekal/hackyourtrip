@@ -225,6 +225,13 @@ auf einem Dashboard die besten aktuellen Optionen pro Strecke zeigt.
   Dauerangabe"** statt einer vom Hinweg gespiegelten Zahl.
   Das ist **reine Darstellung**: „Max. Reisezeit" und die Sortierung nach
   Dauer rechnen unverändert mit der Dauer der Option.
+- **Max. Reisezeit je Richtung:** sobald „Hin und zurück" gewählt ist,
+  erscheint ein zweites Limit (`max_duration_return_hours`). 12 Stunden
+  Nachtbus auf dem Hinweg mag man hinnehmen, am Rückweg vor der Arbeit
+  nicht - eine gemeinsame Zahl kann das nicht ausdrücken. Ohne Rückreise
+  bleibt es bei genau einem Limit, unverändert gegen die Dauer der Option.
+  Nennt eine Quelle die Rückwegdauer nicht, ist das **kein** Verstoß:
+  unbekannt heißt unbekannt, nicht „zu lang".
 - **Drei Ergebnis-Tabs bei Hin+Rück:** „Nur Hinfahrt", „Nur Rückfahrt"
   und „Hin + Zurück" - jeder mit eigener Liste und eigener Sortierung, als
   echte Reiterleiste über den Ergebnissen (`role="tablist"`, Pfeiltasten/Pos1/

@@ -268,16 +268,44 @@ class DealEngine:
 
     # -- filtering & scoring --------------------------------------------------
 
+    @staticmethod
+    def _within_duration_limits(option: TripOption, route: RoutePreference) -> bool:
+        """Max travel time, per direction when a return leg exists.
+
+        The way out and the way back rarely deserve the same limit - a
+        12-hour night bus there can be fine while the same on the way back,
+        before work, is not. Without a return leg this is exactly the old
+        single check against the option's duration.
+
+        A return leg whose duration the source doesn't state is not a
+        violation: unknown is unknown, not "too long".
+        """
+        offers = option.offers
+        first = offers[0] if offers else None
+        back_hours = None
+        if len(offers) == 2 and all(o.mode in TRANSPORT_MODES for o in offers):
+            back_hours = offers[1].duration_hours
+        elif first is not None:
+            back_hours = first.return_duration_hours
+
+        if back_hours is None:
+            return not (route.max_duration_hours is not None
+                        and option.total_duration_hours > route.max_duration_hours)
+        if route.max_duration_hours is not None and first.duration_hours > route.max_duration_hours:
+            return False
+        if (route.max_duration_return_hours is not None
+                and back_hours > route.max_duration_return_hours):
+            return False
+        return True
+
     def _meets_hard_constraints(self, option: TripOption, route: RoutePreference) -> bool:
         # An unknown price can't be compared to a budget. Dropping the option
         # would hide a real connection over a number we don't have; keeping it
         # is honest, and it is clearly labelled as price-less further down.
         if route.budget is not None and not option.has_unknown_price and option.total_price > route.budget:
             return False
-        if route.max_duration_hours is not None and option.total_duration_hours > route.max_duration_hours:
-            # hotel-only trips have no transport duration constraint
-            if option.mode != Mode.HOTEL:
-                return False
+        if option.mode != Mode.HOTEL and not self._within_duration_limits(option, route):
+            return False
         if route.low_cost == "exclude" and any(o.is_low_cost for o in option.offers):
             return False
         if route.low_cost == "only":

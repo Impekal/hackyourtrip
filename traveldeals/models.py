@@ -149,6 +149,10 @@ class RoutePreference:
     budget: Optional[float] = None
     currency: str = "EUR"
     max_duration_hours: Optional[float] = None
+    # Only used when round_trip is set: the way out and the way back rarely
+    # deserve the same limit - a 12-hour night bus there can be acceptable
+    # while the same on the way back, before work, is not.
+    max_duration_return_hours: Optional[float] = None
     priority: Priority = Priority.BEST_VALUE
     modes: list[Mode] = field(default_factory=lambda: [Mode.FLIGHT])
     baggage: BaggagePref = field(default_factory=BaggagePref)

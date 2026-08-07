@@ -178,10 +178,21 @@ Ergebnis) fällt alles graceful auf Mock-Daten zurück.
   nur, wo es eine Quelle gibt: ein API-Feld oder die veroeffentlichten
   Tarifbedingungen des Anbieters - und die gehoeren dann in
   `baggage_source`, damit eine veraltete Zahl nachvollziehbar bleibt.
-  **Offen:** die echten Quellen sind noch nicht gefuellt - der Wegwerf-Workflow
-  `.github/workflows/probe-baggage.yml` sollte klaeren, ob Ryanair/FlixBus/
-  Skiplagged ueberhaupt ein Gepaeck-Feld liefern, blieb aber in der
-  Actions-Warteschlange haengen. Erst danach befuellen, nicht vorher raten.
+  **Beantwortet (07.08.2026, probe-baggage.yml, live gemessen): KEINE der
+  drei Preisquellen nennt Gepaeck.**
+  - Ryanair `oneWayFares`: ein Fare hat genau `outbound` und `summary` -
+    Flughaefen, Zeiten, Preis, flightKey. Kein Gepaeck-Feld.
+  - FlixBus `search`: Trip-Schluessel sind arrival, available, departure,
+    duration, legs, messages, price, provider, remaining, restrictions,
+    status, transfer_type, transfer_type_key, uid. Kein Gepaeck-Feld.
+  - Skiplagged: Top-Level airlines/airports/cities/depart/duration/flights/
+    incomplete/info/return/show_loading; die Eintraege sind undurchsichtige
+    Arrays. Kein Gepaeck-Feld.
+  Aus der API kann die Angabe also nicht kommen - nicht nochmal durchsuchen.
+  Der einzige gangbare Weg waere, die **veroeffentlichten
+  Tarifbedingungen** der Anbieter zu hinterlegen (dann zwingend mit Quelle
+  und Stand in `baggage_source`) - und die Zahlen dafuer muessen von den
+  Anbieterseiten geholt, nicht aus dem Gedaechtnis geschrieben werden.
 - **Beispieldaten sind Opt-in (`route.showMockData`), Voreinstellung aus.**
   Vorher füllten die Mock-Generatoren jede Lücke, und eine Suche ohne echte
   Treffer zeigte drei erfundene Preise statt einer ehrlichen Leermeldung -

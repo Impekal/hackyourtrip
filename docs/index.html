@@ -343,8 +343,14 @@
           </select>
         </div>
         <div class="field" data-group="durationGroup">
-          <label for="maxDuration">Max. Reisezeit (h)</label>
+          <label for="maxDuration" id="maxDurationLabel">Max. Reisezeit (h)</label>
           <input type="number" id="maxDuration" min="0" step="0.5" placeholder="ohne Limit">
+        </div>
+        <!-- Erscheint nur bei "Hin und zurück": 12 Stunden Nachtbus auf dem
+             Hinweg mag man hinnehmen, am Rückweg vor der Arbeit nicht. -->
+        <div class="field" data-group="maxDurationReturnGroup">
+          <label for="maxDurationReturn">Max. Reisezeit zurück (h)</label>
+          <input type="number" id="maxDurationReturn" min="0" step="0.5" placeholder="ohne Limit">
         </div>
         <div class="field" data-group="lowCostGroup">
           <label for="lowCost">Anbieter-Typ</label>
@@ -638,6 +644,6 @@
 <!-- The ?v= is deliberate: GitHub Pages lets browsers cache app.js, so a
      fix could ship and the visitor would keep running the old file. Bump
      this whenever app.js changes in a way users need to see. -->
-<script src="./app.js?v=2026-08-07-3"></script>
+<script src="./app.js?v=2026-08-07-4"></script>
 </body>
 </html>

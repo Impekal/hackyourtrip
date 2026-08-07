@@ -4,7 +4,7 @@
 // guessing: if this doesn't match, the browser is running a cached old
 // app.js and any "the fix didn't work" report is about the old file. Bump
 // together with the ?v= in index.html.
-const BUILD_STAMP = '2026-08-07-3';
+const BUILD_STAMP = '2026-08-07-4';
 document.getElementById('buildStamp').textContent = BUILD_STAMP;
 
 /* =========================================================================
@@ -98,8 +98,15 @@ modeTabsEl.addEventListener('click', (ev) => {
 function updateReturnDateVisibility() {
   const cfg = MODE_TAB_CONFIG[activeMode];
   const roundTripEl = document.getElementById('roundTrip');
+  const isRoundTrip = Boolean(cfg.roundTrip && roundTripEl && roundTripEl.checked);
   const returnDateGroup = document.querySelector('[data-group="returnDateGroup"]');
-  if (returnDateGroup) returnDateGroup.hidden = !(cfg.roundTrip && roundTripEl && roundTripEl.checked);
+  if (returnDateGroup) returnDateGroup.hidden = !isRoundTrip;
+  // Zweites Reisezeit-Limit nur, wenn es auch einen Rückweg gibt - und dann
+  // heißt das erste ausdrücklich "hin", damit klar ist, welches welches ist.
+  const returnLimitGroup = document.querySelector('[data-group="maxDurationReturnGroup"]');
+  if (returnLimitGroup) returnLimitGroup.hidden = !(isRoundTrip && cfg.duration);
+  const label = document.getElementById('maxDurationLabel');
+  if (label) label.textContent = isRoundTrip ? 'Max. Reisezeit hin (h)' : 'Max. Reisezeit (h)';
 }
 document.getElementById('roundTrip')?.addEventListener('change', updateReturnDateVisibility);
 
@@ -1798,12 +1805,31 @@ async function runSearch(route) {
     return { candidates, pools };
   }
 
-  function applyFilters(candidates) {
+  // Reisezeit-Grenzen für einen Abschnitt: `out` gilt für den Hinweg, `back`
+  // für den Rückweg. Bei einer reinen Hinfahrt gibt es nur `out`, und dann
+  // greift es unverändert auf die Dauer der Option - genau wie vorher.
+  function withinDurationLimits(c, out, back) {
+    if (c.mode === 'hotel') return true;
+    const backLeg = returnLeg(c);
+    const backHours = backLeg ? backLeg.durationHours : (c.offers[0] || {}).returnDurationHours;
+    if (backHours == null) {
+      // Einfache Fahrt - oder ein Rückflugticket, dessen Rückwegdauer die
+      // Quelle nicht nennt. Eine unbekannte Dauer ist kein Verstoß.
+      return !(out != null && c.durationHours > out);
+    }
+    if (out != null && c.offers[0].durationHours > out) return false;
+    if (back != null && backHours > back) return false;
+    return true;
+  }
+
+  function applyFilters(candidates, limits = {}) {
+    const outLimit = 'out' in limits ? limits.out : route.maxDuration;
+    const backLimit = 'back' in limits ? limits.back : route.maxDurationReturn;
     return candidates.filter(c => {
       // An unknown price can't blow a budget. Dropping the option would hide a
       // real connection over a number nobody has.
       if (route.budget != null && !c.hasUnknownPrice && c.price > route.budget) return false;
-      if (route.maxDuration != null && c.durationHours > route.maxDuration && c.mode !== 'hotel') return false;
+      if (!withinDurationLimits(c, outLimit, backLimit)) return false;
       if (route.lowCost === 'exclude' && c.offers.some(o => o.isLowCost)) return false;
       if (route.lowCost === 'only') {
         // Only transport legs can be low-cost; a hotel leg in a combo must
@@ -1823,8 +1849,8 @@ async function runSearch(route) {
   // later, at render time: it is a way of looking at these offers, not a
   // search parameter, and re-sorting must never cost another round of API
   // calls.
-  function makeSection(id, label, variant, built, note = '') {
-    let candidates = applyFilters(built.candidates);
+  function makeSection(id, label, variant, built, note = '', limits = {}) {
+    let candidates = applyFilters(built.candidates, limits);
     flagBelowMedian(candidates);
     if (route.dealsOnly) candidates = candidates.filter(c => c.isBelowMedian);
     // Measured against this section's own dates - the return leg's "exact
@@ -1858,14 +1884,20 @@ async function runSearch(route) {
     ? wholeBuilt.candidates
     : [
         ...wholeBuilt.candidates.filter(c => c.offers.some(o => o.returnDepart)),
-        ...pairLegs(applyFilters(outBuilt.candidates), applyFilters(backBuilt.candidates)),
+        // Jede Einzelfahrt gegen die Grenze ihrer eigenen Richtung, bevor
+        // sie zu einer Reise zusammengesetzt wird.
+        ...pairLegs(applyFilters(outBuilt.candidates, { out: route.maxDuration, back: null }),
+                    applyFilters(backBuilt.candidates, { out: route.maxDurationReturn, back: null })),
       ];
 
   const sections = [
     makeSection('outbound', 'Nur Hinfahrt', outboundRoute, outBuilt,
-      `Einzelpreise für ${route.origin} → ${route.destination} am ${fmtDay(route.departFrom)}.`),
+      `Einzelpreise für ${route.origin} → ${route.destination} am ${fmtDay(route.departFrom)}.`,
+      { out: route.maxDuration, back: null }),
+    // Hier *ist* die einzelne Fahrt der Rückweg - also gilt dessen Grenze.
     makeSection('inbound', 'Nur Rückfahrt', inboundRoute, backBuilt,
-      `Einzelpreise für ${route.destination} → ${route.origin} am ${fmtDay(route.returnDate)}.`),
+      `Einzelpreise für ${route.destination} → ${route.origin} am ${fmtDay(route.returnDate)}.`,
+      { out: route.maxDurationReturn, back: null }),
     makeSection('combined', 'Hin + Zurück', route,
       { candidates: combinedCandidates, pools: outBuilt.pools },
       'Gesamtpreis für beide Richtungen: echte Hin-/Rückflug-Tickets und aus zwei Einzelfahrten zusammengesetzte Reisen. '
@@ -2279,6 +2311,10 @@ function readRouteFromForm() {
     budget: numOrNull('budget'),
     currency: document.getElementById('currency').value,
     maxDuration: numOrNull('maxDuration'),
+    // Nur bei Hin+Rück gefragt: 12 Stunden Nachtbus hin mag man hinnehmen,
+    // zurück vor der Arbeit nicht.
+    maxDurationReturn: (cfg.roundTrip && document.getElementById('roundTrip').checked)
+      ? numOrNull('maxDurationReturn') : null,
     // Not a search input any more - the sort control lives at the results
     // (#sortBy). Kept on the route object because the YAML snippet and the
     // AI prompt still describe "how should this be ranked".
@@ -2749,6 +2785,7 @@ function buildYamlSnippet(route) {
     budget: ${route.budget ?? 'null'}
     currency: ${route.currency}
     max_duration_hours: ${route.maxDuration ?? 'null'}
+    max_duration_return_hours: ${route.maxDurationReturn ?? 'null'}
     priority: ${route.priority}
     modes: [${route.modes.join(', ')}]
     baggage:
@@ -2802,7 +2839,10 @@ function buildAiPrompt(route, options) {
     `Reisedatum: ${isoDay(route.departFrom)}${route.roundTrip && route.returnDate ? `, zurück ${isoDay(route.returnDate)}` : ' (nur Hinreise)'}`,
     `Flexibilität: ${route.flexBefore} Tage davor, ${route.flexAfter} Tage danach`,
     route.budget != null ? `Budget: ${route.budget} ${route.currency}` : 'Budget: kein Limit',
-    route.maxDuration != null ? `Max. Reisezeit: ${route.maxDuration}h` : 'Max. Reisezeit: kein Limit',
+    route.maxDuration != null
+      ? `Max. Reisezeit${route.maxDurationReturn != null ? ' hin' : ''}: ${route.maxDuration}h`
+      : 'Max. Reisezeit: kein Limit',
+    route.maxDurationReturn != null ? `Max. Reisezeit zurück: ${route.maxDurationReturn}h` : null,
     `Sortierung: ${route.priority}`,
     route.dealsOnly ? 'Nur Deals/Aktionen' : 'Alle Angebote',
     route.transportPrefs.directOnly ? 'Nur Direktverbindungen' : null,

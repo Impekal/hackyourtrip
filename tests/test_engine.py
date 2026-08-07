@@ -3,6 +3,7 @@ from pathlib import Path
 
 from traveldeals.engine import DealEngine
 from traveldeals.models import (BaggagePref, HotelPref, Mode, Offer,
+                                 TripOption,
                                  Priority, RoutePreference, TransportPref)
 from traveldeals.pricehistory import PriceHistory
 from traveldeals.providers.base import Provider
@@ -461,3 +462,63 @@ def test_unknown_return_duration_stays_none():
                   arrive_time="2026-09-15T10:00:00", duration_hours=2.0,
                   return_depart_time="2026-09-18T18:00:00")
     assert offer.return_duration_hours is None
+
+
+def _dur_route(**overrides):
+    defaults = dict(id="r", origin="BER", destination="BCN",
+                    depart_date_from=date(2026, 9, 15), depart_date_until=date(2026, 9, 15),
+                    round_trip=True, return_date=date(2026, 9, 18))
+    defaults.update(overrides)
+    return RoutePreference(**defaults)
+
+
+def _leg(hours, return_hours=None):
+    return Offer(mode=Mode.FLIGHT, provider="x", booking_site="y", price=50.0,
+                 currency="EUR", depart_time="2026-09-15T08:00:00",
+                 arrive_time="2026-09-15T10:00:00", duration_hours=hours,
+                 return_depart_time="2026-09-18T18:00:00" if return_hours else None,
+                 return_duration_hours=return_hours)
+
+
+def test_max_duration_applies_per_direction_on_a_round_trip():
+    """3h hin, 9h zurück: ein 5h-Limit für den Hinweg ist erfüllt, dasselbe
+    für den Rückweg nicht."""
+    option = TripOption(mode=Mode.FLIGHT, offers=[_leg(3.0, 9.0)], total_price=100.0,
+                        currency="EUR", total_duration_hours=3.0, score=0.0)
+
+    assert DealEngine._within_duration_limits(
+        option, _dur_route(max_duration_hours=5, max_duration_return_hours=12))
+    assert not DealEngine._within_duration_limits(
+        option, _dur_route(max_duration_hours=5, max_duration_return_hours=5))
+    assert not DealEngine._within_duration_limits(
+        option, _dur_route(max_duration_hours=2, max_duration_return_hours=12))
+
+
+def test_two_leg_option_is_measured_leg_by_leg():
+    option = TripOption(mode=Mode.FLIGHT, offers=[_leg(3.0), _leg(9.0)], total_price=100.0,
+                        currency="EUR", total_duration_hours=12.0, score=0.0)
+    assert DealEngine._within_duration_limits(
+        option, _dur_route(max_duration_hours=4, max_duration_return_hours=10))
+    assert not DealEngine._within_duration_limits(
+        option, _dur_route(max_duration_hours=4, max_duration_return_hours=8))
+
+
+def test_one_way_keeps_the_single_limit_against_the_option_duration():
+    """Ohne Rückweg genau wie vorher - eine Grenze, gegen die Dauer der
+    Option."""
+    option = TripOption(mode=Mode.FLIGHT, offers=[_leg(3.0)], total_price=50.0,
+                        currency="EUR", total_duration_hours=3.0, score=0.0)
+    assert DealEngine._within_duration_limits(
+        option, _dur_route(round_trip=False, return_date=None, max_duration_hours=5))
+    assert not DealEngine._within_duration_limits(
+        option, _dur_route(round_trip=False, return_date=None, max_duration_hours=2))
+
+
+def test_unknown_return_duration_is_not_treated_as_too_long():
+    """Nennt die Quelle die Rückwegdauer nicht, ist das kein Verstoß."""
+    offer = _leg(3.0)
+    offer.return_depart_time = "2026-09-18T18:00:00"  # Rückweg da, Dauer unbekannt
+    option = TripOption(mode=Mode.FLIGHT, offers=[offer], total_price=50.0,
+                        currency="EUR", total_duration_hours=3.0, score=0.0)
+    assert DealEngine._within_duration_limits(
+        option, _dur_route(max_duration_hours=5, max_duration_return_hours=1))

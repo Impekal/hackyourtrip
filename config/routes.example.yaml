@@ -68,6 +68,9 @@ routes:
       depart_time_flex_minutes: 0   # Zeitfenster +/- um preferred_depart_time (nur falls gesetzt)
     low_cost: any            # any | only (nur Low-Cost) | exclude (keine Low-Cost)
     deals_only: false         # true = nur Deals/Aktionen zeigen, false = alle Angebote
+    # Nur bei round_trip: eigenes Limit für den Rückweg. null = wie ohne
+    # Limit; ohne round_trip wird es ignoriert.
+    max_duration_return_hours: null
     # Nachbar-Flughäfen/-Bahnhöfe mitsuchen. Getrennt je Seite, weil der
     # Umweg am Start (eigenes Auto) anders wiegt als der am Ziel (Gepäck,
     # kein Auto). 0 = aus. Ein altes nearby_km gilt weiterhin für beide.

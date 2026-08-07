@@ -80,6 +80,7 @@ def _parse_route(raw: dict) -> RoutePreference:
         budget=raw.get("budget"),
         currency=raw.get("currency", "EUR"),
         max_duration_hours=raw.get("max_duration_hours"),
+        max_duration_return_hours=raw.get("max_duration_return_hours"),
         priority=Priority(raw.get("priority", "best_value")),
         modes=[Mode(m) for m in raw.get("modes", ["flight"])],
         baggage=BaggagePref(
