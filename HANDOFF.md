@@ -663,7 +663,43 @@ DB den Preispfad je öffnet, ist es ein Deploy und keine Neuentwicklung. Ein
 403 kommt als `blocked: true` zurück, damit die Seite den Grund nennen kann,
 statt stumm keinen Bahnpreis zu zeigen.
 
-Weiterhin offen bleibt der **Preis** für Bahn (und Hotel). DB-Wrapper regelmässig neu
+**Runde 9 (07.08.2026) - die Hotel-Frage ist entschieden, anders als gedacht.**
+Runde 8 las sich wie "Hotel-Programm nicht freigeschaltet". Das war eine
+Fehldiagnose, und Runde 9 hat sie widerlegt. Aufbau: eine **Kontrollabfrage**
+auf dem Flugpfad, von dem wir wissen, dass Token und Konto stimmen, daneben
+elf Hotel-Pfade.
+
+- Kontrolle `aviasales/v3/prices_for_dates` → **200 mit echten Daten**.
+- Alle elf Hotel-Pfade → **404** (nginx-404, S3 AccessDenied, Go-404),
+  mit Token als Header *und* als Query-Parameter, mit und ohne `marker`.
+
+Entscheidend ist, was **nicht** vorkam: kein einziges 401/403 mit
+JSON-Begründung. Eine fehlende Freischaltung antwortet mit "keine
+Berechtigung", nicht mit "diesen Pfad gibt es nicht". Die alte
+Hotellook-API-Familie ist also **abgeschaltet, nicht gesperrt** - ein
+Programmbeitritt bei Travelpayouts hätte diese Endpunkte nie zurückgebracht.
+Deshalb gibt es im Katalog auch keinen "Beitreten"-Knopf: es gibt nichts
+beizutreten, die Hotel-Seite dort vergibt heute Links und Widgets, keine
+Preis-API. **Nicht weiter im Konto suchen.**
+
+**Runde 10 (07.08.2026) - welche Hotel-API lebt heute?** Reihenfolge bewusst
+umgedreht: erst messen, wer antwortet, dann sich anmelden. Ohne Key ist das
+gesuchte Signal **401 mit JSON** (API lebt, vergibt Keys), nicht 200.
+
+| Anbieter | Antwort | Bedeutung |
+|---|---|---|
+| **LiteAPI v3** (`api.liteapi.travel`) | 401 `{"error":{"code":401,"message":"unauthorized"}}` | **lebt, Keys selbst lösbar** |
+| **Hotelbeds APItude Test** | 401 `{"error":"Authorization field missing"}` | **lebt, Test-Keys selbst lösbar** |
+| RateHawk / worldota | 401 mit JSON | lebt, braucht Vertrag |
+| Booking.com Demand API | 401 | lebt, braucht Partnerschaft |
+| Hotellook (Gegenprobe) | 404 nginx | bestätigt tot |
+
+Damit ist **LiteAPI der Weg für Hotels**, falls das Thema wieder aufgegriffen
+wird: moderne REST-API, Sandbox- und Produktions-Key ohne Vertrag,
+Provisionsmodell. Der Anschluss wäre ein Provider plus eine Worker-Route,
+kein Umbau.
+
+Weiterhin offen bleibt der **Preis** für Bahn. DB-Wrapper regelmässig neu
 prüfen: kämen sie zurück, gäbe es dort sogar Sparpreise.
 
 ## Was diese App kann, das die grossen Portale nicht koennen
