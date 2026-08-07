@@ -1,0 +1,76 @@
+name: Probe round 10 - welche Hotel-API lebt ueberhaupt noch?
+
+# Runde 9 hat die Hotel-Frage entschieden: der Kontroll-Aufruf auf dem
+# Flugpfad antwortet 200, alle elf Hotel-Pfade antworten 404. Kein
+# einziger antwortet mit 401/403 - es ist also KEIN Rechteproblem. Die
+# alte Hotellook-API-Familie ist abgeschaltet, nicht gesperrt. Ein
+# Programm beizutreten haette diese Endpunkte nie zurueckgebracht.
+#
+# Diese Runde dreht die Reihenfolge um: erst messen, welcher Anbieter
+# heute ueberhaupt antwortet, DANN sich anmelden. Ohne Key ist die
+# erwartete Antwort einer lebenden API 401 mit JSON-Begruendung - genau
+# das ist hier das gesuchte Signal, nicht 200.
+#
+# Wird nach der Auswertung geloescht.
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Kandidaten anfragen
+        run: |
+          python3 - <<'PY'
+          import urllib.error, urllib.request
+
+          UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
+
+          def call(name, url, headers=None):
+              hdrs = {"User-Agent": UA, "Accept": "application/json"}
+              hdrs.update(headers or {})
+              try:
+                  with urllib.request.urlopen(
+                          urllib.request.Request(url, headers=hdrs), timeout=30) as r:
+                      body = r.read()[:200].decode("utf-8", "replace").replace("\n", " ")
+                      print(f"  {r.status:>3}  {name}   [antwortet]")
+                      print(f"       {body}")
+                      return
+              except urllib.error.HTTPError as e:
+                  body = e.read()[:200].decode("utf-8", "replace").replace("\n", " ")
+                  # 401/403 mit JSON = API lebt und vergibt Keys.
+                  # 404/HTML     = Pfad existiert nicht mehr.
+                  if e.code in (400, 401, 403) and body.strip().startswith(("{", "[")):
+                      verdict = "LEBT - braucht nur einen Key"
+                  elif e.code in (400, 401, 403):
+                      verdict = "lebt vermutlich, Antwort kein JSON"
+                  else:
+                      verdict = "Pfad weg"
+                  print(f"  {e.code:>3}  {name}   [{verdict}]")
+                  print(f"       {body}")
+              except Exception as e:
+                  print(f"  ---  {name}   FEHLER {type(e).__name__}: {e}")
+
+          print("=== Hotel-APIs, die Keys selbst vergeben (ohne Vertrag) ===")
+          call("LiteAPI v3 (Nuitee)",
+               "https://api.liteapi.travel/v3.0/data/countries")
+          call("LiteAPI v2 hotels",
+               "https://api.liteapi.travel/v2.0/data/hotels?countryCode=DE&limit=1")
+          call("Hotelbeds Test (APItude)",
+               "https://api.test.hotelbeds.com/hotel-content-api/1.0/types/countries?"
+               "fields=all&language=ENG&from=1&to=1")
+
+          print("\n=== Hotel-APIs mit Vertrag/Partnerschaft (nur Lebenszeichen) ===")
+          call("RateHawk / Emerging Travel (worldota)",
+               "https://api.worldota.net/api/b2b/v3/hotel/info/")
+          call("Booking.com Demand API v3",
+               "https://demandapi.booking.com/3.1/common/locations/countries")
+          call("TravelgateX",
+               "https://api.travelgatex.com/")
+
+          print("\n=== Gegenprobe: bekannt tote Pfade aus Runde 9 ===")
+          call("Hotellook engine (tot erwartet)",
+               "https://engine.hotellook.com/api/v2/lookup.json?query=Berlin")
+          PY
