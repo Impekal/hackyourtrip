@@ -121,6 +121,7 @@ def _option_to_dict(option: TripOption) -> dict:
                 "price": o.price, "currency": o.currency, "depart_time": o.depart_time,
                 "arrive_time": o.arrive_time, "duration_hours": o.duration_hours, "url": o.url,
                 "return_depart_time": o.return_depart_time,
+                "return_duration_hours": o.return_duration_hours,
                 "price_known": o.price_known, "line_label": o.line_label,
                 "included_carry_on_kg": o.included_carry_on_kg,
                 "included_carry_on_note": o.included_carry_on_note,

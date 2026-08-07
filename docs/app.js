@@ -4,7 +4,7 @@
 // guessing: if this doesn't match, the browser is running a cached old
 // app.js and any "the fix didn't work" report is about the old file. Bump
 // together with the ?v= in index.html.
-const BUILD_STAMP = '2026-08-07-1';
+const BUILD_STAMP = '2026-08-07-2';
 document.getElementById('buildStamp').textContent = BUILD_STAMP;
 
 /* =========================================================================
@@ -294,12 +294,15 @@ const HOTEL_AMENITY_REQUIREMENTS = [
 // Mirrors traveldeals/providers/mock.py's _round_trip_addon: one combined
 // price for both legs (like the real Travelpayouts API does), plus a
 // synthesized return-leg departure time on route.returnDate.
-function roundTripAddon(rng, route, outboundPrice, departHourPool) {
-  if (!(route.roundTrip && route.returnDate)) return [outboundPrice, null];
+function roundTripAddon(rng, route, outboundPrice, departHourPool, outboundHours) {
+  if (!(route.roundTrip && route.returnDate)) return [outboundPrice, null, null];
   const returnPrice = round2(outboundPrice * rngFloat(rng, 0.8, 1.2));
   const hour = rngChoice(rng, departHourPool);
   const returnDt = atHour(route.returnDate, hour, rngChoice(rng, [0, 15, 30, 45]));
-  return [round2(outboundPrice + returnPrice), returnDt];
+  // Der Rueckweg dauert selten exakt so lang wie der Hinweg - sonst waere
+  // die getrennte Anzeige zweimal dieselbe Zahl.
+  const returnHours = outboundHours == null ? null : round1(outboundHours * rngFloat(rng, 0.85, 1.2));
+  return [round2(outboundPrice + returnPrice), returnDt, returnHours];
 }
 
 function transportComfortFields(rng, mode, stopWeights) {
@@ -326,11 +329,11 @@ function mockFlightOffers(route) {
       const isLowCost = rngBool(rng, 0.5);
       const bagFee = isLowCost ? round2(rngFloat(rng, 25, 55)) : 0;
       const depart = atHour(day, hour, rngChoice(rng, [0, 15, 30, 45]));
-      const [finalPrice, returnDepart] = roundTripAddon(rng, route, price, hours);
+      const [finalPrice, returnDepart, returnDurationHours] = roundTripAddon(rng, route, price, hours, duration);
       offers.push({
         mode: 'flight', isMock: true, bookingSite: rngChoice(rng, BOOKING_SITES.flight),
         price: finalPrice, currency: route.currency, depart, durationHours: duration,
-        bagFee, isLowCost, returnDepart,
+        bagFee, isLowCost, returnDepart, returnDurationHours,
         // Beispieldaten, wie alles hier: Billigflieger nur Handgepäck,
         // Linienflug zusätzlich ein Koffer. Die Zeile trägt ohnehin das
         // "Beispieldaten"-Abzeichen.
@@ -355,11 +358,11 @@ function mockTrainOffers(route) {
       const duration = round1(rngFloat(rng, 2.0, 7.0));
       const depart = atHour(day, hour, rngChoice(rng, [0, 15, 30, 45]));
       const basePrice2 = route.bahncard === '100' ? 0 : price;
-      const [finalPrice, returnDepart] = roundTripAddon(rng, route, basePrice2, hours);
+      const [finalPrice, returnDepart, returnDurationHours] = roundTripAddon(rng, route, basePrice2, hours, duration);
       offers.push({
         mode: 'train', isMock: true, bookingSite: rngChoice(rng, BOOKING_SITES.train),
         price: finalPrice, currency: route.currency,
-        depart, durationHours: duration, bagFee: 0, isLowCost: false, returnDepart,
+        depart, durationHours: duration, bagFee: 0, isLowCost: false, returnDepart, returnDurationHours,
         ...transportComfortFields(rng, 'train', [0.75, 0.20, 0.05]),
       });
     }
@@ -377,11 +380,11 @@ function mockBusOffers(route) {
       const price = round2(basePrice * rngFloat(rng, 0.8, 1.2));
       const duration = round1(rngFloat(rng, 3.0, 11.0));
       const depart = atHour(day, hour, rngChoice(rng, [0, 30]));
-      const [finalPrice, returnDepart] = roundTripAddon(rng, route, price, hours);
+      const [finalPrice, returnDepart, returnDurationHours] = roundTripAddon(rng, route, price, hours, duration);
       offers.push({
         mode: 'bus', isMock: true, bookingSite: rngChoice(rng, BOOKING_SITES.bus),
         price: finalPrice, currency: route.currency, depart, durationHours: duration,
-        bagFee: 0, isLowCost: false, returnDepart,
+        bagFee: 0, isLowCost: false, returnDepart, returnDurationHours,
         ...transportComfortFields(rng, 'bus', [0.65, 0.30, 0.05]),
       });
     }
@@ -573,6 +576,10 @@ function travelpayoutsRawToOffer(raw, currency, route) {
     // back to the generic search URL when it's missing.
     url: link ? AVIASALES_BASE + link : buildBookingUrl(route, departIso, raw.return_at),
     returnDepart: raw.return_at ? new Date(raw.return_at.slice(0, 19)) : null,
+    // Gegenstueck zu duration_to. Fehlt es, bleibt die Rueckwegdauer
+    // unbekannt - null heisst hier "keine Angabe", nicht "0 Stunden", und
+    // wird als solche angezeigt statt geschaetzt.
+    returnDurationHours: raw.duration_back != null ? round2(raw.duration_back / 60) : null,
   };
 }
 
@@ -938,6 +945,11 @@ function ryanairFareToOffer(fare, route, roundTrip) {
   const inbound = fare.inbound || {};
   const depart = new Date(outbound.departureDate);
   const arrive = new Date(outbound.arrivalDate);
+  // Der Rueckflug bringt seine eigenen Zeiten mit - sonst waere seine Dauer
+  // im kombinierten Ticket unsichtbar.
+  const returnDuration = (inbound.departureDate && inbound.arrivalDate)
+    ? round2((new Date(inbound.arrivalDate) - new Date(inbound.departureDate)) / 3600000)
+    : null;
   const flightNumber = outbound.flightNumber || 'FR';
   return {
     mode: 'flight',
@@ -956,6 +968,7 @@ function ryanairFareToOffer(fare, route, roundTrip) {
     url: ryanairBookingUrl(route, outbound.departureDate.slice(0, 10),
                             inbound.departureDate ? inbound.departureDate.slice(0, 10) : null),
     returnDepart: inbound.departureDate ? new Date(inbound.departureDate) : null,
+    returnDurationHours: returnDuration,
   };
 }
 
@@ -1580,6 +1593,40 @@ function baseModesFor(modes) {
   return need;
 }
 
+// Fahrt-/Flugzeit je Richtung. Ein Rückflugticket bringt beide Legs in
+// einem Angebot mit, eine zusammengesetzte Reise in zweien - die Anzeige
+// soll trotzdem in beiden Fällen "2h hin · 5h zurück" sagen statt einer
+// addierten Zahl, aus der sich keine der beiden Richtungen ablesen lässt.
+//
+// `back: null` heißt "die Quelle nennt die Rückwegdauer nicht" - dann steht
+// das da, statt den Hinweg zu spiegeln oder eine Zahl zu erfinden.
+function legDurations(option) {
+  const back = returnLeg(option);
+  if (back) return { out: option.offers[0].durationHours, back: back.durationHours };
+  const single = option.offers[0];
+  if (single && single.returnDepart) {
+    return { out: single.durationHours, back: single.returnDurationHours ?? null };
+  }
+  return null;  // einfache Fahrt
+}
+
+// Gesamte Reisezeit eines Angebots - beim Rückflugticket steckt der Rückweg
+// im selben Angebot. Ohne das sortierte ein kombiniertes Ticket sich vor
+// jede aus zwei Einzelfahrten gebaute Reise, weil nur der Hinweg zählte.
+function offerTotalDuration(offer) {
+  return round2(offer.durationHours + (offer.returnDurationHours || 0));
+}
+
+// "2h hin · 5h zurück" statt "7h". Die Summe beantwortet nicht, wonach man
+// bei einer Hin-und-Rückreise tatsächlich schaut - ob der Rückweg abends
+// noch zumutbar ist, zum Beispiel.
+function durationHtml(option) {
+  const legs = legDurations(option);
+  if (!legs) return `${option.durationHours}h`;
+  const back = legs.back == null ? 'Rückweg ohne Dauerangabe' : `${legs.back}h zurück`;
+  return `${legs.out}h hin · ${back}`;
+}
+
 // Two transport legs in one option (out + back) - as opposed to a single
 // round-trip ticket, or a transport+hotel combo. Drives both the pairing
 // below and the "· zurück ..." line in the results.
@@ -1722,7 +1769,7 @@ async function runSearch(route) {
     const candidates = [];
     for (const mode of modes) {
       if (['flight', 'train', 'bus', 'hotel'].includes(mode)) {
-        for (const offer of pools[mode]) candidates.push(candidate(mode, [offer], offer.price, offer.durationHours));
+        for (const offer of pools[mode]) candidates.push(candidate(mode, [offer], offer.price, offerTotalDuration(offer)));
       } else if (COMBO_TRANSPORT_MODE[mode]) {
         for (const combo of buildCombos(pools[COMBO_TRANSPORT_MODE[mode]], pools.hotel)) {
           candidates.push(candidate(mode, [combo.transport, combo.hotel], combo.price, combo.transport.durationHours));
@@ -1751,7 +1798,7 @@ async function runSearch(route) {
       } else if (OR_COMBO_MODES[mode]) {
         const [modeA, modeB] = OR_COMBO_MODES[mode];
         for (const offer of [...pools[modeA], ...pools[modeB]]) {
-          candidates.push(candidate(mode, [offer], offer.price, offer.durationHours));
+          candidates.push(candidate(mode, [offer], offer.price, offerTotalDuration(offer)));
         }
       }
     }
@@ -1767,7 +1814,8 @@ async function runSearch(route) {
         // Per leg, not the sum: 5h out and 5h back is not a "10h trip" that a
         // 8h limit should hide - and with the "Hin + Zurück" section that
         // would now silently empty the whole list.
-        const legs = c.offers.filter(o => o.mode !== 'hotel').map(o => o.durationHours);
+        const legs = c.offers.filter(o => o.mode !== 'hotel')
+          .flatMap(o => [o.durationHours, ...(o.returnDurationHours != null ? [o.returnDurationHours] : [])]);
         if (Math.max(...(legs.length ? legs : [c.durationHours])) > route.maxDuration) return false;
       }
       if (route.lowCost === 'exclude' && c.offers.some(o => o.isLowCost)) return false;
@@ -2025,6 +2073,18 @@ function baggageChips(offer) {
 // "7 kg", nicht "7.0 kg" - und 22,5 kg bleibt 22,5 kg.
 function fmtKg(kg) {
   return `${Number.isInteger(kg) ? kg : round1(kg)} kg`;
+}
+
+// Dasselbe getrennt-je-Richtung wie oben, nur aus deals.json (snake_case).
+function durationHtmlFromJson(opt) {
+  const first = opt.offers[0] || {};
+  if (!first.return_depart_time) {
+    return opt.total_duration_hours > 0 ? `${opt.total_duration_hours}h` : 'Dauer unbekannt';
+  }
+  const out = first.duration_hours;
+  const back = first.return_duration_hours;
+  const outText = out > 0 ? `${round2(out)}h hin` : 'Hinweg ohne Dauerangabe';
+  return `${outText} · ${back != null ? `${round2(back)}h zurück` : 'Rückweg ohne Dauerangabe'}`;
 }
 
 // deals.json (vom Python-Cronjob) benutzt snake_case. Umschluesseln statt
@@ -2585,7 +2645,7 @@ async function renderOptionList(route, section, options, flightFallbackReason, b
             back
               ? ` (${opt.offers[0].mode}) · zurück ${fmtShort(back.depart)} (${back.mode})`
               : (opt.offers[0].returnDepart ? ` · zurück ${fmtShort(opt.offers[0].returnDepart)}` : '')
-          } · ${opt.durationHours}h · ${opt.offers.map(o => bookingSiteHtml(o.bookingSite, o.url)).join(', ')}</span>
+          } · ${durationHtml(opt)} · ${opt.offers.map(o => bookingSiteHtml(o.bookingSite, o.url)).join(', ')}</span>
           <div class="chips">${opt.offers.flatMap(offerChips).map(c => `<span class="chip">${c}</span>`).join('')}</div>
           ${opt.recommendations.length ? `<ul class="recs">${opt.recommendations.map(r => `<li>${r}</li>`).join('')}</ul>` : ''}
         </div>`;
@@ -2894,7 +2954,7 @@ async function loadAlerts() {
             ${opt.is_error_fare ? '<span class="badge alert">Fehlerpreis</span>' : ''}
             ${opt.is_price_drop ? '<span class="badge good">Preis gefallen</span>' : ''}
           </div>
-          <span class="subline mono">${opt.mode}${line ? ` · ${line}` : ''} · ${opt.total_duration_hours > 0 ? opt.total_duration_hours + 'h' : 'Dauer unbekannt'}${opt.offers[0].return_depart_time ? ` · zurück ${opt.offers[0].return_depart_time.slice(0, 16).replace('T', ' ')}` : ''} · ${opt.offers.map(o => bookingSiteHtml(o.booking_site, o.url)).join(', ')}</span>
+          <span class="subline mono">${opt.mode}${line ? ` · ${line}` : ''} · ${durationHtmlFromJson(opt)}${opt.offers[0].return_depart_time ? ` · zurück ${opt.offers[0].return_depart_time.slice(0, 16).replace('T', ' ')}` : ''} · ${opt.offers.map(o => bookingSiteHtml(o.booking_site, o.url)).join(', ')}</span>
           ${(() => {
             const bags = opt.offers.flatMap(baggageChipsFromJson);
             return bags.length ? `<div class="chips">${bags.map(c => `<span class="chip">${c}</span>`).join('')}</div>` : '';

@@ -41,7 +41,8 @@ def _seed_for(route: RoutePreference, mode: Mode, as_of: date) -> int:
 
 
 def _round_trip_addon(rnd: random.Random, route: RoutePreference, outbound_price: float,
-                       depart_hour_pool) -> tuple[float, str | None]:
+                       depart_hour_pool,
+                       outbound_hours: float | None = None) -> tuple[float, str | None, float | None]:
     """Combined round-trip price + synthesized return-leg departure time.
 
     Mirrors what the real Travelpayouts API does: one combined price for
@@ -50,12 +51,15 @@ def _round_trip_addon(rnd: random.Random, route: RoutePreference, outbound_price
     Offer.
     """
     if not (route.round_trip and route.return_date):
-        return outbound_price, None
+        return outbound_price, None, None
     return_price = round(outbound_price * rnd.uniform(0.8, 1.2), 2)
     hour = rnd.choice(list(depart_hour_pool))
     return_dt = datetime(route.return_date.year, route.return_date.month, route.return_date.day,
                           hour, rnd.choice([0, 15, 30, 45]))
-    return round(outbound_price + return_price, 2), return_dt.isoformat()
+    # The way back rarely takes exactly as long as the way out - otherwise the
+    # split display would just show the same number twice.
+    return_hours = None if outbound_hours is None else round(outbound_hours * rnd.uniform(0.85, 1.2), 1)
+    return round(outbound_price + return_price, 2), return_dt.isoformat(), return_hours
 
 
 def _transport_comfort_fields(rnd: random.Random, mode: Mode, stops_weights: list[float]) -> dict:
@@ -94,7 +98,8 @@ class MockFlightProvider(Provider):
                 checked_bag_fee = round(rnd.uniform(25, 55), 2) if is_low_cost else 0.0
                 depart_dt = datetime(day.year, day.month, day.day, hour, rnd.choice([0, 15, 30, 45]))
                 arrive_dt = depart_dt + timedelta(hours=duration)
-                price, return_depart_time = _round_trip_addon(rnd, route, price, self._DEPART_HOURS)
+                price, return_depart_time, return_duration_hours = _round_trip_addon(
+                    rnd, route, price, self._DEPART_HOURS, duration)
                 offers.append(Offer(
                     mode=self.mode,
                     provider="mock-flight",
@@ -116,6 +121,7 @@ class MockFlightProvider(Provider):
                     included_checked_bag_kg=None if is_low_cost else 23.0,
                     baggage_source="Beispieldaten",
                     return_depart_time=return_depart_time,
+                    return_duration_hours=return_duration_hours,
                     **_transport_comfort_fields(rnd, self.mode, [0.55, 0.35, 0.10]),
                 ))
         # A rare, deliberately-planted "error fare" so the anomaly-detection
@@ -124,8 +130,8 @@ class MockFlightProvider(Provider):
         if rnd.random() < 0.08:
             day = rnd.choice(_date_candidates(route))
             depart_dt = datetime(day.year, day.month, day.day, 10, 0)
-            error_fare_price, return_depart_time = _round_trip_addon(
-                rnd, route, round(base_price * 0.12, 2), self._DEPART_HOURS)
+            error_fare_price, return_depart_time, return_duration_hours = _round_trip_addon(
+                rnd, route, round(base_price * 0.12, 2), self._DEPART_HOURS, 2.0)
             offers.append(Offer(
                 mode=self.mode,
                 provider="mock-flight",
@@ -139,6 +145,7 @@ class MockFlightProvider(Provider):
                 checked_bag_fee=35.0,
                 is_low_cost=True,
                 return_depart_time=return_depart_time,
+                return_duration_hours=return_duration_hours,
             ))
         return offers
 
@@ -163,7 +170,8 @@ class MockTrainProvider(Provider):
                 depart_dt = datetime(day.year, day.month, day.day, hour, rnd.choice([0, 15, 30, 45]))
                 arrive_dt = depart_dt + timedelta(hours=duration)
                 final_price = 0.0 if route.rail.bahncard == "100" else price
-                final_price, return_depart_time = _round_trip_addon(rnd, route, final_price, range(5, 22))
+                final_price, return_depart_time, return_duration_hours = _round_trip_addon(
+                    rnd, route, final_price, range(5, 22), duration)
                 offers.append(Offer(
                     mode=self.mode,
                     provider="mock-train",
@@ -177,6 +185,7 @@ class MockTrainProvider(Provider):
                     details={"bahncard_applied": route.rail.bahncard,
                              "deutschlandticket_ok": route.rail.deutschlandticket and duration <= 1.0},
                     return_depart_time=return_depart_time,
+                    return_duration_hours=return_duration_hours,
                     **_transport_comfort_fields(rnd, self.mode, [0.75, 0.20, 0.05]),
                 ))
         return offers
@@ -199,7 +208,8 @@ class MockBusProvider(Provider):
                 duration = round(rnd.uniform(3.0, 11.0), 1)
                 depart_dt = datetime(day.year, day.month, day.day, hour, rnd.choice([0, 30]))
                 arrive_dt = depart_dt + timedelta(hours=duration)
-                price, return_depart_time = _round_trip_addon(rnd, route, price, range(0, 24))
+                price, return_depart_time, return_duration_hours = _round_trip_addon(
+                    rnd, route, price, range(0, 24), duration)
                 offers.append(Offer(
                     mode=self.mode,
                     provider="mock-bus",
@@ -211,6 +221,7 @@ class MockBusProvider(Provider):
                     duration_hours=duration,
                     url="https://example.invalid/bus",
                     return_depart_time=return_depart_time,
+                    return_duration_hours=return_duration_hours,
                     **_transport_comfort_fields(rnd, self.mode, [0.65, 0.30, 0.05]),
                 ))
         return offers

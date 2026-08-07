@@ -164,4 +164,9 @@ class RyanairFlightProvider(Provider):
             stops=0,  # Ryanair fare finder returns non-stop fares only
             line_label=flight_number,
             return_depart_time=(inbound.get("departureDate") or "")[:19] or None,
+            # The return leg carries its own times, so its duration is a fact
+            # here rather than something to mirror from the outbound.
+            return_duration_hours=(
+                _duration_hours(inbound["departureDate"][:19], inbound["arrivalDate"][:19])
+                if inbound.get("departureDate") and inbound.get("arrivalDate") else None),
         )

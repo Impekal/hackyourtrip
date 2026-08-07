@@ -227,6 +227,11 @@ class Offer:
     # Set only for round-trip offers: `price` is then the combined total for
     # both legs, and this is the return leg's departure time.
     return_depart_time: Optional[str] = None
+    # How long the return leg takes. None = the source does not say - which
+    # is not the same as "no return leg", and is shown as such rather than
+    # mirrored from the outbound. `duration_hours` stays the *outbound* leg,
+    # so both directions can be reported separately.
+    return_duration_hours: Optional[float] = None
 
     # What the fare *includes* in baggage. None = "not known", which is not
     # the same as "not included" and must not be rendered as either: most

@@ -264,4 +264,9 @@ class TravelpayoutsFlightProvider(Provider):
             stops=stops,
             is_low_cost=str(raw.get("airline", "")).upper() in LOW_COST_CARRIERS,
             return_depart_time=return_at[:19] if return_at else None,
+            # Counterpart to duration_to. Absent means the return leg's
+            # duration is simply not stated - None, not 0.0, so the UI can
+            # say so instead of printing a number nobody supplied.
+            return_duration_hours=(round(float(raw["duration_back"]) / 60, 2)
+                                    if raw.get("duration_back") is not None else None),
         )

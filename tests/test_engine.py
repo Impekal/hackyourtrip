@@ -438,3 +438,34 @@ def test_later_departure_hint_never_suggests_a_time_outside_the_window(tmp_path)
     assert result[0].total_price == 100
     assert not any("21:00" in r for r in result[0].recommendations)
     assert any("09:30" in r and "20" in r for r in result[0].recommendations)
+
+
+def test_round_trip_ticket_duration_counts_both_legs():
+    """Ein Rückflugticket trägt beide Richtungen in *einem* Angebot. Zählt nur
+    der Hinweg, sortiert es sich vor jede aus zwei Einzelfahrten gebaute
+    Reise - als bräuchte der Rückweg keine Zeit."""
+    from traveldeals.engine import DealEngine
+
+    out_only = Offer(mode=Mode.FLIGHT, provider="x", booking_site="y", price=100.0,
+                     currency="EUR", depart_time="2026-09-15T08:00:00",
+                     arrive_time="2026-09-15T10:00:00", duration_hours=2.0)
+    round_trip = Offer(mode=Mode.FLIGHT, provider="x", booking_site="y", price=100.0,
+                       currency="EUR", depart_time="2026-09-15T08:00:00",
+                       arrive_time="2026-09-15T10:00:00", duration_hours=2.0,
+                       return_depart_time="2026-09-18T18:00:00", return_duration_hours=3.0)
+
+    assert DealEngine._offer_total_duration(out_only) == 2.0
+    assert DealEngine._offer_total_duration(round_trip) == 5.0
+
+
+def test_unknown_return_duration_is_not_mirrored_from_the_outbound():
+    """None heißt "die Quelle sagt es nicht" - nicht "genauso lang wie hin"."""
+    from traveldeals.engine import DealEngine
+
+    offer = Offer(mode=Mode.FLIGHT, provider="x", booking_site="y", price=100.0,
+                  currency="EUR", depart_time="2026-09-15T08:00:00",
+                  arrive_time="2026-09-15T10:00:00", duration_hours=2.0,
+                  return_depart_time="2026-09-18T18:00:00", return_duration_hours=None)
+    assert offer.return_duration_hours is None
+    # Die Gesamtdauer bleibt dann der bekannte Teil, statt zu raten.
+    assert DealEngine._offer_total_duration(offer) == 2.0

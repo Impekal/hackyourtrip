@@ -215,6 +215,18 @@ auf einem Dashboard die besten aktuellen Optionen pro Strecke zeigt.
   client-seitiges Aufsummieren nötig); die Mock-Provider bilden das mit einer
   synthetisierten Rückreise nach demselben Prinzip nach. Reine Hotel-Modi
   brauchen das nicht (Checkin+Nächte bilden die Aufenthaltsdauer schon ab).
+- **Fahrt-/Flugzeit je Richtung:** bei Hin+Rück steht nicht mehr eine
+  addierte Zahl in der Zeile, sondern „2h hin · 5h zurück". Die Summe
+  beantwortet die eigentliche Frage nicht - ob der Rückweg abends noch
+  zumutbar ist, zum Beispiel. Gilt für beide Bauarten gleich: ein echtes
+  Rückflugticket (beide Legs in *einem* Angebot, Dauer aus `fare.inbound`
+  bzw. `duration_back`) und eine aus zwei Einzelfahrten zusammengesetzte
+  Reise. Nennt eine Quelle die Rückwegdauer nicht, steht **„Rückweg ohne
+  Dauerangabe"** statt einer vom Hinweg gespiegelten Zahl.
+  Für die Sortierung nach Dauer zählt weiterhin die **Gesamtzeit** - vorher
+  zählte beim Rückflugticket nur der Hinweg, wodurch es sich vor jede aus
+  zwei Einzelfahrten gebaute Reise sortierte, als bräuchte der Rückweg keine
+  Zeit. Dasselbe gilt für den Filter „Max. Reisezeit".
 - **Drei Ergebnis-Tabs bei Hin+Rück:** „Nur Hinfahrt", „Nur Rückfahrt"
   und „Hin + Zurück" - jeder mit eigener Liste und eigener Sortierung, als
   echte Reiterleiste über den Ergebnissen (`role="tablist"`, Pfeiltasten/Pos1/
