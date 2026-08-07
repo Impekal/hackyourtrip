@@ -260,8 +260,14 @@ auf einem Dashboard die besten aktuellen Optionen pro Strecke zeigt.
 - **Freigepäck im Angebot** (🎒 Handgepäck 8 kg inkl. / 🧳 Koffer 23 kg inkl.,
   beides nebeneinander wenn beides im Preis ist): Zwei Flüge zu 45 € und 39 €
   sind nicht vergleichbar, wenn beim einen der Koffer 45 € extra kostet.
-  **Wichtig - und die Einschränkung gehört dazu:** ein Chip erscheint nur,
-  wenn es dazu etwas zu belegen gibt. Nennt eine Tarif-Angabe nur Maße statt
+  **Wichtig - und die Einschränkung gehört dazu:** ein Chip mit Kilo-Angabe
+  erscheint nur, wenn es dazu etwas zu belegen gibt. Zweimal live geprüft
+  (07.08.2026): weder Ryanair noch FlixBus noch Skiplagged nennen Gepäck in
+  ihrer API, und ihre veröffentlichten Gepäckseiten sind JS-gerendert bzw.
+  bot-geschützt (Ryanair 403, FlixBus-Seiten 200 aber ohne kg-Angabe im
+  Text). Bei echten Angeboten steht deshalb **„🧳 Gepäckregeln"** als Link
+  auf die Seite des Anbieters - die Antwort ist einen Klick entfernt, statt
+  geraten. Nennt eine Tarif-Angabe nur Maße statt
   Kilo (Ryanair: kleine Tasche unter dem Sitz), steht das Maß da, keine
   erfundene Kilo-Zahl. Und sagt eine Quelle zum Gepäck gar nichts, steht
   **gar kein Chip** - "keine Angabe" ist nicht dasselbe wie "nicht

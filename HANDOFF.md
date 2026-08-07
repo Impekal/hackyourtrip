@@ -189,10 +189,20 @@ Ergebnis) fällt alles graceful auf Mock-Daten zurück.
     incomplete/info/return/show_loading; die Eintraege sind undurchsichtige
     Arrays. Kein Gepaeck-Feld.
   Aus der API kann die Angabe also nicht kommen - nicht nochmal durchsuchen.
-  Der einzige gangbare Weg waere, die **veroeffentlichten
-  Tarifbedingungen** der Anbieter zu hinterlegen (dann zwingend mit Quelle
-  und Stand in `baggage_source`) - und die Zahlen dafuer muessen von den
-  Anbieterseiten geholt, nicht aus dem Gedaechtnis geschrieben werden.
+  **Zweite Runde, die veroeffentlichten Gepaeckseiten (probe-baggage-rules.yml,
+  07.08.2026): auch nicht auslesbar.**
+  - `ryanair.com/.../Baggage` -> HTTP 403; die anderen Ryanair-Seiten liefern
+    4-46 Zeichen Text ("Fees", "Book cheap flights...") - JS-gerendert.
+  - `flixbus.de/service/gepaeck` und `.com/service/luggage` -> HTTP 200 mit
+    ~6000 Zeichen, aber **keine einzige kg-/cm-Angabe im Text**; die Zahlen
+    stehen in nachgeladenen Komponenten.
+  - `help.flixbus.com` -> Salesforce-SPA, Text ist "FlixHelp Loading ...".
+  Damit gibt es **keine belegbare Quelle** fuer Kilo-Zahlen. Der Ausweg ohne
+  Erfindung: `BAGGAGE_RULES_LINKS` in app.js verlinkt die Gepaeckseite des
+  Anbieters direkt aus der Angebotszeile ("🧳 Gepaeckregeln"). Wer spaeter
+  echte Zahlen hat (vom Nutzer genannt, aus einem neuen Endpunkt), traegt
+  sie in `included_*` ein - **immer mit Quelle und Stand in
+  `baggage_source`**, nie aus dem Gedaechtnis.
 - **Beispieldaten sind Opt-in (`route.showMockData`), Voreinstellung aus.**
   Vorher füllten die Mock-Generatoren jede Lücke, und eine Suche ohne echte
   Treffer zeigte drei erfundene Preise statt einer ehrlichen Leermeldung -

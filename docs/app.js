@@ -4,7 +4,7 @@
 // guessing: if this doesn't match, the browser is running a cached old
 // app.js and any "the fix didn't work" report is about the old file. Bump
 // together with the ?v= in index.html.
-const BUILD_STAMP = '2026-08-07-4';
+const BUILD_STAMP = '2026-08-07-5';
 document.getElementById('buildStamp').textContent = BUILD_STAMP;
 
 /* =========================================================================
@@ -2085,7 +2085,38 @@ function baggageChips(offer) {
     const kg = offer.includedCheckedBagKg != null ? ` ${fmtKg(offer.includedCheckedBagKg)}` : '';
     chips.push(`🧳 ${count}Koffer${kg} inkl.`);
   }
+  // Sagt die Quelle nichts, ist der Link zur Anbieterseite die einzige
+  // ehrliche Antwort - besser als eine Leerstelle und besser als geraten.
+  if (!chips.length) {
+    const url = baggageRulesUrl(offer);
+    if (url) chips.push(`🧳 <a href="${url}" target="_blank" rel="noopener">Gepäckregeln</a>`);
+  }
   return chips;
+}
+
+/* Gepäckregeln des Anbieters - verlinkt, nicht abgeschrieben.
+ *
+ * Zweimal live geprüft (07.08.2026, siehe HANDOFF): weder Ryanair noch
+ * FlixBus noch Skiplagged nennen in ihrer *API* ein Gepäckfeld, und ihre
+ * veröffentlichten Gepäckseiten sind JS-gerendert bzw. bot-geschützt
+ * (Ryanair 403, FlixBus-Hilfe eine leere Salesforce-Hülle). Es gibt also
+ * keine Quelle, aus der sich "8 kg" belegen ließe - und aus dem Gedächtnis
+ * geschriebene Kilos wären genau der Fehler, den dieses Projekt nicht
+ * nochmal macht.
+ *
+ * Also der ehrliche Ersatz: ein Klick auf die Seite, die es wirklich weiß.
+ * Nur für Anbieter, die im Angebot namentlich stehen - ein geratener Link
+ * wäre auch wieder eine Behauptung.
+ */
+const BAGGAGE_RULES_LINKS = [
+  ['FlixBus', 'https://www.flixbus.de/service/gepaeck'],
+  ['Ryanair', 'https://www.ryanair.com/de/de/nuetzliche-infos/hilfe-center/faq-uebersicht/Gepack'],
+];
+
+function baggageRulesUrl(offer) {
+  const site = offer.bookingSite || '';
+  const hit = BAGGAGE_RULES_LINKS.find(([name]) => site.startsWith(name));
+  return hit ? hit[1] : '';
 }
 
 // "7 kg", nicht "7.0 kg" - und 22,5 kg bleibt 22,5 kg.
