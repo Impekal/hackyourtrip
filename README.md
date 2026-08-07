@@ -505,15 +505,24 @@ Zahlungsdaten.
 3. Worker neu deployen (Actions-Tab -> *Deploy proxy worker* -> *Run
    workflow*) - der Key wird automatisch als Worker-Secret gesetzt.
 
-Sind mehrere gesetzt, gewinnt Gemini vor Groq vor Mistral. Ohne jeden Key
-funktioniert alles andere normal weiter; der Button zeigt dann nur einen
-Hinweis. Der Key liegt ausschließlich im Worker, nie im Browser-JS.
+Sind mehrere gesetzt, wird Gemini zuerst versucht, dann Groq, dann Mistral -
+und zwar **nacheinander, bis einer antwortet**. Ein Key, der zwar gesetzt ist,
+aber abgelehnt wird (Kontingent aufgebraucht, Abrechnung abgelaufen, Key
+zurückgezogen), blockiert die Empfehlung deshalb nicht mehr: der nächste
+Anbieter übernimmt, und die Antwort nennt im Feld `fallbackFrom`, wer warum
+übersprungen wurde. Ein nicht mehr benutzter Key darf also ruhig stehen
+bleiben. Ohne jeden Key funktioniert alles andere normal weiter; der Button
+zeigt dann nur einen Hinweis. Der Key liegt ausschließlich im Worker, nie im
+Browser-JS.
 
 **Modellname überschreiben:** Anbieter mustern Modellnamen gelegentlich aus.
 Falls die Antwort dann "model not found" o.ä. lautet, muss dafür kein Code
 geändert werden - eine Repo-*Variable* (nicht Secret) namens `AI_MODEL`
 setzen und neu deployen. Standard ist `gemini-2.0-flash`,
-`llama-3.3-70b-versatile` bzw. `mistral-small-latest`.
+`llama-3.3-70b-versatile` bzw. `mistral-small-latest`. `AI_MODEL` benennt
+*ein* konkretes Modell und gilt deshalb nur für den erstplatzierten Anbieter -
+die Ausweichanbieter nehmen ihren eigenen Standard, sonst würde ihnen ein
+Modellname zugeschoben, den sie nicht kennen.
 
 **Kann ich einen Key aus einem anderen Google-Projekt nehmen?** Ja - der
 Worker schickt den Key nur weiter, das Projekt dahinter ist ihm egal. Zwei

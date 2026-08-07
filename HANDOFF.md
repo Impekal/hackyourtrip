@@ -640,6 +640,29 @@ lässt den Deploy bewusst *nicht* scheitern, wenn geblockt wird.
 Travelpayouts-Hotels **mit** Token: 404/403 auf allen vier Pfaden - das
 Hotel-Programm ist im Konto schlicht nicht freigeschaltet, kein Code-Problem.
 
+**Ergebnis der Live-Messung vom Worker aus (07.08.2026) - hier ist die Grenze:**
+
+| Aufruf | vom GitHub-Runner | vom Cloudflare-Worker |
+|---|---|---|
+| `GET /bahn/orte` (Stationssuche) | 403 OPS_BLOCKED | **200, echte Daten** |
+| `POST /bahn/fahrplan` (Preise) | 403 OPS_BLOCKED | 403 |
+| `POST /bahn/tagesbestpreis` | 403 OPS_BLOCKED | 403 |
+
+Das ist die entscheidende Beobachtung: Cloudflares Ausgangs-IP ist **nicht**
+gesperrt - sonst wäre auch die Ortssuche geblockt. Geschützt ist gezielt der
+*Buchungs-/Preispfad*. `X-Correlation-ID` im Format der Website
+(zwei UUIDs mit Unterstrich) wurde nachgereicht und ändert nichts.
+Damit ist die Sache ausgereizt, was von einem Server aus geht: was noch
+fehlt, wäre eine echte Browser-Sitzung samt Cookies und passendem
+TLS-Fingerprint - Letzteren kann ein Worker gar nicht setzen, und es wäre
+ein bewusstes Umgehen einer Schutzmassnahme. **Nicht weiter probieren.**
+
+Die Route bleibt trotzdem im Worker: `/bahn/orte` liefert heute schon echte
+DB-Stationen inklusive `extId` (EVA-Nummer) und Produktliste, und falls die
+DB den Preispfad je öffnet, ist es ein Deploy und keine Neuentwicklung. Ein
+403 kommt als `blocked: true` zurück, damit die Seite den Grund nennen kann,
+statt stumm keinen Bahnpreis zu zeigen.
+
 Weiterhin offen bleibt der **Preis** für Bahn (und Hotel). DB-Wrapper regelmässig neu
 prüfen: kämen sie zurück, gäbe es dort sogar Sparpreise.
 
