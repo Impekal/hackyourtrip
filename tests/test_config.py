@@ -151,3 +151,57 @@ routes:
     path.write_text(yaml_content)
     route = load_routes(path)[0]
     assert route.nearby_origin_km == 0 and route.nearby_destination_km == 0
+
+
+def test_return_date_before_departure_is_dropped(tmp_path: Path, capsys):
+    """Eine Rückreise vor der Hinreise ist keine Reise. Im Formular verhindert
+    das `min` des Datumsfeldes; routes.yaml wird von Hand geschrieben."""
+    yaml_content = """
+routes:
+  - id: verdreht
+    origin: HAM
+    destination: LYS
+    depart_date_from: 2026-09-15
+    depart_date_until: 2026-09-15
+    round_trip: true
+    return_date: 2026-09-10
+"""
+    path = tmp_path / "routes.yaml"
+    path.write_text(yaml_content)
+    route = load_routes(path)[0]
+    assert route.return_date is None  # kein erfundenes Ersatzdatum
+    # Und es wird gesagt, nicht stillschweigend verschluckt.
+    assert "return_date" in capsys.readouterr().out
+
+
+def test_return_date_on_the_same_day_is_allowed(tmp_path: Path):
+    # Tagesausflug hin und zurück - üblich, also erlaubt.
+    yaml_content = """
+routes:
+  - id: tagestour
+    origin: HAM
+    destination: BRE
+    depart_date_from: 2026-09-15
+    depart_date_until: 2026-09-15
+    round_trip: true
+    return_date: 2026-09-15
+"""
+    path = tmp_path / "routes.yaml"
+    path.write_text(yaml_content)
+    assert load_routes(path)[0].return_date == date(2026, 9, 15)
+
+
+def test_a_later_return_date_is_kept(tmp_path: Path):
+    yaml_content = """
+routes:
+  - id: normal
+    origin: HAM
+    destination: LYS
+    depart_date_from: 2026-09-15
+    depart_date_until: 2026-09-15
+    round_trip: true
+    return_date: 2026-09-20
+"""
+    path = tmp_path / "routes.yaml"
+    path.write_text(yaml_content)
+    assert load_routes(path)[0].return_date == date(2026, 9, 20)

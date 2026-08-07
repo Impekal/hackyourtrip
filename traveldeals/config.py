@@ -44,6 +44,24 @@ def _optional_float(value) -> float | None:
     return None if value is None else float(value)
 
 
+def _parse_return_date(raw: dict, depart_from: date) -> date | None:
+    """A return before the outbound is not a trip.
+
+    The web form prevents it with the date field's `min`, but routes.yaml is
+    hand-edited and has no such guard. Dropping the date (and saying so) is
+    better than silently searching a reversed trip - and better than
+    inventing a corrected date the user never wrote.
+    """
+    if not raw.get("return_date"):
+        return None
+    return_date = _parse_date(raw["return_date"])
+    if return_date < depart_from:
+        print(f"[config] Route {raw.get('id', '?')!r}: return_date {return_date} liegt vor "
+              f"depart_date_from {depart_from} - wird ignoriert, Suche läuft als reine Hinreise.")
+        return None
+    return return_date
+
+
 def _parse_route(raw: dict) -> RoutePreference:
     baggage_raw = raw.get("baggage", {}) or {}
     rail_raw = raw.get("rail", {}) or {}
@@ -99,7 +117,7 @@ def _parse_route(raw: dict) -> RoutePreference:
         # ends, so an existing routes.yaml keeps behaving the same.
         nearby_origin_km=int(raw.get("nearby_origin_km", raw.get("nearby_km", 0)) or 0),
         nearby_destination_km=int(raw.get("nearby_destination_km", raw.get("nearby_km", 0)) or 0),
-        return_date=_parse_date(raw["return_date"]) if raw.get("return_date") else None,
+        return_date=_parse_return_date(raw, _parse_date(raw["depart_date_from"])),
         notes=raw.get("notes", ""),
     )
 

@@ -4,7 +4,7 @@
 // guessing: if this doesn't match, the browser is running a cached old
 // app.js and any "the fix didn't work" report is about the old file. Bump
 // together with the ?v= in index.html.
-const BUILD_STAMP = '2026-08-06-15';
+const BUILD_STAMP = '2026-08-07-1';
 document.getElementById('buildStamp').textContent = BUILD_STAMP;
 
 /* =========================================================================
@@ -102,6 +102,37 @@ function updateReturnDateVisibility() {
   if (returnDateGroup) returnDateGroup.hidden = !(cfg.roundTrip && roundTripEl && roundTripEl.checked);
 }
 document.getElementById('roundTrip')?.addEventListener('change', updateReturnDateVisibility);
+
+/* Eine Rückreise vor der Hinreise ist keine Reise.
+ *
+ * Über `min` statt über eine Fehlermeldung nach dem Absenden: der
+ * Datumsdialog lässt die früheren Tage dann gar nicht erst anklicken, und
+ * eine trotzdem hineingetippte Datei blockt die eingebaute
+ * Formularprüfung des Browsers ab. Wird das Hinreisedatum nachträglich
+ * nach hinten geschoben, wandert das Rückreisedatum mit - sonst stünde
+ * dort ein Wert, der die Suche stillschweigend blockiert.
+ *
+ * Dasselbe gilt für "Datum bis" gegenüber "Datum von": ein Zeitraum, der
+ * vor seinem Anfang endet, findet nie etwas. */
+function syncDateBounds({ pushFollowers = true } = {}) {
+  const fromEl = document.getElementById('departFrom');
+  const untilEl = document.getElementById('departUntil');
+  const returnEl = document.getElementById('returnDate');
+  const from = fromEl.value;
+  if (!from) return;
+
+  // Gleicher Tag ist erlaubt - ein Tagesausflug hin und zurück ist üblich.
+  returnEl.min = from;
+  untilEl.min = from;
+  if (!pushFollowers) return;
+  if (returnEl.value && returnEl.value < from) returnEl.value = from;
+  if (untilEl.value && untilEl.value < from) untilEl.value = from;
+}
+document.getElementById('departFrom').addEventListener('change', () => syncDateBounds());
+// input feuert auch beim Tippen: die Grenzen mitziehen, aber ein halb
+// getipptes Datum nicht schon umschreiben.
+document.getElementById('departFrom').addEventListener('input', () => syncDateBounds({ pushFollowers: false }));
+
 applyModeVisibility(activeMode);
 
 // "Gewicht egal" greys out the matching kg field, so it's obvious the number
@@ -2173,6 +2204,17 @@ const trackYaml = document.getElementById('trackYaml');
 
 function numOrNull(id) { const v = document.getElementById(id).value; return v === '' ? null : Number(v); }
 
+// Rückreisedatum, aber nur wenn es überhaupt eines sein kann: Modus erlaubt
+// Hin+Rück, Haken gesetzt, Datum da - und nicht vor der Hinreise.
+function validReturnDate(cfg) {
+  if (!(cfg.roundTrip && document.getElementById('roundTrip').checked)) return null;
+  const value = document.getElementById('returnDate').value;
+  if (!value) return null;
+  const from = document.getElementById('departFrom').value;
+  if (from && value < from) return null;  // Zeichenketten-Vergleich reicht bei ISO-Daten
+  return new Date(value);
+}
+
 function readRouteFromForm() {
   const cfg = MODE_TAB_CONFIG[activeMode];
   return {
@@ -2214,8 +2256,11 @@ function readRouteFromForm() {
     nearbyOriginKm: Number(document.getElementById('nearbyOriginKm').value || 0),
     nearbyDestinationKm: Number(document.getElementById('nearbyDestinationKm').value || 0),
     roundTrip: cfg.roundTrip && document.getElementById('roundTrip').checked,
-    returnDate: (cfg.roundTrip && document.getElementById('roundTrip').checked && document.getElementById('returnDate').value)
-      ? new Date(document.getElementById('returnDate').value) : null,
+    // Zweiter Riegel hinter dem `min` des Datumsfeldes: über die Oberfläche
+    // ist ein früheres Rückreisedatum nicht mehr erreichbar, aber ein Wert,
+    // der es trotzdem hierher schafft, darf keine Suche "zurück vor hin"
+    // auslösen. Dann lieber ohne Rückreise als mit einem erfundenen Datum.
+    returnDate: validReturnDate(cfg),
     hotelPrefs: {
       minStars: document.getElementById('minStars').value ? Number(document.getElementById('minStars').value) : null,
       minRating: numOrNull('minRating'),
@@ -2868,4 +2913,6 @@ async function loadAlerts() {
   document.getElementById('departFrom').value = isoDay(from);
   document.getElementById('departUntil').value = isoDay(until);
   document.getElementById('returnDate').value = isoDay(addDays(until, 4));
+  // Erst jetzt, wo die Felder Werte haben, greifen die Untergrenzen.
+  syncDateBounds();
 })();

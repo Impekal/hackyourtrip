@@ -202,7 +202,15 @@ auf einem Dashboard die besten aktuellen Optionen pro Strecke zeigt.
   großer DACH-/europäischer Bahnhöfe.
 - **Hin- und Rückreise:** bei Flug/Bahn/Bus (und deren "was ist besser"-Kombis)
   lässt sich zwischen Nur-Hinfahrt und Hin+Rück wählen (`round_trip` +
-  `return_date` in `RoutePreference`). Bei echten Travelpayouts-Daten liefert
+  `return_date` in `RoutePreference`). Ein Rückreisedatum **vor** der Hinreise
+  ist gar nicht erst auswählbar: das Feld trägt die Hinreise als Untergrenze,
+  frühere Tage sind im Kalender gesperrt. Wird die Hinreise nachträglich nach
+  hinten geschoben, wandert die Rückreise mit - sonst bliebe dort ein Wert
+  stehen, der die Suche stillschweigend blockiert. Gleicher Tag bleibt erlaubt
+  (Tagesausflug). Dasselbe gilt für "Datum bis" gegenüber "Datum von".
+  In `routes.yaml`, die von Hand geschrieben wird, gibt es keinen Kalender -
+  dort wird ein verdrehtes `return_date` beim Laden verworfen und gemeldet,
+  statt eine Rückreise vor der Hinreise zu suchen oder ein Datum zu erfinden. Bei echten Travelpayouts-Daten liefert
   die API dafür einen kombinierten Gesamtpreis für beide Strecken (kein
   client-seitiges Aufsummieren nötig); die Mock-Provider bilden das mit einer
   synthetisierten Rückreise nach demselben Prinzip nach. Reine Hotel-Modi
