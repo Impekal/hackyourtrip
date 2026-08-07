@@ -123,6 +123,10 @@ const BAHN_UPSTREAM = {
   fahrplan: "https://www.bahn.de/web/api/angebote/fahrplan",
   bestpreis: "https://www.bahn.de/web/api/angebote/tagesbestpreis",
 };
+// Measured 07.08.2026: from a Cloudflare Worker the GET station search
+// answers 200 with real data, while the POST fare search answers 403. The
+// IP is therefore not the problem - the request shape is. bahn.de's own
+// frontend sends a correlation ID on every call, so it goes out here too.
 const BAHN_HEADERS = {
   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
   Accept: "application/json",
@@ -131,6 +135,11 @@ const BAHN_HEADERS = {
   Origin: "https://www.bahn.de",
   Referer: "https://www.bahn.de/buchung/fahrplan/suche",
 };
+
+// The site's format is two UUIDs joined by an underscore.
+function bahnCorrelationId() {
+  return `${crypto.randomUUID()}_${crypto.randomUUID()}`;
+}
 // All products, i.e. don't silently hide regional trains - the cheap fare is
 // often exactly the slow connection.
 const BAHN_PRODUCTS = ["ICE", "EC_IC", "IR", "REGIONAL", "SBAHN", "BUS",
@@ -524,7 +533,7 @@ async function handleBahnRequest(incoming, request, ctx, allowedOrigin) {
     }
     init = {
       method: "POST",
-      headers: BAHN_HEADERS,
+      headers: { ...BAHN_HEADERS, "X-Correlation-ID": bahnCorrelationId() },
       body: JSON.stringify(bahnSearchBody(from, to, stamp, incoming.searchParams.get("class"))),
     };
   }

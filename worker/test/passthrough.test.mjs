@@ -287,6 +287,18 @@ stubFetch({ verbindungen: [{ angebotsPreis: { betrag: 39.9, waehrung: 'EUR' } }]
   report(JSON.parse(last.init.body).klasse === 'KLASSE_1', 'first class is passed through');
 }
 
+// bahn.de's own frontend sends a correlation ID on every call, and the fare
+// endpoint is the one that refuses requests without it.
+{
+  const { last } = await call('/bahn/fahrplan?from=a&to=b&date=2026-09-15');
+  const id = last.init.headers['X-Correlation-ID'];
+  report(typeof id === 'string' && /^[0-9a-f-]{36}_[0-9a-f-]{36}$/.test(id),
+    'the fare search sends a correlation ID in the site\'s format', id);
+  const { last: again } = await call('/bahn/fahrplan?from=a&to=b&date=2026-09-16');
+  report(again.init.headers['X-Correlation-ID'] !== id,
+    'each fare search gets its own correlation ID');
+}
+
 // Regional trains must stay in: the cheap fare is often the slow connection.
 {
   const { last } = await call('/bahn/fahrplan?from=a&to=b&date=2026-09-15');
