@@ -242,17 +242,9 @@ class DealEngine:
 
     # -- building candidates -------------------------------------------------
 
-    @staticmethod
-    def _offer_total_duration(offer: Offer) -> float:
-        """Whole journey, not just the way out: a round-trip ticket carries
-        both legs in one offer. Without this it would rank as though the
-        return leg took no time at all."""
-        return round(offer.duration_hours + (offer.return_duration_hours or 0.0), 2)
-
     def _single_offer_option(self, mode: Mode, offer: Offer) -> TripOption:
         return TripOption(mode=mode, offers=[offer], total_price=offer.price,
-                           currency=offer.currency,
-                           total_duration_hours=self._offer_total_duration(offer),
+                           currency=offer.currency, total_duration_hours=offer.duration_hours,
                            score=0.0)
 
     def _combo_options(self, combo_mode: Mode, transport_offers: list[Offer],

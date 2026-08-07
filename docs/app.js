@@ -4,7 +4,7 @@
 // guessing: if this doesn't match, the browser is running a cached old
 // app.js and any "the fix didn't work" report is about the old file. Bump
 // together with the ?v= in index.html.
-const BUILD_STAMP = '2026-08-07-2';
+const BUILD_STAMP = '2026-08-07-3';
 document.getElementById('buildStamp').textContent = BUILD_STAMP;
 
 /* =========================================================================
@@ -1610,13 +1610,6 @@ function legDurations(option) {
   return null;  // einfache Fahrt
 }
 
-// Gesamte Reisezeit eines Angebots - beim Rückflugticket steckt der Rückweg
-// im selben Angebot. Ohne das sortierte ein kombiniertes Ticket sich vor
-// jede aus zwei Einzelfahrten gebaute Reise, weil nur der Hinweg zählte.
-function offerTotalDuration(offer) {
-  return round2(offer.durationHours + (offer.returnDurationHours || 0));
-}
-
 // "2h hin · 5h zurück" statt "7h". Die Summe beantwortet nicht, wonach man
 // bei einer Hin-und-Rückreise tatsächlich schaut - ob der Rückweg abends
 // noch zumutbar ist, zum Beispiel.
@@ -1769,7 +1762,7 @@ async function runSearch(route) {
     const candidates = [];
     for (const mode of modes) {
       if (['flight', 'train', 'bus', 'hotel'].includes(mode)) {
-        for (const offer of pools[mode]) candidates.push(candidate(mode, [offer], offer.price, offerTotalDuration(offer)));
+        for (const offer of pools[mode]) candidates.push(candidate(mode, [offer], offer.price, offer.durationHours));
       } else if (COMBO_TRANSPORT_MODE[mode]) {
         for (const combo of buildCombos(pools[COMBO_TRANSPORT_MODE[mode]], pools.hotel)) {
           candidates.push(candidate(mode, [combo.transport, combo.hotel], combo.price, combo.transport.durationHours));
@@ -1798,7 +1791,7 @@ async function runSearch(route) {
       } else if (OR_COMBO_MODES[mode]) {
         const [modeA, modeB] = OR_COMBO_MODES[mode];
         for (const offer of [...pools[modeA], ...pools[modeB]]) {
-          candidates.push(candidate(mode, [offer], offer.price, offerTotalDuration(offer)));
+          candidates.push(candidate(mode, [offer], offer.price, offer.durationHours));
         }
       }
     }
@@ -1810,14 +1803,7 @@ async function runSearch(route) {
       // An unknown price can't blow a budget. Dropping the option would hide a
       // real connection over a number nobody has.
       if (route.budget != null && !c.hasUnknownPrice && c.price > route.budget) return false;
-      if (route.maxDuration != null && c.mode !== 'hotel') {
-        // Per leg, not the sum: 5h out and 5h back is not a "10h trip" that a
-        // 8h limit should hide - and with the "Hin + Zurück" section that
-        // would now silently empty the whole list.
-        const legs = c.offers.filter(o => o.mode !== 'hotel')
-          .flatMap(o => [o.durationHours, ...(o.returnDurationHours != null ? [o.returnDurationHours] : [])]);
-        if (Math.max(...(legs.length ? legs : [c.durationHours])) > route.maxDuration) return false;
-      }
+      if (route.maxDuration != null && c.durationHours > route.maxDuration && c.mode !== 'hotel') return false;
       if (route.lowCost === 'exclude' && c.offers.some(o => o.isLowCost)) return false;
       if (route.lowCost === 'only') {
         // Only transport legs can be low-cost; a hotel leg in a combo must

@@ -223,10 +223,8 @@ auf einem Dashboard die besten aktuellen Optionen pro Strecke zeigt.
   bzw. `duration_back`) und eine aus zwei Einzelfahrten zusammengesetzte
   Reise. Nennt eine Quelle die Rückwegdauer nicht, steht **„Rückweg ohne
   Dauerangabe"** statt einer vom Hinweg gespiegelten Zahl.
-  Für die Sortierung nach Dauer zählt weiterhin die **Gesamtzeit** - vorher
-  zählte beim Rückflugticket nur der Hinweg, wodurch es sich vor jede aus
-  zwei Einzelfahrten gebaute Reise sortierte, als bräuchte der Rückweg keine
-  Zeit. Dasselbe gilt für den Filter „Max. Reisezeit".
+  Das ist **reine Darstellung**: „Max. Reisezeit" und die Sortierung nach
+  Dauer rechnen unverändert mit der Dauer der Option.
 - **Drei Ergebnis-Tabs bei Hin+Rück:** „Nur Hinfahrt", „Nur Rückfahrt"
   und „Hin + Zurück" - jeder mit eigener Liste und eigener Sortierung, als
   echte Reiterleiste über den Ergebnissen (`role="tablist"`, Pfeiltasten/Pos1/
@@ -252,8 +250,6 @@ auf einem Dashboard die besten aktuellen Optionen pro Strecke zeigt.
   Preislose Fahrplan-Verbindungen sortieren in allen Preis-Reihenfolgen hinter
   jedes bepreiste Angebot (ihre 0 ist ein Platzhalter, kein Preis) - außer
   bei „Dauer", denn die Dauer, die sie mitbringen, ist echt.
-- **Maximale Reisezeit gilt pro Strecke,** nicht für die Summe: 5h hin und 5h
-  zurück ist keine „10h-Reise", die ein 8h-Limit ausblenden dürfte.
 - **Freigepäck im Angebot** (🎒 Handgepäck 8 kg inkl. / 🧳 Koffer 23 kg inkl.,
   beides nebeneinander wenn beides im Preis ist): Zwei Flüge zu 45 € und 39 €
   sind nicht vergleichbar, wenn beim einen der Koffer 45 € extra kostet.
