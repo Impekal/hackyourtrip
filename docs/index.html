@@ -97,6 +97,12 @@
   .sort-field select { font-size: 0.85rem; padding: 0.3rem 0.5rem; }
   .section-note { color: var(--text-dim); font-size: 0.82rem; margin: 0 0 0.8rem; }
 
+  /* Korrekturhinweis direkt am Feld - eine stillschweigend geänderte Eingabe
+     wirkt wie ein Fehler, eine erklärte nicht. */
+  .field-hint {
+    color: var(--alert); font-size: 0.72rem; line-height: 1.35; margin: 0.1rem 0 0;
+  }
+
   form.search { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 1.25rem; margin-bottom: 1.5rem; }
   .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 0.9rem; }
   .field { display: flex; flex-direction: column; gap: 0.3rem; }
@@ -316,10 +322,12 @@
         <div class="field" data-group="returnDateGroup">
           <label for="returnDate">Rückreisedatum</label>
           <input type="date" id="returnDate">
+          <p class="field-hint" id="returnDateHint" hidden></p>
         </div>
         <div class="field" data-group="departUntilGroup">
           <label for="departUntil" id="departUntilLabel">Datum bis</label>
           <input type="date" id="departUntil">
+          <p class="field-hint" id="departUntilHint" hidden></p>
         </div>
         <div class="field">
           <label for="flexBefore">Flex. Tage davor</label>
@@ -644,6 +652,6 @@
 <!-- The ?v= is deliberate: GitHub Pages lets browsers cache app.js, so a
      fix could ship and the visitor would keep running the old file. Bump
      this whenever app.js changes in a way users need to see. -->
-<script src="./app.js?v=2026-08-07-5"></script>
+<script src="./app.js?v=2026-08-07-6"></script>
 </body>
 </html>

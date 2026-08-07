@@ -203,8 +203,14 @@ auf einem Dashboard die besten aktuellen Optionen pro Strecke zeigt.
 - **Hin- und Rückreise:** bei Flug/Bahn/Bus (und deren "was ist besser"-Kombis)
   lässt sich zwischen Nur-Hinfahrt und Hin+Rück wählen (`round_trip` +
   `return_date` in `RoutePreference`). Ein Rückreisedatum **vor** der Hinreise
-  ist gar nicht erst auswählbar: das Feld trägt die Hinreise als Untergrenze,
-  frühere Tage sind im Kalender gesperrt. Wird die Hinreise nachträglich nach
+  bleibt nicht stehen. Das Feld trägt die Hinreise als `min` - aber darauf
+  allein ist kein Verlass: Chrome graut frühere Tage im Kalender aus,
+  Firefox lässt sie anklicken, und tippen kann man sie überall. Die
+  eigentliche Garantie ist deshalb die Korrektur: ein früheres Datum wird
+  auf den Hinreisetag zurückgesetzt, sobald die Eingabe steht, und der Grund
+  steht direkt unter dem Feld ("Rückreise kann nicht vor der Hinreise
+  liegen – auf 15.09.2026 gesetzt"). Ein Wert, der sich ohne Erklärung von
+  selbst ändert, wirkt wie ein Fehler; ein erklärter nicht. Wird die Hinreise nachträglich nach
   hinten geschoben, wandert die Rückreise mit - sonst bliebe dort ein Wert
   stehen, der die Suche stillschweigend blockiert. Gleicher Tag bleibt erlaubt
   (Tagesausflug). Dasselbe gilt für "Datum bis" gegenüber "Datum von".

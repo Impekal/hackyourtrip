@@ -4,7 +4,7 @@
 // guessing: if this doesn't match, the browser is running a cached old
 // app.js and any "the fix didn't work" report is about the old file. Bump
 // together with the ?v= in index.html.
-const BUILD_STAMP = '2026-08-07-5';
+const BUILD_STAMP = '2026-08-07-6';
 document.getElementById('buildStamp').textContent = BUILD_STAMP;
 
 /* =========================================================================
@@ -112,15 +112,25 @@ document.getElementById('roundTrip')?.addEventListener('change', updateReturnDat
 
 /* Eine Rückreise vor der Hinreise ist keine Reise.
  *
- * Über `min` statt über eine Fehlermeldung nach dem Absenden: der
- * Datumsdialog lässt die früheren Tage dann gar nicht erst anklicken, und
- * eine trotzdem hineingetippte Datei blockt die eingebaute
- * Formularprüfung des Browsers ab. Wird das Hinreisedatum nachträglich
- * nach hinten geschoben, wandert das Rückreisedatum mit - sonst stünde
- * dort ein Wert, der die Suche stillschweigend blockiert.
+ * `min` allein reicht dafür nicht - und das war der Fehler in der ersten
+ * Fassung. Chrome graut frühere Tage im Kalender aus, aber Firefox lässt
+ * sie anklicken, und tippen kann man sie überall. `min` bleibt also als
+ * erste Hürde, die eigentliche Garantie ist die Korrektur unten: ein
+ * früheres Datum wird auf den Hinreisetag zurückgesetzt, sobald die
+ * Eingabe steht - in jedem Browser gleich.
+ *
+ * Die Korrektur wird am Feld erklärt. Ein Wert, der sich ohne Erklärung
+ * von selbst ändert, wirkt wie ein Fehler; ein erklärter nicht.
  *
  * Dasselbe gilt für "Datum bis" gegenüber "Datum von": ein Zeitraum, der
  * vor seinem Anfang endet, findet nie etwas. */
+function showFieldHint(id, text) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = text;
+  el.hidden = !text;
+}
+
 function syncDateBounds({ pushFollowers = true } = {}) {
   const fromEl = document.getElementById('departFrom');
   const untilEl = document.getElementById('departUntil');
@@ -132,9 +142,47 @@ function syncDateBounds({ pushFollowers = true } = {}) {
   returnEl.min = from;
   untilEl.min = from;
   if (!pushFollowers) return;
-  if (returnEl.value && returnEl.value < from) returnEl.value = from;
-  if (untilEl.value && untilEl.value < from) untilEl.value = from;
+  if (returnEl.value && returnEl.value < from) {
+    returnEl.value = from;
+    showFieldHint('returnDateHint',
+      `Rückreise kann nicht vor der Hinreise liegen – auf ${fmtDay(new Date(from))} gesetzt.`);
+  }
+  if (untilEl.value && untilEl.value < from) {
+    untilEl.value = from;
+    showFieldHint('departUntilHint',
+      `„Datum bis" kann nicht vor „Datum von" liegen – auf ${fmtDay(new Date(from))} gesetzt.`);
+  }
 }
+
+// Die eigentliche Garantie: was der Browser durchgelassen hat, wird hier
+// zurechtgerückt - egal ob geklickt, getippt oder eingefügt.
+function enforceDateOrder(fieldId, hintId, label) {
+  const el = document.getElementById(fieldId);
+  const fromEl = document.getElementById('departFrom');
+  const fix = () => {
+    const from = fromEl.value;
+    if (!el.value || !from) return;
+    if (el.value < from) {
+      el.value = from;
+      showFieldHint(hintId, `${label} – auf ${fmtDay(new Date(from))} gesetzt.`);
+    } else {
+      showFieldHint(hintId, '');
+    }
+  };
+  // Bewusst nur `change`/`blur`, nicht `input`: beim Bearbeiten eines
+  // bestehenden Datums feuert `input` in Chrome nach jedem Segment und
+  // würde mitten in der Eingabe dazwischenfunken.
+  el.addEventListener('change', fix);
+  el.addEventListener('blur', fix);
+  return fix;
+}
+// Die Rueckgabewerte sind der Riegel vor der Suche: was auch immer im Feld
+// steht, wird vor dem Absenden zurechtgerueckt.
+const fixReturnDate = enforceDateOrder('returnDate', 'returnDateHint',
+  'Rückreise kann nicht vor der Hinreise liegen');
+const fixDepartUntil = enforceDateOrder('departUntil', 'departUntilHint',
+  '„Datum bis" kann nicht vor „Datum von" liegen');
+
 document.getElementById('departFrom').addEventListener('change', () => syncDateBounds());
 // input feuert auch beim Tippen: die Grenzen mitziehen, aber ein halb
 // getipptes Datum nicht schon umschreiben.
@@ -2937,6 +2985,11 @@ aiButton.addEventListener('click', requestAiRecommendation);
 
 searchForm.addEventListener('submit', async (ev) => {
   ev.preventDefault();
+  // Letzter Riegel: ein Datum, das Browser und Feld-Listener durchgelassen
+  // haben (eingefügt, per Skript gesetzt, autovervollständigt), wird hier
+  // korrigiert - sichtbar, bevor gesucht wird.
+  fixReturnDate();
+  fixDepartUntil();
   const route = readRouteFromForm();
   searchMetaEl.textContent = 'suche…';
   searchResultsEl.innerHTML = '';
