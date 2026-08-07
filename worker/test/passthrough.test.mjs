@@ -245,5 +245,76 @@ globalThis.fetch = async () => { throw new Error('feed down'); };
     'deals: a dead feed yields an empty list, not an error');
 }
 
+// --- /bahn/* -------------------------------------------------------------
+// The only known source of real DB *fares*. Upstream wants POST; the proxy
+// only ever accepts GET, so the body is built here from whitelisted params.
+stubFetch([{ id: 'A=1@O=Berlin Hbf@L=8011160@', name: 'Berlin Hbf' }]);
+{
+  const { resp, body, last } = await call('/bahn/orte?q=Berlin%20Hbf');
+  report(resp.status === 200 && body[0].name === 'Berlin Hbf'
+    && last.url.startsWith('https://www.bahn.de/web/api/reiseloesung/orte')
+    && new URL(last.url).searchParams.get('suchbegriff') === 'Berlin Hbf',
+    'bahn orte forwards the search term', last?.url);
+}
+
+stubFetch({ verbindungen: [{ angebotsPreis: { betrag: 39.9, waehrung: 'EUR' } }] });
+{
+  const { resp, body, last } = await call(
+    '/bahn/fahrplan?from=A%3D1%40L%3D8011160%40&to=A%3D1%40L%3D8000261%40&date=2026-09-15T08:00:00');
+  const sent = JSON.parse(last.init.body);
+  report(resp.status === 200 && body.verbindungen[0].angebotsPreis.betrag === 39.9
+    && last.init.method === 'POST'
+    && sent.abfahrtsHalt === 'A=1@L=8011160@' && sent.ankunftsHalt === 'A=1@L=8000261@'
+    && sent.anfrageZeitpunkt === '2026-09-15T08:00:00'
+    && sent.klasse === 'KLASSE_2',
+    'bahn fahrplan turns GET params into the upstream POST body',
+    JSON.stringify(sent).slice(0, 200));
+}
+
+// A bare day is what a date input produces; widen it rather than reject it.
+{
+  const { last } = await call('/bahn/fahrplan?from=a&to=b&date=2026-09-15');
+  report(JSON.parse(last.init.body).anfrageZeitpunkt === '2026-09-15T08:00:00',
+    'a bare date is widened to a timestamp');
+  const { last: best } = await call('/bahn/bestpreis?from=a&to=b&date=2026-09-15');
+  report(JSON.parse(best.init.body).anfrageZeitpunkt === '2026-09-15T00:00:00'
+    && best.url.endsWith('/tagesbestpreis'),
+    'bestpreis scans from midnight, not from 08:00', best?.url);
+}
+
+{
+  const { last } = await call('/bahn/fahrplan?from=a&to=b&date=2026-09-15&class=1');
+  report(JSON.parse(last.init.body).klasse === 'KLASSE_1', 'first class is passed through');
+}
+
+// Regional trains must stay in: the cheap fare is often the slow connection.
+{
+  const { last } = await call('/bahn/fahrplan?from=a&to=b&date=2026-09-15');
+  const products = JSON.parse(last.init.body).produktgattungen;
+  report(products.includes('REGIONAL') && products.includes('ICE'),
+    'all product types are searched, not just long distance');
+}
+
+{
+  const { resp } = await call('/bahn/fahrplan?from=a&to=b');
+  report(resp.status === 400, 'bahn fahrplan without a date -> 400');
+  const { resp: noQ } = await call('/bahn/orte');
+  report(noQ.status === 400, 'bahn orte without q -> 400');
+  const { resp: bad } = await call('/bahn/fahrplan?from=a&to=b&date=15.09.2026');
+  report(bad.status === 400, 'a malformed date is rejected before it reaches DB');
+  const { resp: nope } = await call('/bahn/nope?q=x');
+  report(nope.status === 404, 'unknown /bahn/* endpoint -> 404');
+}
+
+// The bot wall is the expected outcome from a datacenter IP. It has to be
+// distinguishable from a generic failure, so the page can say what happened
+// instead of quietly showing no train price at all.
+stubFetch({ status: 'ERROR', code: 'OPS_BLOCKED' }, 403);
+{
+  const { resp, body } = await call('/bahn/fahrplan?from=a&to=b&date=2026-09-15');
+  report(resp.status === 403 && body.blocked === true && /bot protection/i.test(body.error),
+    'a DB block is reported as blocked, not as an empty result', JSON.stringify(body));
+}
+
 globalThis.fetch = realFetch;
 if (failures) process.exitCode = 1;

@@ -111,6 +111,52 @@ const FLIXBUS_HEADERS = {
   "Accept-Language": "de-DE,de;q=0.9,en;q=0.8",
 };
 
+// Deutsche Bahn. This is the API bahn.de's own website calls, and it is the
+// only known source that returns actual train *fares* rather than just a
+// timetable (Transitous gives us the timetable already). It is protected by
+// a bot wall: a GitHub Actions runner gets 403 OPS_BLOCKED. Whether a
+// Cloudflare Worker's egress fares better is exactly what the /bahn/status
+// endpoint below is there to answer - so a failure here is a measurement,
+// not a bug, and the client is told which of the two it is.
+const BAHN_UPSTREAM = {
+  orte: "https://www.bahn.de/web/api/reiseloesung/orte",
+  fahrplan: "https://www.bahn.de/web/api/angebote/fahrplan",
+  bestpreis: "https://www.bahn.de/web/api/angebote/tagesbestpreis",
+};
+const BAHN_HEADERS = {
+  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+  Accept: "application/json",
+  "Accept-Language": "de-DE,de;q=0.9",
+  "Content-Type": "application/json; charset=UTF-8",
+  Origin: "https://www.bahn.de",
+  Referer: "https://www.bahn.de/buchung/fahrplan/suche",
+};
+// All products, i.e. don't silently hide regional trains - the cheap fare is
+// often exactly the slow connection.
+const BAHN_PRODUCTS = ["ICE", "EC_IC", "IR", "REGIONAL", "SBAHN", "BUS",
+                        "SCHIFF", "UBAHN", "TRAM", "ANRUFPFLICHTIG"];
+
+function bahnSearchBody(from, to, dateTime, klasse) {
+  return {
+    abfahrtsHalt: from,
+    ankunftsHalt: to,
+    anfrageZeitpunkt: dateTime,
+    ankunftSuche: "ABFAHRT",
+    klasse: klasse === "1" ? "KLASSE_1" : "KLASSE_2",
+    produktgattungen: BAHN_PRODUCTS,
+    reisende: [{
+      typ: "ERWACHSENER",
+      ermaessigungen: [{ art: "KEINE_ERMAESSIGUNG", klasse: "KLASSENLOS" }],
+      alter: [],
+      anzahl: 1,
+    }],
+    schnelleVerbindungen: true,
+    sitzplatzOnly: false,
+    bikeCarriage: false,
+    reservierungsKontingenteVorhanden: false,
+  };
+}
+
 // Skiplagged: covers the full-service carriers Ryanair doesn't fly and the
 // Travelpayouts cache misses. Quotes in USD (evidenced: the site renders "$",
 // and BER->BCN was 62.00 there where Ryanair said 53.36 EUR - ratio 0.86, the
@@ -196,21 +242,27 @@ function openAiStyleRequest(key, model, prompt, url) {
   };
 }
 
-function pickAiProvider(env) {
-  const provider = AI_PROVIDERS.find((p) => env[p.keyVar]);
-  if (!provider) return null;
-  const model = env.AI_MODEL || provider.defaultModel;
-  return {
-    name: provider.name,
-    model,
-    prepare: (prompt) => (provider.buildRequest
-      ? provider.buildRequest(env[provider.keyVar], model, prompt)
-      : openAiStyleRequest(env[provider.keyVar], model, prompt, provider.url)),
-    readText: provider.extractText
-      || ((payload) => payload?.choices?.[0]?.message?.content || ""),
-    readError: provider.extractError
-      || ((payload) => payload?.error?.message || payload?.message),
-  };
+// Every provider that has a key, in priority order. It is deliberately a
+// list and not a single pick: a key that is present can still be refused
+// (quota used up, billing lapsed, key revoked), and when that happens the
+// next configured provider should answer instead of the whole feature
+// going dark. AI_MODEL, if set, only applies to the first provider - it
+// names one specific model and would be nonsense passed to the others.
+function availableAiProviders(env) {
+  return AI_PROVIDERS.filter((p) => env[p.keyVar]).map((provider, index) => {
+    const model = (index === 0 && env.AI_MODEL) || provider.defaultModel;
+    return {
+      name: provider.name,
+      model,
+      prepare: (prompt) => (provider.buildRequest
+        ? provider.buildRequest(env[provider.keyVar], model, prompt)
+        : openAiStyleRequest(env[provider.keyVar], model, prompt, provider.url)),
+      readText: provider.extractText
+        || ((payload) => payload?.choices?.[0]?.message?.content || ""),
+      readError: provider.extractError
+        || ((payload) => payload?.error?.message || payload?.message),
+    };
+  });
 }
 
 const AI_MAX_BODY_BYTES = 32 * 1024;
@@ -249,8 +301,8 @@ async function handleAiRequest(request, env, allowedOrigin) {
   if (request.method !== "POST") {
     return jsonResponse({ error: "Use POST for /ai." }, 405, allowedOrigin);
   }
-  const provider = pickAiProvider(env);
-  if (!provider) {
+  const providers = availableAiProviders(env);
+  if (!providers.length) {
     // Not an error: the AI recommendation is optional, and the UI says so
     // rather than showing a failure.
     return jsonResponse({
@@ -274,28 +326,45 @@ async function handleAiRequest(request, env, allowedOrigin) {
     return jsonResponse({ error: "Missing 'prompt'." }, 400, allowedOrigin);
   }
 
-  const spec = provider.prepare(prompt);
-  let upstreamResponse;
-  try {
-    upstreamResponse = await fetch(spec.url, {
-      method: "POST",
-      headers: spec.headers,
-      body: JSON.stringify(spec.body),
-    });
-  } catch (err) {
-    return jsonResponse({ error: `${provider.name} request failed: ${err.message}` }, 502, allowedOrigin);
-  }
+  // Try each configured provider in turn. The first one that answers wins;
+  // the reasons the others gave are kept so a total failure still says what
+  // went wrong with each, instead of only naming the last one tried.
+  const failures = [];
+  for (const provider of providers) {
+    const spec = provider.prepare(prompt);
+    let upstreamResponse;
+    try {
+      upstreamResponse = await fetch(spec.url, {
+        method: "POST",
+        headers: spec.headers,
+        body: JSON.stringify(spec.body),
+      });
+    } catch (err) {
+      failures.push(`${provider.name}: request failed: ${err.message}`);
+      continue;
+    }
 
-  const payload = await upstreamResponse.json().catch(() => null);
-  if (!upstreamResponse.ok) {
-    const detail = provider.readError(payload) || `status ${upstreamResponse.status}`;
-    return jsonResponse({ error: `${provider.name} error: ${detail}` }, 502, allowedOrigin);
+    const payload = await upstreamResponse.json().catch(() => null);
+    if (!upstreamResponse.ok) {
+      failures.push(`${provider.name}: ${provider.readError(payload) || `status ${upstreamResponse.status}`}`);
+      continue;
+    }
+    const text = (provider.readText(payload) || "").trim();
+    if (!text) {
+      failures.push(`${provider.name}: returned no usable text`);
+      continue;
+    }
+    return jsonResponse({
+      configured: true,
+      provider: provider.name,
+      model: provider.model,
+      // Named only when an earlier provider had to be skipped, so the page
+      // can say why the answer came from somewhere else.
+      ...(failures.length ? { fallbackFrom: failures } : {}),
+      text,
+    }, 200, allowedOrigin);
   }
-  const text = (provider.readText(payload) || "").trim();
-  if (!text) {
-    return jsonResponse({ error: `${provider.name} returned no usable text.` }, 502, allowedOrigin);
-  }
-  return jsonResponse({ configured: true, provider: provider.name, model: provider.model, text }, 200, allowedOrigin);
+  return jsonResponse({ error: `All AI providers failed. ${failures.join(" | ")}` }, 502, allowedOrigin);
 }
 
 /**
@@ -395,6 +464,92 @@ async function handleRyanairRequest(incoming, request, ctx, allowedOrigin) {
   }
 
   const response = new Response(await upstreamResponse.text(), {
+    status: upstreamResponse.status,
+    headers: {
+      "Content-Type": "application/json",
+      "Cache-Control": `public, max-age=${CACHE_TTL_SECONDS}`,
+      ...corsHeaders(allowedOrigin),
+    },
+  });
+  if (upstreamResponse.ok) {
+    ctx.waitUntil(cache.put(cacheKey, response.clone()));
+  }
+  return response;
+}
+
+/**
+ * GET /bahn/{orte|fahrplan|bestpreis} - Deutsche Bahn passthrough.
+ *
+ * The client always sends GET; the two fare endpoints are POST upstream, so
+ * the request body is assembled here from whitelisted params. That keeps the
+ * "only GET reaches the proxy" rule intact and stops the caller from posting
+ * an arbitrary body to bahn.de through us.
+ *
+ * A 403 from upstream is passed on as 403 with `blocked: true`, so the page
+ * can say "DB blocks automated queries" rather than showing a generic
+ * failure - and never invents a price to fill the gap.
+ */
+async function handleBahnRequest(incoming, request, ctx, allowedOrigin) {
+  const kind = incoming.pathname.replace(/^\/+|\/+$/g, "").slice("bahn/".length);
+  if (!BAHN_UPSTREAM[kind]) {
+    return jsonResponse({
+      error: "Unknown Bahn endpoint. Use /bahn/orte, /bahn/fahrplan or /bahn/bestpreis.",
+    }, 404, allowedOrigin);
+  }
+
+  let upstreamUrl = BAHN_UPSTREAM[kind];
+  let init = { headers: BAHN_HEADERS };
+
+  if (kind === "orte") {
+    const q = incoming.searchParams.get("q");
+    if (!q) return jsonResponse({ error: "orte needs q." }, 400, allowedOrigin);
+    upstreamUrl += `?suchbegriff=${encodeURIComponent(q)}&typ=ALL&limit=`
+      + encodeURIComponent(incoming.searchParams.get("limit") || "6");
+  } else {
+    const from = incoming.searchParams.get("from");
+    const to = incoming.searchParams.get("to");
+    const date = incoming.searchParams.get("date");
+    if (!(from && to && date)) {
+      return jsonResponse({
+        error: `${kind} needs from, to and date (from/to are IDs from /bahn/orte).`,
+      }, 400, allowedOrigin);
+    }
+    // Date must be a full local timestamp; a bare day is accepted and
+    // widened rather than rejected, since that is what a date input gives.
+    const stamp = /^\d{4}-\d{2}-\d{2}$/.test(date)
+      ? `${date}T${kind === "bestpreis" ? "00:00:00" : "08:00:00"}`
+      : date;
+    if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(stamp)) {
+      return jsonResponse({ error: "date must be YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS." }, 400, allowedOrigin);
+    }
+    init = {
+      method: "POST",
+      headers: BAHN_HEADERS,
+      body: JSON.stringify(bahnSearchBody(from, to, stamp, incoming.searchParams.get("class"))),
+    };
+  }
+
+  const cache = caches.default;
+  const cacheKey = new Request(incoming.toString(), new Request(incoming.toString()));
+  const cached = await cache.match(cacheKey);
+  if (cached) return cached;
+
+  let upstreamResponse;
+  try {
+    upstreamResponse = await fetch(upstreamUrl, init);
+  } catch (err) {
+    return jsonResponse({ error: `Bahn request failed: ${err.message}` }, 502, allowedOrigin);
+  }
+
+  const text = await upstreamResponse.text();
+  if (upstreamResponse.status === 403) {
+    return jsonResponse({
+      blocked: true,
+      error: "Deutsche Bahn blocked this query (bot protection). No price available from this source.",
+    }, 403, allowedOrigin);
+  }
+
+  const response = new Response(text, {
     status: upstreamResponse.status,
     headers: {
       "Content-Type": "application/json",
@@ -592,6 +747,9 @@ export default {
     }
     if (path.startsWith("flixbus/")) {
       return handleFlixbusRequest(requestUrl, request, ctx, allowedOrigin);
+    }
+    if (path.startsWith("bahn/")) {
+      return handleBahnRequest(requestUrl, request, ctx, allowedOrigin);
     }
     if (path === "skiplagged") {
       return handleSkiplaggedRequest(requestUrl, request, ctx, allowedOrigin);

@@ -613,6 +613,33 @@ Hotels ebenso: Agoda/Trivago 404, Expedia/Hotels.com 429, Kayak liefert nur
 ein Hotelmarken-Verzeichnis. **Nicht nochmal durchprobieren**, ohne dass sich
 dort etwas ändert.
 
+**Runde 7 (07.08.2026) - Vendo, Community-Frontends, BlaBlaCar, Hotellook:**
+Alles negativ, und zwar endgültig genug, um es nicht zu wiederholen:
+`app.vendo.noncd.db.de` und `int.vendo.noncd.db.de` haben **kein DNS mehr** -
+die Mobil-API der DB-App, auf die praktisch jede Anleitung im Netz verweist,
+existiert nicht mehr. `bahn.expert` antwortet 404 auf allen API-Pfaden,
+`v6`/`v5.db.transport.rest` 503 (dauerhaft, kein Ausfall), `db-rest.bendix.dev`
+DNS tot. Alle vier BlaBlaCar-Bus-Hosts (`api.idbus.com` v1+v2,
+`api.blablacarbus.com`, `booking.blablacarbus.com`) DNS tot - **BlaBlaBus hat
+keine offene API mehr**, der Deep-Link ist dort das Ende der Fahnenstange.
+Hotellook: alle Endpunkte nginx-404.
+Einziger Lichtblick: `dbf.finalrewind.org/journeys` lebt (HTTP 300
+`"Ambiguous station name"`) - aber es ist eine Fahrplanquelle, keine Preisquelle,
+also derselbe Stand wie Transitous.
+
+**Runde 8 (07.08.2026) - der eigentliche Fund:**
+`www.bahn.de/web/api/...` ist der Endpunkt, den die heutige bahn.de-Website
+selbst benutzt, inklusive `angebote/fahrplan` und `angebote/tagesbestpreis` -
+**das ist die Preisquelle**. Sie ist nicht tot, sie ist *bewacht*: vom GitHub-
+Runner kommt `HTTP 403 {"status":"ERROR","code":"OPS_BLOCKED"}`. Das ist eine
+IP-/Bot-Sperre gegen Rechenzentren, kein kaputter Pfad. Deshalb liegt der
+Endpunkt jetzt als `/bahn/{orte,fahrplan,bestpreis}` im Worker: die offene
+Frage ist nur noch, ob **Cloudflares** Ausgangs-IPs durchkommen, wo eine
+GitHub-IP es nicht tut. Der Smoke-Test im Deploy-Workflow misst genau das und
+lässt den Deploy bewusst *nicht* scheitern, wenn geblockt wird.
+Travelpayouts-Hotels **mit** Token: 404/403 auf allen vier Pfaden - das
+Hotel-Programm ist im Konto schlicht nicht freigeschaltet, kein Code-Problem.
+
 Weiterhin offen bleibt der **Preis** für Bahn (und Hotel). DB-Wrapper regelmässig neu
 prüfen: kämen sie zurück, gäbe es dort sogar Sparpreise.
 

@@ -158,6 +158,48 @@ jobs:
           assert "&lt;" not in posts[0]["title"] and "&amp;" not in posts[0]["title"]
           PY
 
+          # /bahn is the one source that quotes real DB fares. From a GitHub
+          # runner it answers 403 OPS_BLOCKED (bot wall). This step asks the
+          # only open question: does Cloudflare's egress get through?
+          # Deliberately not asserted - a block is a measurement, not a
+          # broken deployment, so it must not fail the deploy.
+          echo "=== /bahn/orte + /bahn/fahrplan (403 = DB blocks us, 200 = live fares) ==="
+          curl -sS -w '\nHTTP_STATUS:%{http_code}\n' \
+            "$BASE/bahn/orte?q=Berlin%20Hbf" | head -c 600; echo
+          python3 - "$BASE" <<'PY' || echo "Bahn-Test beendet (siehe Status oben)"
+          import json, sys, urllib.error, urllib.parse, urllib.request
+
+          base = sys.argv[1]
+
+          def get(path):
+              req = urllib.request.Request(f"{base}{path}",
+                                           headers={"User-Agent": "HackYourTrip-SmokeTest/1.0"})
+              try:
+                  with urllib.request.urlopen(req, timeout=45) as resp:
+                      return resp.status, json.load(resp)
+              except urllib.error.HTTPError as e:
+                  return e.code, json.loads(e.read().decode("utf-8", "replace") or "{}")
+
+          status, places = get("/bahn/orte?" + urllib.parse.urlencode({"q": "Berlin Hbf"}))
+          print("Ortssuche:", status)
+          if status != 200 or not isinstance(places, list) or not places:
+              print("  -> keine Orte, Preisabfrage entfaellt:", str(places)[:200])
+              raise SystemExit(0)
+          start = places[0]["id"]
+          _, ziele = get("/bahn/orte?" + urllib.parse.urlencode({"q": "München Hbf"}))
+          ziel = ziele[0]["id"]
+
+          status, data = get("/bahn/fahrplan?" + urllib.parse.urlencode(
+              {"from": start, "to": ziel, "date": "2026-09-15T08:00:00"}))
+          print("Verbindungssuche:", status)
+          conns = (data or {}).get("verbindungen") or []
+          print("  Verbindungen:", len(conns))
+          for c in conns[:3]:
+              preis = (c.get("angebotsPreis") or {})
+              print("   ", c.get("verbindungsAbschnitte", [{}])[0].get("abfahrtsZeitpunkt"),
+                    preis.get("betrag"), preis.get("waehrung"))
+          PY
+
           # Print the body, not just the status: 501 means "no AI key set"
           # (fine, the feature is optional) but 502 carries the provider's
           # actual reason - which is the only thing that makes it fixable.

@@ -112,5 +112,67 @@ stubFetch(() => ({ status: 200, body: {} }));
   report(resp.status === 405, 'GET /ai -> 405');
 }
 
+// 11. The case that was actually broken in production: a Gemini key is
+//     present but its free-tier quota is used up. Before, that 429 ended the
+//     request and the configured Mistral key was never reached.
+{
+  const seen = [];
+  await check('exhausted first provider falls through to the next',
+    { GEMINI_API_KEY: 'g', MISTRAL_API_KEY: 'm' },
+    ({ url }) => {
+      seen.push(url);
+      if (url.includes('generativelanguage')) {
+        return { status: 429, body: { error: { message: 'You exceeded your current quota' } } };
+      }
+      return { status: 200, body: { choices: [{ message: { content: 'Empfehlung D' } }] } };
+    },
+    (status, body) => status === 200 && body.provider === 'mistral'
+      && body.text === 'Empfehlung D'
+      && seen.length === 2 && seen[0].includes('generativelanguage'));
+
+  // The skipped provider is named, so the page can explain the switch
+  // instead of silently attributing the answer to the wrong model.
+  stubFetch(({ url }) => (url.includes('generativelanguage')
+    ? { status: 429, body: { error: { message: 'quota' } } }
+    : { status: 200, body: { choices: [{ message: { content: 'x' } }] } }));
+  const resp = await worker.fetch(aiRequest(), { GEMINI_API_KEY: 'g', MISTRAL_API_KEY: 'm' }, ctx);
+  const body = await resp.json();
+  report(Array.isArray(body.fallbackFrom) && /gemini.*quota/.test(body.fallbackFrom[0]),
+    'the skipped provider and its reason are reported');
+}
+
+// 12. A working first provider must not be dragged through the others.
+{
+  let calls = 0;
+  await check('a healthy first provider is used alone',
+    { GEMINI_API_KEY: 'g', GROQ_API_KEY: 'q', MISTRAL_API_KEY: 'm' },
+    () => {
+      calls += 1;
+      return { status: 200, body: { candidates: [{ content: { parts: [{ text: 'ok' }] } }] } };
+    },
+    (status, body) => status === 200 && body.provider === 'gemini'
+      && calls === 1 && body.fallbackFrom === undefined);
+}
+
+// 13. Everything down -> one 502 that names every reason, not just the last.
+await check('all providers down -> 502 listing each reason',
+  { GEMINI_API_KEY: 'g', MISTRAL_API_KEY: 'm' },
+  ({ url }) => (url.includes('generativelanguage')
+    ? { status: 429, body: { error: { message: 'quota weg' } } }
+    : { status: 401, body: { message: 'key ungueltig' } }),
+  (status, body) => status === 502 && /gemini: quota weg/.test(body.error)
+    && /mistral: key ungueltig/.test(body.error));
+
+// 14. AI_MODEL names one specific model; it must not be forced onto a
+//     fallback provider that has never heard of it.
+await check('AI_MODEL is not carried over to the fallback provider',
+  { GEMINI_API_KEY: 'g', MISTRAL_API_KEY: 'm', AI_MODEL: 'gemini-2.5-pro' },
+  ({ url }) => (url.includes('generativelanguage')
+    ? { status: 429, body: { error: { message: 'quota' } } }
+    : { status: 200, body: { choices: [{ message: { content: 'x' } }] } }),
+  (status, body, last) => body.provider === 'mistral'
+    && JSON.parse(last.init.body).model === 'mistral-small-latest'
+    && body.model === 'mistral-small-latest');
+
 globalThis.fetch = realFetch;
 if (failures) process.exitCode = 1;
