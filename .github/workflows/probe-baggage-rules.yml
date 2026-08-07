@@ -23,6 +23,9 @@ jobs:
               ("FlixBus DE Beförderungsbed.", "https://www.flixbus.de/unternehmen/agb"),
               ("FlixBus global luggage", "https://www.flixbus.com/service/luggage"),
               ("FlixBus Help luggage", "https://help.flixbus.com/s/article/what-luggage-can-i-take?language=en_US"),
+              ("FlixBus AGB/Befoerderung", "https://www.flixbus.de/unternehmen/agb-und-befoerderungsbedingungen"),
+              ("FlixBus Hilfe Gepaeck", "https://help.flixbus.com/s/?language=de"),
+              ("FlixBus Sitemap-Service", "https://www.flixbus.de/service"),
               ("Ryanair Gepaeck DE", "https://www.ryanair.com/de/de/nuetzliche-infos/hilfe-center/faq-uebersicht/Gepack"),
               ("Ryanair bags EN", "https://www.ryanair.com/gb/en/useful-info/help-centre/faq-overview/Baggage"),
               ("Ryanair fees", "https://www.ryanair.com/gb/en/useful-info/help-centre/fees"),
@@ -85,4 +88,7 @@ jobs:
                       break
               if not hits:
                   print("    keine kg-/cm-Angabe im Text gefunden")
+                  # Dann sehen, was ueberhaupt auf der Seite steht - vielleicht
+                  # trifft nur das Muster nicht.
+                  print("    -- Seitentext:", text[:2500])
           PY
