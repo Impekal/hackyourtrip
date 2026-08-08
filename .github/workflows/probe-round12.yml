@@ -1,0 +1,85 @@
+name: Probe round 12 - Vendo-Hosts: wirklich tot oder nur IPv6?
+
+# Runde 7 hat app.vendo.noncd.db.de als "DNS tot" abgehakt. Ein Hinweis von
+# aussen nennt genau diesen Host als den, den db-vendo-client heute benutzt,
+# und erwaehnt beilaeufig "IPv4/IPv6-Unterschiede".
+#
+# Das ist ein moeglicher Fehler in MEINER Messung: GitHub-Runner sind
+# IPv4-only. Hat der Host nur AAAA-Records, meldet getaddrinfo exakt
+# "Name or service not known" - dasselbe wie bei einem toten Namen. Runde 7
+# konnte die beiden Faelle also gar nicht unterscheiden.
+#
+# Diese Runde fragt A und AAAA getrennt ab und nennt einen bekannten
+# Doppelstack-Host als Kontrolle, damit ein leeres Ergebnis nicht wieder
+# mehrdeutig ist.
+#
+# Wird nach der Auswertung geloescht.
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: DNS getrennt nach A und AAAA
+        run: |
+          python3 - <<'PY'
+          import socket
+
+          HOSTS = [
+              "app.vendo.noncd.db.de",
+              "int.vendo.noncd.db.de",
+              "www.bahn.de",              # Kontrolle: antwortet nachweislich
+              "reiseauskunft.bahn.de",    # in Runde 11 als tot gemessen
+              "movas.noncd.db.de",
+              "app.movas.noncd.db.de",
+          ]
+
+          def lookup(host, family, label):
+              try:
+                  infos = socket.getaddrinfo(host, 443, family, socket.SOCK_STREAM)
+                  addrs = sorted({i[4][0] for i in infos})
+                  return f"{label}: {', '.join(addrs)}"
+              except socket.gaierror as e:
+                  return f"{label}: -- ({e.strerror})"
+
+          print("=== DNS getrennt abgefragt ===")
+          for host in HOSTS:
+              print(f"\n{host}")
+              print("   " + lookup(host, socket.AF_INET, "A    (IPv4)"))
+              print("   " + lookup(host, socket.AF_INET6, "AAAA (IPv6)"))
+
+          print("\n=== Hat dieser Runner ueberhaupt IPv6? ===")
+          # Ohne diese Antwort waere ein IPv6-Fehlschlag wieder mehrdeutig.
+          try:
+              s = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+              s.settimeout(8)
+              # ipv6.google.com ist verlaesslich AAAA-only erreichbar.
+              s.connect((socket.getaddrinfo("ipv6.google.com", 443, socket.AF_INET6,
+                                             socket.SOCK_STREAM)[0][4][0], 443))
+              print("   IPv6-Verbindung nach aussen: MOEGLICH")
+              s.close()
+          except Exception as e:
+              print(f"   IPv6-Verbindung nach aussen: NICHT moeglich ({type(e).__name__}: {e})")
+          PY
+
+      - name: Falls der Host lebt - eine echte Anfrage versuchen
+        if: always()
+        run: |
+          echo "=== curl gegen die Vendo-Endpunkte (IPv4 und IPv6 getrennt) ==="
+          for host in app.vendo.noncd.db.de int.vendo.noncd.db.de; do
+            for flag in -4 -6; do
+              echo "--- $host $flag"
+              # --max-time kurz halten: ein toter Host soll den Job nicht haengen
+              # lassen. Ausgabe bewusst nur Statuszeile plus Anfang des Bodys.
+              curl -sS $flag --max-time 20 \
+                -o /tmp/out.txt -w 'HTTP %{http_code}  ip=%{remote_ip}\n' \
+                -X POST "https://$host/mob/angebote/fahrplan" \
+                -H 'Content-Type: application/x.db.vendo.mob.verbindungssuche.v8+json' \
+                -H 'Accept: application/x.db.vendo.mob.verbindungssuche.v8+json' \
+                -H 'X-Correlation-ID: probe/1.0' \
+                -d '{}' 2>&1 | tail -3
+              head -c 300 /tmp/out.txt 2>/dev/null; echo
+            done
+          done
