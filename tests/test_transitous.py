@@ -18,7 +18,8 @@ from traveldeals.providers.base import Provider
 from traveldeals.providers.transitous import (TransitousBusProvider,
                                                TransitousTrainProvider,
                                                _local_anchor_to_utc,
-                                               _to_local_naive)
+                                               _to_local_naive,
+                                               d_ticket_coverage)
 
 GEOCODE_BERLIN = [
     {"type": "PLACE", "category": "hostel_16", "name": "A&O Berlin Hauptbahnhof",
@@ -303,3 +304,89 @@ def test_priceless_price_is_not_written_to_the_price_history(engine_factory, tmp
     # A recorded 0.0 would poison every future "is this a price drop?" and
     # "is this an error fare?" check for this route.
     assert recorded == [88.0]
+
+
+# -- Deutschland-Ticket ------------------------------------------------------
+# DB refuses automated fare lookups, so a regional connection's price cannot
+# be fetched. It can, however, be *derived* for a ticket holder: the
+# Deutschland-Ticket covers all local transport in Germany. The risk runs the
+# other way - a "0 EUR" wrongly attached to an ICE or to a journey abroad -
+# and that is what most of these guard.
+
+RE_ITINERARY = {
+    "duration": 7200,
+    "startTime": "2026-09-15T06:10:00Z",
+    "endTime": "2026-09-15T08:10:00Z",
+    "transfers": 1,
+    "legs": [
+        {"mode": "REGIONAL_RAIL", "displayName": "RE 7", "agencyName": "DB Regio AG",
+         "from": {"name": "Berlin Hauptbahnhof", "track": "3"}, "to": {"name": "Zwischenhalt"}},
+        {"mode": "SUBURBAN", "displayName": "S1", "agencyName": "S-Bahn Berlin",
+         "from": {"name": "Zwischenhalt"}, "to": {"name": "München Hbf"}},
+    ],
+}
+GERMAN = {"country": "DE"}
+
+
+def test_regional_journey_inside_germany_is_covered():
+    assert d_ticket_coverage(RE_ITINERARY, GERMAN, GERMAN) is True
+
+
+def test_an_ice_leg_makes_the_journey_not_covered():
+    assert d_ticket_coverage(ICE_ITINERARY, GERMAN, GERMAN) is False
+
+
+@pytest.mark.parametrize("mode", ["HIGHSPEED_RAIL", "LONG_DISTANCE", "NIGHT_RAIL", "COACH"])
+def test_every_long_distance_mode_is_excluded(mode):
+    itinerary = {"legs": [{"mode": "REGIONAL_RAIL"}, {"mode": mode}]}
+    assert d_ticket_coverage(itinerary, GERMAN, GERMAN) is False
+
+
+@pytest.mark.parametrize("origin,destination", [
+    ({"country": "DE"}, {"country": "AT"}),
+    ({"country": "PL"}, {"country": "DE"}),
+    ({}, {"country": "DE"}),
+])
+def test_a_journey_leaving_germany_is_undecidable_not_uncovered(origin, destination):
+    # None, never False: the ticket may well not apply, but we do not know
+    # that from the timetable, and "unknown" is the honest answer.
+    assert d_ticket_coverage(RE_ITINERARY, origin, destination) is None
+
+
+def test_an_unknown_leg_mode_is_undecidable_rather_than_covered():
+    itinerary = {"legs": [{"mode": "REGIONAL_RAIL"}, {"mode": "FUNICULAR"}]}
+    assert d_ticket_coverage(itinerary, GERMAN, GERMAN) is None
+
+
+def test_an_empty_itinerary_is_undecidable():
+    assert d_ticket_coverage({"legs": []}, GERMAN, GERMAN) is None
+
+
+def test_without_the_ticket_a_covered_connection_keeps_an_unknown_price():
+    provider = TransitousTrainProvider(session=FakeSession([RE_ITINERARY]))
+    offer = provider.search(make_route())[0]
+
+    assert offer.d_ticket_covered is True
+    # Coverage is information; the fare is still not something we know.
+    assert offer.price_known is False
+    assert offer.price == 0.0
+    assert offer.price_note == ""
+
+
+def test_with_the_ticket_a_covered_connection_becomes_a_real_zero():
+    provider = TransitousTrainProvider(session=FakeSession([RE_ITINERARY]))
+    offer = provider.search(make_route(has_deutschland_ticket=True))[0]
+
+    assert offer.price_known is True
+    assert offer.price == 0.0
+    assert offer.price_note == "im Deutschland-Ticket enthalten"
+
+
+def test_the_ticket_does_not_make_an_ice_free():
+    # The expensive mistake this whole feature could cause, guarded directly.
+    provider = TransitousTrainProvider(session=FakeSession([ICE_ITINERARY]))
+    offer = provider.search(make_route(has_deutschland_ticket=True))[0]
+
+    assert offer.d_ticket_covered is False
+    assert offer.price_known is False
+    assert offer.price_note == ""

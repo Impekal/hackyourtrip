@@ -184,6 +184,10 @@ class RoutePreference:
     # at both ends.
     nearby_origin_km: int = 0
     nearby_destination_km: int = 0
+    # Owning a Deutschland-Ticket changes what a regional connection costs
+    # from "unknown" to "nothing extra" - the only way this project gets a
+    # real DB price, since DB itself refuses automated fare lookups.
+    has_deutschland_ticket: bool = False
     notes: str = ""
 
 
@@ -217,6 +221,18 @@ class Offer:
     # and its handling in engine.py. Inventing a plausible number instead is
     # exactly what once made the UI show a 42 EUR train that did not exist.
     price_known: bool = True
+    # Deutschland-Ticket coverage, three-valued on purpose:
+    #   True  - every leg is regional and the journey stays in Germany, so a
+    #           ticket holder pays nothing extra
+    #   False - at least one long-distance leg, so the ticket does not cover it
+    #   None  - not decidable (journey leaves Germany, unknown leg mode)
+    # None must never be shown as "not covered": absent knowledge is not a
+    # negative answer, the same distinction `price_known` draws for fares.
+    d_ticket_covered: Optional[bool] = None
+    # Why a price is what it is, when that needs saying - currently only
+    # "im Deutschland-Ticket enthalten", so a 0.00 never reads as "free"
+    # or as a bug.
+    price_note: str = ""
     # Set only by the nearby-airport search: this offer leaves from / lands
     # at a *different* airport than the one searched for, and `detour_km` is
     # how far that is from it. Never hidden - only the traveller knows

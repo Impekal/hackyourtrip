@@ -4,7 +4,7 @@
 // guessing: if this doesn't match, the browser is running a cached old
 // app.js and any "the fix didn't work" report is about the old file. Bump
 // together with the ?v= in index.html.
-const BUILD_STAMP = '2026-08-07-6';
+const BUILD_STAMP = '2026-08-08-1';
 document.getElementById('buildStamp').textContent = BUILD_STAMP;
 
 /* =========================================================================
@@ -73,6 +73,11 @@ function applyModeVisibility(mode) {
     // guarantee zero results on train/bus/hotel tabs.
     lowCostGroup: cfg.flight,
     departUntilGroup: !cfg.singleDate,
+    // The Deutschland-Ticket can only ever apply where a train or coach
+    // offer can appear at all. Derived from the mode name rather than a
+    // column per row, so a new train/bus combo tab gets it automatically
+    // instead of silently missing it.
+    dTicketGroup: /train|bus|mixed_return/.test(mode),
   };
   for (const [group, visible] of Object.entries(groupVisible)) {
     document.querySelectorAll(`[data-group="${group}"]`).forEach(el => { el.hidden = !visible; });
@@ -1319,6 +1324,49 @@ const TRANSIT_REQUEST_MODES = {
   bus: 'COACH,BUS,SUBURBAN,SUBWAY,TRAM,WALK',
 };
 
+/* ---------------------------------------------------------------------
+ * Deutschland-Ticket coverage.
+ *
+ * DB blocks every automated fare lookup (measured 07.08.2026: the station
+ * search answers 200, the fare endpoint 403), so a train price cannot be
+ * fetched. But for one large class of journeys the fare does not need to be
+ * fetched at all - it is *derivable*. The Deutschland-Ticket covers all
+ * local and regional transport in Germany. So if every leg of a connection
+ * is regional and the journey stays inside Germany, a ticket holder pays
+ * nothing extra. That is a fact, not an estimate.
+ *
+ * This deliberately only answers where it can be sure: one long-distance
+ * leg (ICE/IC/EC, night train, coach) makes it false, and anything touching
+ * a non-German stop or an unfamiliar leg mode yields null - "cannot tell" -
+ * rather than a guess. A wrong "0 EUR" would be worse than no answer.
+ * ------------------------------------------------------------------- */
+const D_TICKET_MODES = ['REGIONAL_FAST_RAIL', 'REGIONAL_RAIL', 'SUBURBAN',
+                         'SUBWAY', 'TRAM', 'BUS', 'WALK'];
+// Listed separately rather than derived as "not in D_TICKET_MODES", so an
+// unfamiliar mode string from a new feed yields null instead of being
+// silently declared covered.
+const D_TICKET_EXCLUDED_MODES = ['HIGHSPEED_RAIL', 'LONG_DISTANCE', 'NIGHT_RAIL', 'COACH'];
+
+function isGermanStop(stop) {
+  const country = ((stop && stop.country) || '').trim().toLowerCase();
+  return country === 'deutschland' || country === 'germany' || country === 'de';
+}
+
+/**
+ * true  - every leg is regional and the journey stays in Germany
+ * false - at least one leg is long-distance, so the ticket does not cover it
+ * null  - not decidable (journey leaves Germany, or an unknown leg mode)
+ */
+function dTicketCoverage(itinerary, origin, destination) {
+  if (!isGermanStop(origin) || !isGermanStop(destination)) return null;
+  const legs = (itinerary.legs || []).filter(l => l && l.mode);
+  if (!legs.length) return null;
+  for (const leg of legs) {
+    if (D_TICKET_EXCLUDED_MODES.includes(leg.mode)) return false;
+  }
+  return legs.every(l => D_TICKET_MODES.includes(l.mode)) ? true : null;
+}
+
 // MOTIS answers in UTC ("2026-09-15T08:37:00Z"); everything else in this app
 // works with Date objects read in wall-clock terms (getHours() etc). So a
 // timestamp is re-read in the *station's* timezone and rebuilt as a local
@@ -1379,7 +1427,7 @@ async function transitResolveStop(text) {
   return stops.find(h => (h.name || '').trim().toLowerCase() === needle) || stops[0];
 }
 
-function transitItineraryToOffer(itinerary, mode, route, tz) {
+function transitItineraryToOffer(itinerary, mode, route, tz, stops = {}) {
   const legs = itinerary.legs || [];
   const transitLegs = legs.filter(l => TRANSIT_LEG_MODES[mode].includes(l.mode));
   // A pure walking/local-transport result is real but not the train or coach
@@ -1391,13 +1439,23 @@ function transitItineraryToOffer(itinerary, mode, route, tz) {
     const agency = (leg.agencyName || '').trim();
     if (agency && !agencies.includes(agency)) agencies.push(agency);
   }
+  const covered = dTicketCoverage(itinerary, stops.origin, stops.destination);
+  // Covered *and* the traveller holds the ticket: the marginal fare really
+  // is zero, so this is a known price, not a missing one. Without the
+  // ticket the coverage is shown as information only - the fare is still
+  // unknown, and pretending otherwise is the exact failure this codebase
+  // is built to avoid.
+  const freeWithDTicket = covered === true && route.hasDeutschlandTicket === true;
+
   return {
     mode,
     isMock: false,
     // The one field that makes all the difference: this is a real
     // connection whose fare this source simply does not carry.
-    priceKnown: false,
+    priceKnown: freeWithDTicket,
     price: 0,
+    dTicketCovered: covered,
+    priceNote: freeWithDTicket ? 'im Deutschland-Ticket enthalten' : '',
     currency: route.currency,
     // An operator name from an official feed is a fact, and nothing here
     // claims a bookable price, so showing it verbatim is safe.
@@ -1442,7 +1500,7 @@ async function fetchRealTransitOffers(route, mode) {
         transitModes: TRANSIT_REQUEST_MODES[mode],
       }));
       for (const itinerary of (payload && payload.itineraries) || []) {
-        const offer = transitItineraryToOffer(itinerary, mode, route, tz);
+        const offer = transitItineraryToOffer(itinerary, mode, route, tz, { origin, destination });
         if (!offer) continue;
         // The anchors overlap on purpose, and MOTIS happily rolls past
         // midnight into a day that was never asked for.
@@ -2103,6 +2161,13 @@ function offerChips(offer) {
     }
   } else if (['flight', 'train', 'bus'].includes(offer.mode)) {
     chips.push(offer.stops === 0 ? 'Direkt' : `${offer.stops}x Umstieg`);
+    // Only stated when it is decided. `null` means "not decidable" and gets
+    // no chip at all - an absent claim, not a negative one.
+    if (offer.dTicketCovered === true) {
+      chips.push(offer.priceKnown
+        ? '🎫 im Deutschland-Ticket enthalten'
+        : '🎫 mit Deutschland-Ticket 0 €');
+    }
     chips.push(...baggageChips(offer));
     if (offer.punctualityPct != null) chips.push(`${offer.punctualityPct}% pünktlich`);
     if (offer.legroomCm != null) chips.push(`${offer.legroomCm}cm Beinfreiheit`);
@@ -2385,6 +2450,7 @@ function readRouteFromForm() {
       : new Date(document.getElementById('departUntil').value),
     flexBefore: Number(document.getElementById('flexBefore').value || 0),
     flexAfter: Number(document.getElementById('flexAfter').value || 0),
+    hasDeutschlandTicket: document.getElementById('hasDTicket').checked,
     minNights: Number(document.getElementById('minNights').value || 0),
     maxNights: Number(document.getElementById('maxNights').value || 0),
     budget: numOrNull('budget'),
@@ -2732,6 +2798,11 @@ async function renderOptionList(route, section, options, flightFallbackReason, b
         const detour = opt.offers.find(o => o.detourKm);
         const detourHtml = detour ? `<span class="badge info">ab ${detour.altOrigin || route.origin}${
           detour.altDestination ? ` nach ${detour.altDestination}` : ''} · +${detour.detourKm} km Anfahrt</span>` : '';
+        // A 0.00 in the price slot needs its reason right next to it,
+        // otherwise it reads as "free" or as a bug rather than as
+        // "already paid for with a ticket you hold".
+        const dTicket = opt.offers.some(o => o.priceNote === 'im Deutschland-Ticket enthalten')
+          ? '<span class="badge good">🎫 im Deutschland-Ticket enthalten</span>' : '';
         return `
         <div class="option${mock ? ' is-mock' : ''}${noPrice ? ' is-timetable' : ''}">
           <span class="rank mono">${i + 1}</span>
@@ -2739,6 +2810,7 @@ async function renderOptionList(route, section, options, flightFallbackReason, b
             ${priceHtml}
             ${mock ? '<span class="badge warn">Beispieldaten – nicht buchbar</span>' : ''}
             ${noPrice ? '<span class="badge info">Echter Fahrplan – Preis beim Anbieter</span>' : ''}
+            ${dTicket}
             ${detourHtml}
             ${opt.isBelowMedian ? '<span class="badge good">Deal</span>' : ''}
           </div>

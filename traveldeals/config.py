@@ -119,6 +119,7 @@ def _parse_route(raw: dict) -> RoutePreference:
         nearby_origin_km=int(raw.get("nearby_origin_km", raw.get("nearby_km", 0)) or 0),
         nearby_destination_km=int(raw.get("nearby_destination_km", raw.get("nearby_km", 0)) or 0),
         return_date=_parse_return_date(raw, _parse_date(raw["depart_date_from"])),
+        has_deutschland_ticket=bool(raw.get("has_deutschland_ticket", False)),
         notes=raw.get("notes", ""),
     )
 

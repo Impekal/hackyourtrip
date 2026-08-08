@@ -318,6 +318,13 @@
           <div class="checks inline-toggle" data-group="roundTripGroup">
             <label><input type="checkbox" id="roundTrip"> Hin und zurück</label>
           </div>
+          <!-- Der einzige Weg, bei der Bahn an einen echten Preis zu kommen:
+               die DB gibt keine Tarife heraus, aber wenn eine Verbindung nur
+               aus Nahverkehr innerhalb Deutschlands besteht, kostet sie mit
+               dem D-Ticket nachweislich nichts extra. -->
+          <div class="checks inline-toggle" data-group="dTicketGroup">
+            <label><input type="checkbox" id="hasDTicket"> Ich habe das Deutschland-Ticket</label>
+          </div>
         </div>
         <div class="field" data-group="returnDateGroup">
           <label for="returnDate">Rückreisedatum</label>
@@ -652,6 +659,6 @@
 <!-- The ?v= is deliberate: GitHub Pages lets browsers cache app.js, so a
      fix could ship and the visitor would keep running the old file. Bump
      this whenever app.js changes in a way users need to see. -->
-<script src="./app.js?v=2026-08-07-6"></script>
+<script src="./app.js?v=2026-08-08-1"></script>
 </body>
 </html>

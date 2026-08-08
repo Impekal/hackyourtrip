@@ -73,6 +73,50 @@ REQUEST_MODES = {
     Mode.BUS: "COACH,BUS,SUBURBAN,SUBWAY,TRAM,WALK",
 }
 
+# --- Deutschland-Ticket -----------------------------------------------------
+# Deutsche Bahn blocks every automated fare lookup (measured 07.08.2026: from
+# a Cloudflare Worker the station search answers 200, the fare endpoint 403),
+# so a train fare cannot be fetched. For one large class of journeys it does
+# not have to be: the Deutschland-Ticket covers all local and regional
+# transport inside Germany, so if every leg is regional and the journey stays
+# in Germany, a ticket holder pays nothing extra. That follows from the
+# timetable alone - a fact, not an estimate.
+#
+# Mirrors dTicketCoverage() in docs/app.js; keep the two in step.
+D_TICKET_MODES = frozenset({
+    "REGIONAL_FAST_RAIL", "REGIONAL_RAIL", "SUBURBAN", "SUBWAY", "TRAM", "BUS", "WALK",
+})
+# Listed explicitly rather than derived as "not in D_TICKET_MODES", so an
+# unfamiliar mode from a new feed yields "cannot tell" instead of being
+# silently declared covered.
+D_TICKET_EXCLUDED_MODES = frozenset({
+    "HIGHSPEED_RAIL", "LONG_DISTANCE", "NIGHT_RAIL", "COACH",
+})
+_GERMAN_COUNTRY_NAMES = frozenset({"deutschland", "germany", "de"})
+
+
+def _is_german_stop(stop: dict | None) -> bool:
+    return ((stop or {}).get("country") or "").strip().lower() in _GERMAN_COUNTRY_NAMES
+
+
+def d_ticket_coverage(itinerary: dict, origin: dict | None, destination: dict | None) -> bool | None:
+    """True = covered, False = not covered, None = not decidable.
+
+    None is deliberately distinct from False: a journey leaving Germany, or
+    one carrying a leg mode we do not recognise, is unknown territory.
+    Claiming "0 EUR" there would be worse than saying nothing at all.
+    """
+    if not _is_german_stop(origin) or not _is_german_stop(destination):
+        return None
+    legs = [leg for leg in (itinerary.get("legs") or []) if leg.get("mode")]
+    if not legs:
+        return None
+    if any(leg["mode"] in D_TICKET_EXCLUDED_MODES for leg in legs):
+        return False
+    if all(leg["mode"] in D_TICKET_MODES for leg in legs):
+        return True
+    return None
+
 # Transitous asks API users to identify themselves so they can get in touch
 # about traffic rather than just blocking it.
 USER_AGENT = "HackYourTrip/1.0 (+https://github.com/kalivolut/hackyourtrip)"
@@ -182,7 +226,7 @@ class TransitousProvider(Provider):
                     print(f"[transitous] plan failed for {route.origin}->{route.destination} on {day}: {exc}")
                     continue
                 for itinerary in payload.get("itineraries", []):
-                    offer = self._to_offer(itinerary, route, tz_name)
+                    offer = self._to_offer(itinerary, route, tz_name, origin, destination)
                     if offer is None:
                         continue
                     # The anchors overlap by design (an 18:00 request can
@@ -198,7 +242,14 @@ class TransitousProvider(Provider):
                     offers.append(offer)
         return offers
 
-    def _to_offer(self, itinerary: dict, route: RoutePreference, tz_name: str) -> Offer | None:
+    def _to_offer(
+        self,
+        itinerary: dict,
+        route: RoutePreference,
+        tz_name: str,
+        origin: dict | None = None,
+        destination: dict | None = None,
+    ) -> Offer | None:
         legs = itinerary.get("legs") or []
         wanted = TRANSIT_MODES[self.mode]
         transit_legs = [leg for leg in legs if leg.get("mode") in wanted]
@@ -221,6 +272,13 @@ class TransitousProvider(Provider):
                 agencies.append(agency)
 
         first, last = legs[0], legs[-1]
+        covered = d_ticket_coverage(itinerary, origin, destination)
+        # Covered *and* the traveller holds the ticket: the marginal fare
+        # really is zero, so this is a known price. Without the ticket the
+        # coverage is information only - the fare stays unknown, and
+        # pretending otherwise is the exact failure this module exists to
+        # avoid.
+        free_with_d_ticket = covered is True and route.has_deutschland_ticket
         return Offer(
             mode=self.mode,
             provider="transitous",
@@ -229,7 +287,9 @@ class TransitousProvider(Provider):
             # show verbatim.
             booking_site=" / ".join(agencies) if agencies else "Transitous",
             price=0.0,
-            price_known=False,
+            price_known=free_with_d_ticket,
+            d_ticket_covered=covered,
+            price_note="im Deutschland-Ticket enthalten" if free_with_d_ticket else "",
             currency=route.currency,
             depart_time=_to_local_naive(start, tz_name),
             arrive_time=_to_local_naive(end, tz_name),

@@ -702,6 +702,39 @@ kein Umbau.
 Weiterhin offen bleibt der **Preis** für Bahn. DB-Wrapper regelmässig neu
 prüfen: kämen sie zurück, gäbe es dort sogar Sparpreise.
 
+## Deutschland-Ticket: der einzige echte Bahnpreis, den wir bekommen
+
+Die DB gibt keine Tarife heraus (siehe Messtabelle oben). Für eine grosse
+Klasse von Fahrten muss sie das auch nicht: das Deutschland-Ticket deckt den
+gesamten Nahverkehr in Deutschland ab. Besteht eine Verbindung **nur** aus
+Nahverkehrsabschnitten und bleibt sie **in Deutschland**, zahlt ein
+Ticketinhaber nichts extra. Das folgt aus dem Fahrplan allein - es ist eine
+Tatsache, keine Schätzung. Damit wird aus unserer reinen Fahrplanquelle
+(Transitous) für genau diese Fahrten eine echte Preisaussage.
+
+Implementiert doppelt und wortgleich: `dTicketCoverage()` in `docs/app.js`,
+`d_ticket_coverage()` in `providers/transitous.py`. **Beide zusammen halten.**
+
+Dreiwertig, und das ist der Kern:
+
+| Ergebnis | wann | Folge |
+|---|---|---|
+| `true` | alle Abschnitte Nahverkehr, Start+Ziel in Deutschland | mit Haken: Preis 0, `price_known=True` |
+| `false` | mindestens ein ICE/IC/EC/Nachtzug/Fernbus | nie 0, Preis bleibt unbekannt |
+| `null` | Fahrt verlässt Deutschland **oder** unbekannte Gattung | nie 0, kein Chip, keine Aussage |
+
+`null` ist bewusst **nicht** `false`: fehlendes Wissen ist keine Verneinung -
+dieselbe Unterscheidung, die `price_known` bei Preisen trifft. Und die
+Ausschlussliste ist explizit aufgezählt statt als "nicht in der
+Abdeckungsliste" abgeleitet, damit eine unbekannte Gattung aus einem neuen
+Feed `null` ergibt statt stillschweigend als abgedeckt zu gelten.
+
+Ohne Haken (`has_deutschland_ticket`) bleibt der Preis **unbekannt** und die
+Abdeckung ist nur ein Hinweis - wer das Ticket nicht hat, für den kostet die
+Fahrt sehr wohl etwas. Der gefährliche Fehler wäre ein "0 €" an einem ICE
+oder an einer Auslandsfahrt; genau darauf zielen die meisten Tests
+(`tests/test_transitous.py`, `ui_dticket.py`).
+
 ## Was diese App kann, das die grossen Portale nicht koennen
 
 Der Vorsprung liegt nicht in der Preisabdeckung - dort gewinnt Skyscanner mit
