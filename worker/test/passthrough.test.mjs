@@ -252,7 +252,7 @@ stubFetch([{ id: 'A=1@O=Berlin Hbf@L=8011160@', name: 'Berlin Hbf' }]);
 {
   const { resp, body, last } = await call('/bahn/orte?q=Berlin%20Hbf');
   report(resp.status === 200 && body[0].name === 'Berlin Hbf'
-    && last.url.startsWith('https://www.bahn.de/web/api/reiseloesung/orte')
+    && last.url.startsWith('https://int.bahn.de/web/api/reiseloesung/orte')
     && new URL(last.url).searchParams.get('suchbegriff') === 'Berlin Hbf',
     'bahn orte forwards the search term', last?.url);
 }
@@ -287,16 +287,65 @@ stubFetch({ verbindungen: [{ angebotsPreis: { betrag: 39.9, waehrung: 'EUR' } }]
   report(JSON.parse(last.init.body).klasse === 'KLASSE_1', 'first class is passed through');
 }
 
-// bahn.de's own frontend sends a correlation ID on every call, and the fare
-// endpoint is the one that refuses requests without it.
+// Headers match what db-vendo-client actually sends - no correlation ID
+// (that guess did not change the 403), but a varying user agent, since a
+// fixed one is the easiest thing in the world to block wholesale.
 {
+  const seen = new Set();
+  for (let i = 0; i < 25; i += 1) {
+    const { last } = await call(`/bahn/fahrplan?from=a&to=b&date=2026-09-${10 + (i % 20)}`);
+    seen.add(last.init.headers['User-Agent']);
+
+  }
+  report(seen.size > 1, 'the user agent varies between requests', [...seen][0]);
+  report([...seen].every(ua => /^Mozilla\/5\.0 \(.+\) AppleWebKit/.test(ua)),
+    'every generated user agent is well-formed', [...seen][0]);
+
   const { last } = await call('/bahn/fahrplan?from=a&to=b&date=2026-09-15');
-  const id = last.init.headers['X-Correlation-ID'];
-  report(typeof id === 'string' && /^[0-9a-f-]{36}_[0-9a-f-]{36}$/.test(id),
-    'the fare search sends a correlation ID in the site\'s format', id);
-  const { last: again } = await call('/bahn/fahrplan?from=a&to=b&date=2026-09-16');
-  report(again.init.headers['X-Correlation-ID'] !== id,
-    'each fare search gets its own correlation ID');
+  report(last.init.headers['X-Correlation-ID'] === undefined,
+    'no correlation ID is sent - it never helped');
+  report(last.init.headers['Accept'] === 'application/json'
+    && last.init.headers['Content-Type'] === 'application/json',
+    'headers match the client this endpoint list came from',
+    JSON.stringify(last.init.headers));
+}
+
+// int.bahn.de is the host db-vendo-client's dbweb profile uses; www.bahn.de
+// answered 200 on the station search but 403 on fares. Both stay, tried in
+// that order, because the blocking is described as haphazard.
+{
+  const tried = [];
+  globalThis.fetch = async (url, init) => {
+    tried.push(url);
+    globalThis.__last = { url, init };
+    // int refuses, www answers - the fallback must actually be taken.
+    if (url.startsWith('https://int.bahn.de')) {
+      return new Response(JSON.stringify({ status: 'ERROR', code: 'OPS_BLOCKED' }),
+        { status: 403, headers: { 'Content-Type': 'application/json' } });
+    }
+    return new Response(JSON.stringify({ verbindungen: [{ angebotsPreis: { betrag: 19.9 } }] }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } });
+  };
+  const resp = await worker.fetch(new Request('https://proxy.test/bahn/fahrplan?from=a&to=b&date=2026-09-15'), {}, ctx);
+  const body = await resp.json();
+  report(resp.status === 200 && body.verbindungen[0].angebotsPreis.betrag === 19.9
+    && tried.length === 2 && tried[0].startsWith('https://int.bahn.de')
+    && tried[1].startsWith('https://www.bahn.de'),
+    'a 403 from the first host falls through to the second', JSON.stringify(tried));
+}
+
+// Only when every host refuses is it reported as blocked - and it must say
+// which, so a future reader knows what was actually tried.
+{
+  globalThis.fetch = async () => new Response(
+    JSON.stringify({ status: 'ERROR', code: 'OPS_BLOCKED' }),
+    { status: 403, headers: { 'Content-Type': 'application/json' } });
+  const resp = await worker.fetch(new Request('https://proxy.test/bahn/fahrplan?from=a&to=b&date=2026-09-15'), {}, ctx);
+  const body = await resp.json();
+  report(resp.status === 403 && body.blocked === true
+    && /int\.bahn\.de/.test(body.error) && /www\.bahn\.de/.test(body.error),
+    'only a refusal from every host counts as blocked, and it names them',
+    JSON.stringify(body));
 }
 
 // Regional trains must stay in: the cheap fare is often the slow connection.

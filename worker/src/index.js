@@ -118,27 +118,47 @@ const FLIXBUS_HEADERS = {
 // Cloudflare Worker's egress fares better is exactly what the /bahn/status
 // endpoint below is there to answer - so a failure here is a measurement,
 // not a bug, and the client is told which of the two it is.
-const BAHN_UPSTREAM = {
-  orte: "https://www.bahn.de/web/api/reiseloesung/orte",
-  fahrplan: "https://www.bahn.de/web/api/angebote/fahrplan",
-  bestpreis: "https://www.bahn.de/web/api/angebote/tagesbestpreis",
+// Hosts in the order they are tried. `int.bahn.de` first: that is the host
+// db-vendo-client's `dbweb` profile actually uses (read from its
+// p/dbweb/base.json), while our earlier attempt against `www.bahn.de`
+// answered 200 on the station search but 403 on the fare search. Both are
+// kept because the client's own README calls this "haphazard blocking" -
+// when one host refuses, the other is worth a try before giving up.
+const BAHN_HOSTS = ["https://int.bahn.de", "https://www.bahn.de"];
+const BAHN_PATHS = {
+  orte: "/web/api/reiseloesung/orte",
+  fahrplan: "/web/api/angebote/fahrplan",
+  bestpreis: "/web/api/angebote/tagesbestpreis",
 };
-// Measured 07.08.2026: from a Cloudflare Worker the GET station search
-// answers 200 with real data, while the POST fare search answers 403. The
-// IP is therefore not the problem - the request shape is. bahn.de's own
-// frontend sends a correlation ID on every call, so it goes out here too.
-const BAHN_HEADERS = {
-  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
-  Accept: "application/json",
-  "Accept-Language": "de-DE,de;q=0.9",
-  "Content-Type": "application/json; charset=UTF-8",
-  Origin: "https://www.bahn.de",
-  Referer: "https://www.bahn.de/buchung/fahrplan/suche",
+// Deliberately minimal, matching what db-vendo-client actually sends: it
+// gets by with Content-Type, Accept and Accept-Language plus a randomised
+// user agent. The earlier guess here - an X-Correlation-ID in the website's
+// format - did not change the 403 and is gone again; UA variation is what
+// that client uses against the blocking.
+function bahnHeaders(language) {
+  return {
+    "Content-Type": "application/json",
+    Accept: "application/json",
+    "Accept-Language": language || "de",
+    "User-Agent": randomBahnUserAgent(),
+  };
+}
+
+// Same idea as db-vendo-client's `randomizeUserAgent`: a fixed UA is the
+// easiest thing in the world to block wholesale.
+const BAHN_UA_PARTS = {
+  platform: [
+    "Windows NT 10.0; Win64; x64",
+    "Macintosh; Intel Mac OS X 10_15_7",
+    "X11; Linux x86_64",
+  ],
+  version: ["124.0.0.0", "125.0.0.0", "126.0.0.0", "127.0.0.0", "128.0.0.0"],
 };
 
-// The site's format is two UUIDs joined by an underscore.
-function bahnCorrelationId() {
-  return `${crypto.randomUUID()}_${crypto.randomUUID()}`;
+function randomBahnUserAgent() {
+  const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+  return `Mozilla/5.0 (${pick(BAHN_UA_PARTS.platform)}) AppleWebKit/537.36 `
+    + `(KHTML, like Gecko) Chrome/${pick(BAHN_UA_PARTS.version)} Safari/537.36`;
 }
 // All products, i.e. don't silently hide regional trains - the cheap fare is
 // often exactly the slow connection.
@@ -500,19 +520,19 @@ async function handleRyanairRequest(incoming, request, ctx, allowedOrigin) {
  */
 async function handleBahnRequest(incoming, request, ctx, allowedOrigin) {
   const kind = incoming.pathname.replace(/^\/+|\/+$/g, "").slice("bahn/".length);
-  if (!BAHN_UPSTREAM[kind]) {
+  if (!BAHN_PATHS[kind]) {
     return jsonResponse({
       error: "Unknown Bahn endpoint. Use /bahn/orte, /bahn/fahrplan or /bahn/bestpreis.",
     }, 404, allowedOrigin);
   }
 
-  let upstreamUrl = BAHN_UPSTREAM[kind];
-  let init = { headers: BAHN_HEADERS };
+  let suffix = BAHN_PATHS[kind];
+  let init = { headers: bahnHeaders(incoming.searchParams.get("language")) };
 
   if (kind === "orte") {
     const q = incoming.searchParams.get("q");
     if (!q) return jsonResponse({ error: "orte needs q." }, 400, allowedOrigin);
-    upstreamUrl += `?suchbegriff=${encodeURIComponent(q)}&typ=ALL&limit=`
+    suffix += `?suchbegriff=${encodeURIComponent(q)}&typ=ALL&limit=`
       + encodeURIComponent(incoming.searchParams.get("limit") || "6");
   } else {
     const from = incoming.searchParams.get("from");
@@ -532,8 +552,8 @@ async function handleBahnRequest(incoming, request, ctx, allowedOrigin) {
       return jsonResponse({ error: "date must be YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS." }, 400, allowedOrigin);
     }
     init = {
+      ...init,
       method: "POST",
-      headers: { ...BAHN_HEADERS, "X-Correlation-ID": bahnCorrelationId() },
       body: JSON.stringify(bahnSearchBody(from, to, stamp, incoming.searchParams.get("class"))),
     };
   }
@@ -543,18 +563,35 @@ async function handleBahnRequest(incoming, request, ctx, allowedOrigin) {
   const cached = await cache.match(cacheKey);
   if (cached) return cached;
 
-  let upstreamResponse;
-  try {
-    upstreamResponse = await fetch(upstreamUrl, init);
-  } catch (err) {
-    return jsonResponse({ error: `Bahn request failed: ${err.message}` }, 502, allowedOrigin);
+  // Try each host in turn. A 403 from one is not the end: the client whose
+  // endpoint list this follows describes the blocking as haphazard, so the
+  // next host gets a chance before we report failure.
+  let upstreamResponse = null;
+  let text = "";
+  const refusals = [];
+  for (const host of BAHN_HOSTS) {
+    let attempt;
+    try {
+      attempt = await fetch(host + suffix, init);
+    } catch (err) {
+      refusals.push(`${host}: ${err.message}`);
+      continue;
+    }
+    const body = await attempt.text();
+    if (attempt.status === 403) {
+      refusals.push(`${host}: 403`);
+      continue;
+    }
+    upstreamResponse = attempt;
+    text = body;
+    break;
   }
 
-  const text = await upstreamResponse.text();
-  if (upstreamResponse.status === 403) {
+  if (!upstreamResponse) {
     return jsonResponse({
       blocked: true,
-      error: "Deutsche Bahn blocked this query (bot protection). No price available from this source.",
+      error: `Deutsche Bahn blocked this query (bot protection): ${refusals.join(", ")}. `
+        + "No price available from this source.",
     }, 403, allowedOrigin);
   }
 
