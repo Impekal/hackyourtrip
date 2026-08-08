@@ -1,0 +1,133 @@
+name: Probe round 11 - HAFAS mgate direkt (db-hafas / pyhafas / db-prices)
+
+# Hinweis von aussen: die Community-Projekte db-prices, db-hafas und pyhafas
+# sprechen die internen DB-Schnittstellen an. Runde 7 hat nur die *Wrapper*
+# geprueft (db-rest 503, bahn.expert 404, Vendo-Hosts ohne DNS) - der
+# HAFAS-Endpunkt selbst, `mgate.exe`, war nie dran. Genau den nutzen
+# db-hafas und pyhafas direkt.
+#
+# Entscheidend ist die KONTROLLE: OeBB und weitere Betreiber fahren dasselbe
+# HAFAS. Antwortet unsere Anfrageform dort, aber bei der DB nicht, liegt es
+# an der DB und nicht an uns. Ohne diese Kontrolle waere ein Fehlschlag nicht
+# deutbar - genau der Aufbau, der die Hotel-Frage entschieden hat.
+#
+# Wird nach der Auswertung geloescht.
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: HAFAS-Endpunkte anfragen
+        run: |
+          python3 - <<'PY'
+          import json, urllib.error, urllib.request
+
+          UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
+
+          # Eine Haltestellensuche ist die einfachste HAFAS-Anfrage: braucht
+          # keine gueltigen IDs, und ein lebendes HAFAS antwortet darauf immer
+          # mit JSON - notfalls mit einem Fehlercode, aber eben mit JSON.
+          def loc_match_body(cfg, query="Berlin Hbf"):
+              return {
+                  "lang": "de",
+                  "svcReqL": [{
+                      "cfg": {"polyEnc": "GPA"},
+                      "meth": "LocMatch",
+                      "req": {"input": {"field": "S", "loc": {
+                          "name": query + "?", "type": "ALL"}, "maxLoc": 5}},
+                  }],
+                  "client": cfg["client"],
+                  "ext": cfg.get("ext", "DB.R21.12.a"),
+                  "ver": cfg.get("ver", "1.15"),
+                  "auth": cfg["auth"],
+              }
+
+          def call(name, url, body):
+              data = json.dumps(body).encode()
+              req = urllib.request.Request(url, data=data, headers={
+                  "User-Agent": UA, "Content-Type": "application/json",
+                  "Accept": "application/json",
+              })
+              try:
+                  with urllib.request.urlopen(req, timeout=40) as r:
+                      text = r.read().decode("utf-8", "replace")
+                      payload = None
+                      try:
+                          payload = json.loads(text)
+                      except Exception:
+                          pass
+                      if payload is None:
+                          print(f"  {r.status:>3}  {name}   [antwortet, aber kein JSON]")
+                          print(f"       {text[:200]}".replace("\n", " "))
+                          return
+                      # HAFAS meldet Fehler im Feld `err`; "OK" heisst, der
+                      # Endpunkt hat die Anfrage wirklich verarbeitet.
+                      err = payload.get("err")
+                      svc = (payload.get("svcResL") or [{}])[0]
+                      hits = ((svc.get("res") or {}).get("match") or {}).get("locL") or []
+                      print(f"  {r.status:>3}  {name}   err={err!r} svcErr={svc.get('err')!r} "
+                            f"Treffer={len(hits)}")
+                      if hits:
+                          print(f"       LEBT: {[h.get('name') for h in hits[:3]]}")
+                      else:
+                          print(f"       {text[:220]}".replace("\n", " "))
+              except urllib.error.HTTPError as e:
+                  body_txt = e.read()[:220].decode("utf-8", "replace").replace("\n", " ")
+                  print(f"  {e.code:>3}  {name}   [HTTP-Fehler]\n       {body_txt}")
+              except Exception as e:
+                  print(f"  ---  {name}   {type(e).__name__}: {e}")
+
+          # Die Zugangsdaten, die die Community-Profile fuer die jeweilige
+          # App hinterlegt haben. Sie stehen offen in den Projekten - hier
+          # geht es allein um die Frage, ob der Endpunkt ueberhaupt noch da ist.
+          DB = {"client": {"id": "DB", "v": "16040000", "type": "IPH", "name": "DB Navigator"},
+                "auth": {"type": "AID", "aid": "n91dB8Z77MLdoR0K"},
+                "ext": "DB.R21.12.a", "ver": "1.15"}
+          OEBB = {"client": {"id": "OEBB", "v": "6030600", "type": "IPH", "name": "oebbianer"},
+                  "auth": {"type": "AID", "aid": "OWDL4fE4ixNiPBBm"},
+                  "ext": "OEBB.1", "ver": "1.57"}
+
+          print("=== DB: der HAFAS-Endpunkt, den db-hafas/pyhafas ansprechen ===")
+          for host in ("https://reiseauskunft.bahn.de/bin/mgate.exe",
+                       "https://fahrplan.oebb.at/bin/mgate.exe".replace("oebb.at", "bahn.de"),
+                       "https://hafas.db.de/bin/mgate.exe"):
+              call(host.split("//")[1][:38], host, loc_match_body(DB))
+
+          print("\n=== KONTROLLE: dieselbe Anfrageform bei einem anderen HAFAS ===")
+          # Antwortet die OeBB und die DB nicht, liegt es nicht an unserer
+          # Anfrage - dann hat die DB ihr HAFAS abgeschaltet.
+          call("oebb fahrplan.oebb.at/bin/mgate.exe",
+               "https://fahrplan.oebb.at/bin/mgate.exe", loc_match_body(OEBB, "Wien Hbf"))
+
+          print("\n=== Die REST-Wrapper nochmal (Runde 7 sagte 503) ===")
+          for url in ("https://v6.db.transport.rest/locations?query=Berlin&results=3",
+                      "https://v5.db.transport.rest/locations?query=Berlin&results=3"):
+              try:
+                  req = urllib.request.Request(url, headers={"User-Agent": UA})
+                  with urllib.request.urlopen(req, timeout=30) as r:
+                      print(f"  {r.status:>3}  {url[:52]}")
+                      print(f"       {r.read()[:200].decode('utf-8', 'replace')}")
+              except urllib.error.HTTPError as e:
+                  print(f"  {e.code:>3}  {url[:52]}   "
+                        + e.read()[:150].decode("utf-8", "replace").replace("\n", " "))
+              except Exception as e:
+                  print(f"  ---  {url[:52]}   {type(e).__name__}: {e}")
+
+          print("\n=== db-prices: die alte Sparpreis-Suche ===")
+          for url in ("https://reiseauskunft.bahn.de/bin/query.exe/dn?S=Berlin&Z=Muenchen&start=1",
+                      "https://ps.bahn.de/preissuche/preissuche/psc_service.go",
+                      "https://reiseauskunft.bahn.de/bin/mgate.exe"):
+              try:
+                  req = urllib.request.Request(url, headers={"User-Agent": UA})
+                  with urllib.request.urlopen(req, timeout=30) as r:
+                      body = r.read()[:180].decode("utf-8", "replace").replace("\n", " ")
+                      print(f"  {r.status:>3}  {url[:56]}\n       {body}")
+              except urllib.error.HTTPError as e:
+                  print(f"  {e.code:>3}  {url[:56]}   [HTTP]")
+              except Exception as e:
+                  print(f"  ---  {url[:56]}   {type(e).__name__}: {e}")
+          PY
