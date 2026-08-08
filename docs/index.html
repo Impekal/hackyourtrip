@@ -205,6 +205,12 @@
   .track-box { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 1rem 1.25rem; margin-top: 1.5rem; }
   .track-box h3 { margin: 0 0 0.4rem; font-size: 0.95rem; }
   .track-box p { color: var(--text-dim); font-size: 0.82rem; margin: 0 0 0.7rem; }
+  /* Der Weg vom Suchergebnis zum laufenden Alarm ist mehrschrittig und
+     laeuft ausserhalb der Seite - nummeriert statt als Fliesstext, damit
+     kein Schritt uebersehen wird und der Alarm stumm bleibt. */
+  .track-box .steps { color: var(--text-dim); font-size: 0.82rem; margin: 0 0 0.8rem; padding-left: 1.2rem; }
+  .track-box .steps li { margin-bottom: 0.3rem; }
+  .track-box .hint { font-size: 0.78rem; margin: 0.7rem 0 0; }
   textarea.yaml {
     width: 100%; min-height: 260px; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
     font-size: 0.78rem; background: var(--field); color: var(--text); border: 1px solid var(--line);
@@ -317,13 +323,6 @@
                separate block further down the form. -->
           <div class="checks inline-toggle" data-group="roundTripGroup">
             <label><input type="checkbox" id="roundTrip"> Hin und zurück</label>
-          </div>
-          <!-- Der einzige Weg, bei der Bahn an einen echten Preis zu kommen:
-               die DB gibt keine Tarife heraus, aber wenn eine Verbindung nur
-               aus Nahverkehr innerhalb Deutschlands besteht, kostet sie mit
-               dem D-Ticket nachweislich nichts extra. -->
-          <div class="checks inline-toggle" data-group="dTicketGroup">
-            <label><input type="checkbox" id="hasDTicket"> Ich habe das Deutschland-Ticket</label>
           </div>
         </div>
         <div class="field" data-group="returnDateGroup">
@@ -479,6 +478,14 @@
         <div class="checks" style="margin-top:0.7rem">
           <label><input type="checkbox" id="deutschlandticket"> Deutschlandticket vorhanden</label>
         </div>
+        <!-- Der einzige Weg, bei der Bahn an einen echten Preis zu kommen: die
+             DB gibt keine Tarife heraus, aber eine Verbindung, die nur aus
+             Nahverkehr innerhalb Deutschlands besteht, kostet mit dem
+             D-Ticket nachweislich nichts extra. -->
+        <p class="field-hint" style="color:var(--text-dim)">
+          Mit Haken werden reine Nahverkehrsverbindungen in Deutschland mit
+          0 € gewertet – Fernverkehr (ICE/IC/EC) nie.
+        </p>
       </fieldset>
 
       <fieldset data-group="transportExtraGroup">
@@ -631,13 +638,33 @@
     <div class="track-box" id="trackBox" hidden>
       <h3>📌 Diese Suche dauerhaft überwachen</h3>
       <p>
-        Die Live-Suche läuft nur hier im Browser mit Mock-Daten und merkt sich nichts.
-        Für echte Preisalarme (Telegram/E-Mail, mit Preishistorie) diesen Block in deine
-        <code class="mono">config/routes.yaml</code> einfügen und committen/als Secret hinterlegen
-        (siehe README) - der GitHub-Actions-Cronjob übernimmt das dann automatisch.
+        Die Suche hier zeigt einen Moment. Sparen entsteht erst durchs Beobachten:
+        alle 3 Stunden prüft ein Automat diese Strecke, führt eine Preishistorie und
+        meldet dir Preisstürze per Telegram oder E-Mail.
       </p>
+      <p>
+        Dafür kommt der Block unten in das Repo-Secret
+        <code class="mono">ROUTES_YAML_CONTENT</code> – <strong>nicht</strong> in eine Datei:
+        deine Reisepläne sollen nicht in einem öffentlichen Repo landen.
+      </p>
+      <ol class="steps">
+        <li>Unten auf <em>In Zwischenablage kopieren</em> klicken.</li>
+        <li><a id="secretLink" href="#" target="_blank" rel="noopener">Secret <code class="mono">ROUTES_YAML_CONTENT</code> öffnen</a>
+            (GitHub → Settings → Secrets and variables → Actions).</li>
+        <li>Ist es noch leer: alles einfügen. Beobachtest du schon Strecken:
+            nur die Zeilen ab <code class="mono">- id:</code> unten anhängen –
+            die Zeile <code class="mono">routes:</code> darf nur einmal vorkommen.</li>
+        <li>Speichern. Der nächste Lauf nimmt die Strecke mit; sofort testen geht
+            über den Actions-Tab → <em>Check travel deals</em> → <em>Run workflow</em>.</li>
+      </ol>
       <textarea class="yaml mono" id="trackYaml" readonly></textarea>
       <button class="secondary" id="copyYaml" style="margin-top:0.6rem">In Zwischenablage kopieren</button>
+      <p class="hint" id="alertChannelHint">
+        Damit dich eine Meldung auch erreicht, muss ein Kanal hinterlegt sein:
+        <code class="mono">TELEGRAM_BOT_TOKEN</code> + <code class="mono">TELEGRAM_CHAT_ID</code>
+        oder die <code class="mono">SMTP_*</code>-Secrets. Fehlen beide, läuft die Prüfung
+        zwar, aber niemand erfährt davon.
+      </p>
     </div>
   </section>
 
@@ -659,6 +686,6 @@
 <!-- The ?v= is deliberate: GitHub Pages lets browsers cache app.js, so a
      fix could ship and the visitor would keep running the old file. Bump
      this whenever app.js changes in a way users need to see. -->
-<script src="./app.js?v=2026-08-08-1"></script>
+<script src="./app.js?v=2026-08-08-2"></script>
 </body>
 </html>

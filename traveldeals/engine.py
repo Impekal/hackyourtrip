@@ -13,7 +13,7 @@ from __future__ import annotations
 from datetime import date, datetime
 
 from traveldeals.currency import convert, get_rates_per_eur
-from traveldeals.models import (MEAL_PLAN_TIERS, OR_COMBO_MODES,
+from traveldeals.models import (MEAL_PLAN_TIERS, MIXED_RETURN_MODES, OR_COMBO_MODES,
                                  TRANSPORT_MODES, HotelPref, Mode, Offer,
                                  Priority, RoutePreference, TransportPref,
                                  TripOption)
@@ -215,6 +215,10 @@ class DealEngine:
                 mode_a, mode_b = OR_COMBO_MODES[mode]
                 for offer in pool(mode_a) + pool(mode_b):
                     candidates.append(self._single_offer_option(mode, offer))
+            elif mode is Mode.MIXED_RETURN:
+                for m in MIXED_RETURN_MODES:
+                    pool(m)  # fill offer_pools so the pairing can read them
+                candidates.extend(self._mixed_return_options(offer_pools))
 
         candidates = [c for c in candidates if self._meets_hard_constraints(c, route)]
         _flag_below_median(candidates)
@@ -264,6 +268,54 @@ class DealEngine:
                 total_price=round(t.price + cheapest_hotel.price, 2),
                 currency=t.currency, total_duration_hours=t.duration_hours, score=0.0,
             ))
+        return options
+
+    def _mixed_return_options(self, pools: dict[Mode, list[Offer]]) -> list[TripOption]:
+        """Out one way, back another - the pairing no portal sells.
+
+        Every outbound is paired with the best return *per mode* rather than
+        with every return: all-against-all would produce thousands of options
+        differing only in the return, and the cheapest return of a mode
+        dominates the rest anyway.
+
+        A mode whose returns carry no price still contributes one
+        representative, so a timetable-only mode (Bahn) is not simply missing
+        from the comparison - it appears with its price honestly unknown.
+
+        Mirrors pairLegs() in docs/app.js.
+        """
+        # One-way legs only: an offer that already books its own return is a
+        # round trip, not half of a mixed one.
+        def one_way(offers: list[Offer]) -> list[Offer]:
+            return [o for o in offers if not o.return_depart_time]
+
+        best_return: dict[Mode, Offer] = {}
+        for mode in MIXED_RETURN_MODES:
+            for candidate in one_way(pools.get(mode, [])):
+                current = best_return.get(mode)
+                if current is None:
+                    best_return[mode] = candidate
+                elif not current.price_known and candidate.price_known:
+                    best_return[mode] = candidate
+                elif (current.price_known and candidate.price_known
+                        and candidate.price < current.price):
+                    best_return[mode] = candidate
+
+        options: list[TripOption] = []
+        for mode in MIXED_RETURN_MODES:
+            for out in one_way(pools.get(mode, [])):
+                for back in best_return.values():
+                    # A return leaving before the outbound is not a trip.
+                    if back.depart_time <= out.depart_time:
+                        continue
+                    options.append(TripOption(
+                        mode=Mode.MIXED_RETURN, offers=[out, back],
+                        total_price=round(out.price + back.price, 2),
+                        currency=out.currency,
+                        total_duration_hours=round(
+                            out.duration_hours + back.duration_hours, 2),
+                        score=0.0,
+                    ))
         return options
 
     # -- filtering & scoring --------------------------------------------------

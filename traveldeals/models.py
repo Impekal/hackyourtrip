@@ -33,6 +33,10 @@ class Mode(str, Enum):
     TRAIN_OR_BUS = "train_or_bus"      # whichever of the two is better
     FLIGHT_OR_TRAIN = "flight_or_train"
     FLIGHT_OR_BUS = "flight_or_bus"
+    # Out one way, back another - fly out, take the coach back, or any other
+    # pairing. No booking portal offers this because each sells one mode;
+    # a personal tool has no such constraint, and the saving can be large.
+    MIXED_RETURN = "mixed_return"
 
 
 # Modes that are pure transport (as opposed to hotel-only or combos)
@@ -45,6 +49,11 @@ OR_COMBO_MODES = {
     Mode.FLIGHT_OR_TRAIN: (Mode.FLIGHT, Mode.TRAIN),
     Mode.FLIGHT_OR_BUS: (Mode.FLIGHT, Mode.BUS),
 }
+
+# Which pools MIXED_RETURN draws from. Mirrors MIXED_RETURN_MODES in
+# docs/app.js - the outbound and the return leg may each come from any of
+# these, and specifically need not be the same one.
+MIXED_RETURN_MODES = (Mode.FLIGHT, Mode.TRAIN, Mode.BUS)
 
 
 @dataclass
@@ -184,10 +193,6 @@ class RoutePreference:
     # at both ends.
     nearby_origin_km: int = 0
     nearby_destination_km: int = 0
-    # Owning a Deutschland-Ticket changes what a regional connection costs
-    # from "unknown" to "nothing extra" - the only way this project gets a
-    # real DB price, since DB itself refuses automated fare lookups.
-    has_deutschland_ticket: bool = False
     notes: str = ""
 
 

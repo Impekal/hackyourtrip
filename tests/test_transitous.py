@@ -12,7 +12,7 @@ import pytest
 import requests
 
 from traveldeals.engine import DealEngine
-from traveldeals.models import Mode, Offer, Priority, RoutePreference
+from traveldeals.models import Mode, Offer, Priority, RailPref, RoutePreference
 from traveldeals.pricehistory import PriceHistory
 from traveldeals.providers.base import Provider
 from traveldeals.providers.transitous import (TransitousBusProvider,
@@ -375,7 +375,7 @@ def test_without_the_ticket_a_covered_connection_keeps_an_unknown_price():
 
 def test_with_the_ticket_a_covered_connection_becomes_a_real_zero():
     provider = TransitousTrainProvider(session=FakeSession([RE_ITINERARY]))
-    offer = provider.search(make_route(has_deutschland_ticket=True))[0]
+    offer = provider.search(make_route(rail=RailPref(deutschlandticket=True)))[0]
 
     assert offer.price_known is True
     assert offer.price == 0.0
@@ -385,7 +385,7 @@ def test_with_the_ticket_a_covered_connection_becomes_a_real_zero():
 def test_the_ticket_does_not_make_an_ice_free():
     # The expensive mistake this whole feature could cause, guarded directly.
     provider = TransitousTrainProvider(session=FakeSession([ICE_ITINERARY]))
-    offer = provider.search(make_route(has_deutschland_ticket=True))[0]
+    offer = provider.search(make_route(rail=RailPref(deutschlandticket=True)))[0]
 
     assert offer.d_ticket_covered is False
     assert offer.price_known is False

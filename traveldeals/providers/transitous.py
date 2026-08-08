@@ -278,7 +278,7 @@ class TransitousProvider(Provider):
         # coverage is information only - the fare stays unknown, and
         # pretending otherwise is the exact failure this module exists to
         # avoid.
-        free_with_d_ticket = covered is True and route.has_deutschland_ticket
+        free_with_d_ticket = covered is True and route.rail.deutschlandticket
         return Offer(
             mode=self.mode,
             provider="transitous",

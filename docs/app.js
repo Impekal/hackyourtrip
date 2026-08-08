@@ -4,7 +4,7 @@
 // guessing: if this doesn't match, the browser is running a cached old
 // app.js and any "the fix didn't work" report is about the old file. Bump
 // together with the ?v= in index.html.
-const BUILD_STAMP = '2026-08-08-1';
+const BUILD_STAMP = '2026-08-08-2';
 document.getElementById('buildStamp').textContent = BUILD_STAMP;
 
 /* =========================================================================
@@ -73,11 +73,6 @@ function applyModeVisibility(mode) {
     // guarantee zero results on train/bus/hotel tabs.
     lowCostGroup: cfg.flight,
     departUntilGroup: !cfg.singleDate,
-    // The Deutschland-Ticket can only ever apply where a train or coach
-    // offer can appear at all. Derived from the mode name rather than a
-    // column per row, so a new train/bus combo tab gets it automatically
-    // instead of silently missing it.
-    dTicketGroup: /train|bus|mixed_return/.test(mode),
   };
   for (const [group, visible] of Object.entries(groupVisible)) {
     document.querySelectorAll(`[data-group="${group}"]`).forEach(el => { el.hidden = !visible; });
@@ -1445,7 +1440,7 @@ function transitItineraryToOffer(itinerary, mode, route, tz, stops = {}) {
   // ticket the coverage is shown as information only - the fare is still
   // unknown, and pretending otherwise is the exact failure this codebase
   // is built to avoid.
-  const freeWithDTicket = covered === true && route.hasDeutschlandTicket === true;
+  const freeWithDTicket = covered === true && route.deutschlandticket === true;
 
   return {
     mode,
@@ -2450,7 +2445,6 @@ function readRouteFromForm() {
       : new Date(document.getElementById('departUntil').value),
     flexBefore: Number(document.getElementById('flexBefore').value || 0),
     flexAfter: Number(document.getElementById('flexAfter').value || 0),
-    hasDeutschlandTicket: document.getElementById('hasDTicket').checked,
     minNights: Number(document.getElementById('minNights').value || 0),
     maxNights: Number(document.getElementById('maxNights').value || 0),
     budget: numOrNull('budget'),
@@ -2924,7 +2918,11 @@ function buildYamlSnippet(route) {
   const slug = `${route.origin || route.destination}-${route.destination}`.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
   const fmt = d => d.toISOString().slice(0, 10);
   const hp = route.hotelPrefs, tp = route.transportPrefs;
-  return `  - id: ${slug}
+  // The `routes:` header is included so the snippet is a valid file on its
+  // own - pasting it into an empty secret has to just work. Someone who
+  // already tracks routes drops this one line, which the box says.
+  return `routes:
+  - id: ${slug}
     origin: ${route.origin || route.destination}
     destination: ${route.destination}
     depart_date_from: ${fmt(route.departFrom)}
@@ -3079,10 +3077,38 @@ searchForm.addEventListener('submit', async (ev) => {
   trackBox.hidden = false;
 });
 
-document.getElementById('copyYaml').addEventListener('click', () => {
+// Copy feedback matters here: the whole flow leaves the page after this
+// click, and a silent button leaves you unsure whether to paste yet.
+const copyYamlBtn = document.getElementById('copyYaml');
+copyYamlBtn.addEventListener('click', async () => {
   trackYaml.select();
-  navigator.clipboard?.writeText(trackYaml.value);
+  const label = copyYamlBtn.textContent;
+  try {
+    await navigator.clipboard.writeText(trackYaml.value);
+    copyYamlBtn.textContent = '✓ kopiert – jetzt ins Secret einfügen';
+  } catch (err) {
+    // execCommand is deprecated but still the only fallback where the
+    // Clipboard API is blocked (older Safari, non-secure origins).
+    copyYamlBtn.textContent = document.execCommand?.('copy')
+      ? '✓ kopiert – jetzt ins Secret einfügen'
+      : 'Bitte von Hand markieren und kopieren';
+  }
+  setTimeout(() => { copyYamlBtn.textContent = label; }, 4000);
 });
+
+/* The secret lives in the repo this page is published from, so the link is
+ * derived from the GitHub Pages host rather than hard-coded - a fork gets
+ * its own settings page instead of being sent to someone else's. Falls back
+ * to the docs when the page is served from anywhere else (localhost, a
+ * custom domain), where the owner/repo simply cannot be known. */
+const secretLinkEl = document.getElementById('secretLink');
+if (secretLinkEl) {
+  const pagesHost = location.hostname.match(/^([\w-]+)\.github\.io$/);
+  const repo = pagesHost && location.pathname.split('/').filter(Boolean)[0];
+  secretLinkEl.href = repo
+    ? `https://github.com/${pagesHost[1]}/${repo}/settings/secrets/actions`
+    : 'https://docs.github.com/actions/security-guides/using-secrets-in-github-actions';
+}
 
 /* =========================================================================
  * "Meine Alerts" tab - reads the result of the last GitHub Actions cron

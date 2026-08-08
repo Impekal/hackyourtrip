@@ -1,6 +1,7 @@
 from datetime import date
 from pathlib import Path
 
+from traveldeals.config import load_routes
 from traveldeals.engine import DealEngine
 from traveldeals.models import (BaggagePref, HotelPref, Mode, Offer,
                                  TripOption,
@@ -522,3 +523,125 @@ def test_unknown_return_duration_is_not_treated_as_too_long():
                         currency="EUR", total_duration_hours=3.0, score=0.0)
     assert DealEngine._within_duration_limits(
         option, _dur_route(max_duration_hours=5, max_duration_return_hours=1))
+
+
+# -- mixed_return: hin auf einem Weg, zurueck auf einem anderen --------------
+# Die Kombi, die kein Portal verkauft, weil jedes nur einen Verkehrstraeger
+# anbietet. Sie existierte bisher nur im Browser - eine Strecke damit liess
+# sich also gar nicht ueberwachen, der Cronjob brach mit "not a valid Mode" ab.
+
+def _mixed_leg(mode, price, hour, duration=2.0, price_known=True, day=15):
+    return Offer(
+        mode=mode, provider="stub", booking_site="X", price=price,
+        price_known=price_known, currency="EUR",
+        depart_time=f"2026-09-{day:02d}T{hour:02d}:00:00",
+        arrive_time=f"2026-09-{day:02d}T{hour + int(duration):02d}:00:00",
+        duration_hours=duration, url="",
+    )
+
+
+def _mixed_engine(flights=(), trains=(), buses=()):
+    return DealEngine(
+        {Mode.FLIGHT: FakeProvider(Mode.FLIGHT, list(flights)),
+         Mode.TRAIN: FakeProvider(Mode.TRAIN, list(trains)),
+         Mode.BUS: FakeProvider(Mode.BUS, list(buses))},
+        PriceHistory(Path("/nonexistent")), use_live_currency=False)
+
+
+def _mixed_route(**kw):
+    return make_route(modes=[Mode.MIXED_RETURN], **kw)
+
+
+def test_mixed_return_pairs_an_outbound_flight_with_a_return_bus():
+    engine = _mixed_engine(flights=[_mixed_leg(Mode.FLIGHT, 60.0, 8)],
+                           buses=[_mixed_leg(Mode.BUS, 15.0, 18, day=20)])
+    options = engine.search(_mixed_route())
+
+    combos = [o for o in options if len(o.offers) == 2]
+    assert combos, "keine Kombination gebildet"
+    best = min(combos, key=lambda o: o.total_price)
+    assert best.mode is Mode.MIXED_RETURN
+    assert [o.mode for o in best.offers] == [Mode.FLIGHT, Mode.BUS]
+    assert best.total_price == 75.0
+
+
+def test_a_return_leaving_before_the_outbound_is_not_a_trip():
+    # Der Bus faehrt fuenf Tage VOR dem Flug. Flug hin / Bus zurueck ist
+    # damit unmoeglich - Bus hin / Flug zurueck dagegen voellig richtig,
+    # denn jede Gattung kann auch der Hinweg sein.
+    engine = _mixed_engine(flights=[_mixed_leg(Mode.FLIGHT, 60.0, 12, day=20)],
+                           buses=[_mixed_leg(Mode.BUS, 15.0, 8, day=15)])
+    combos = [o for o in engine.search(_mixed_route()) if len(o.offers) == 2]
+
+    assert not [o for o in combos
+                if o.offers[0].mode is Mode.FLIGHT and o.offers[1].mode is Mode.BUS]
+    assert [(o.offers[0].mode, o.offers[1].mode) for o in combos] == [(Mode.BUS, Mode.FLIGHT)]
+
+
+def test_only_the_cheapest_return_per_mode_is_paired():
+    # Sonst entstuenden tausende Varianten, die sich nur im Rueckweg
+    # unterscheiden - der guenstigste seiner Gattung schlaegt die anderen ohnehin.
+    engine = _mixed_engine(
+        flights=[_mixed_leg(Mode.FLIGHT, 60.0, 8)],
+        buses=[_mixed_leg(Mode.BUS, 15.0, 18, day=20), _mixed_leg(Mode.BUS, 25.0, 19, day=20),
+               _mixed_leg(Mode.BUS, 40.0, 20, day=20)])
+    combos = [o for o in engine.search(_mixed_route()) if len(o.offers) == 2]
+
+    bus_returns = [o.offers[1].price for o in combos if o.offers[1].mode is Mode.BUS]
+    assert bus_returns == [15.0]
+
+
+def test_a_priceless_mode_still_appears_rather_than_dropping_out():
+    # Bahn liefert Fahrplan ohne Preis. Eine Kombi damit muss auftauchen -
+    # mit ehrlich unbekanntem Preis, nicht als 0 und nicht gar nicht.
+    engine = _mixed_engine(flights=[_mixed_leg(Mode.FLIGHT, 60.0, 8)],
+                           trains=[_mixed_leg(Mode.TRAIN, 0.0, 18, price_known=False, day=20)])
+    combos = [o for o in engine.search(_mixed_route()) if len(o.offers) == 2]
+
+    with_train = [o for o in combos if o.offers[1].mode is Mode.TRAIN]
+    assert with_train
+    assert with_train[0].has_unknown_price is True
+
+
+def test_a_priced_return_wins_over_a_priceless_one_of_the_same_mode():
+    engine = _mixed_engine(
+        flights=[_mixed_leg(Mode.FLIGHT, 60.0, 8)],
+        trains=[_mixed_leg(Mode.TRAIN, 0.0, 17, price_known=False, day=20),
+                _mixed_leg(Mode.TRAIN, 39.0, 18, day=20)])
+    combos = [o for o in engine.search(_mixed_route()) if len(o.offers) == 2]
+
+    train_returns = [o.offers[1] for o in combos if o.offers[1].mode is Mode.TRAIN]
+    # Mehrere Kombis koennen denselben Rueckweg teilen (jede Gattung darf
+    # auch Hinweg sein); entscheidend ist, dass es immer derselbe ist -
+    # der bepreiste, nicht der ohne Preisangabe.
+    assert train_returns
+    assert {o.price for o in train_returns} == {39.0}
+    assert all(o.price_known for o in train_returns)
+
+
+def test_an_offer_that_books_its_own_return_is_not_half_of_a_mixed_trip():
+    outbound = _mixed_leg(Mode.FLIGHT, 60.0, 8)
+    round_trip = _mixed_leg(Mode.FLIGHT, 90.0, 9)
+    round_trip.return_depart_time = "2026-09-20T18:00:00"
+    engine = _mixed_engine(flights=[outbound, round_trip],
+                           buses=[_mixed_leg(Mode.BUS, 15.0, 18, day=20)])
+    combos = [o for o in engine.search(_mixed_route()) if len(o.offers) == 2]
+
+    assert all(o.offers[0].price != 90.0 for o in combos)
+
+
+def test_mixed_return_mode_survives_the_config_round_trip(tmp_path):
+    # Der eigentliche Fehler: das Snippet aus der Weboberflaeche schrieb
+    # modes: [mixed_return], und der Loader kannte den Wert nicht.
+    path = tmp_path / "routes.yaml"
+    path.write_text(
+        "routes:\n"
+        "  - id: ham-bcn\n"
+        "    origin: HAM\n"
+        "    destination: BCN\n"
+        "    depart_date_from: 2026-09-15\n"
+        "    depart_date_until: 2026-09-15\n"
+        "    modes: [mixed_return]\n")
+
+    routes = load_routes(path)
+    assert routes[0].modes == [Mode.MIXED_RETURN]
