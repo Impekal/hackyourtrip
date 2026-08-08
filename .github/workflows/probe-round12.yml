@@ -1,4 +1,4 @@
-name: Probe round 12 - Vendo-Hosts: wirklich tot oder nur IPv6?
+name: "Probe round 12 - Vendo-Hosts: tot oder nur IPv6?"
 
 # Runde 7 hat app.vendo.noncd.db.de als "DNS tot" abgehakt. Ein Hinweis von
 # aussen nennt genau diesen Host als den, den db-vendo-client heute benutzt,
