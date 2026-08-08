@@ -730,6 +730,53 @@ nicht mehr. Deshalb ist auch `db-rest` dauerhaft 503 und nicht nur gestört.
 erst obige Tabelle lesen. Der einzige noch lebende DB-Preispfad ist
 `www.bahn.de/web/api/angebote/*` - und der ist bewacht (Runde 8).
 
+**Runde 12/13 (08.08.2026) - db-vendo-client: Quelltext gelesen, Ergebnis
+unverändert.** Von aussen kam der Hinweis auf `db-vendo-client` und den
+Endpunkt `app.vendo.noncd.db.de/mob/angebote/tagesbestpreis`.
+
+*Runde 12 - existiert der Vendo-Host?* Beide Adressfamilien getrennt
+abgefragt, mit `www.bahn.de` als Kontrolle:
+
+| Host | A | AAAA |
+|---|---|---|
+| `www.bahn.de` (Kontrolle) | 23.216.147.196 | 2600:1405:1000:9::17d6:16e5 |
+| `app.vendo.noncd.db.de` | – | – |
+| `int.vendo.noncd.db.de` | – | – |
+| `movas.noncd.db.de` | – | – |
+
+Der Resolver liefert AAAA problemlos (Kontrolle beweist es), die
+Vendo-Hosts sind für **beide** Familien NXDOMAIN. Kein IPv6-Thema - die
+Namen existieren im öffentlichen DNS nicht. Das `dbnav`-Profil ist für uns
+also unerreichbar.
+
+*Runde 13 - was macht das `dbweb`-Profil anders?* Statt weiter Header zu
+raten, den Quelltext gelesen. `p/dbweb/base.json`:
+
+```
+journeysEndpoint   https://int.bahn.de/web/api/angebote/fahrplan
+bestpriceEndpoint  https://int.bahn.de/web/api/angebote/tagesbestpreis
+recon              https://int.bahn.de/web/api/angebote/recon
+locationsEndpoint  https://int.bahn.de/web/api/reiseloesung/orte
+```
+
+**`int.bahn.de`**, nicht `www.bahn.de` - und die Header sind minimal
+(`Content-Type`, `Accept`, `Accept-Language`) plus ein *zufälliger*
+User-Agent (`randomizeUserAgent`). Beides übernommen, `int.bahn.de` zuerst,
+`www.bahn.de` als Ausweichhost, X-Correlation-ID (meine Erfindung) entfernt.
+
+**Live gemessen nach dem Deploy: Ortssuche 200, Preissuche 403 - bei beiden
+Hosts.** Damit benutzen wir exakt die Endpunktliste und den Header-Satz des
+echten Clients und werden trotzdem abgewiesen. Das deckt sich mit dessen
+eigener README, die für `dbweb` "aggressive blocking (IPv4/IPv6)" nennt und
+als Alternative ausgerechnet **Transitous** empfiehlt - die Quelle, auf der
+dieses Projekt ohnehin steht.
+
+Fazit: die Endpunkte sind richtig und aktuell, die Sperre sitzt auf der
+Netzreputation des Rechenzentrums. Von einem Server aus ist das nicht ohne
+bewusstes Umgehen zu lösen. **Nicht erneut aufnehmen**, solange sich an der
+Sperrpraxis nichts ändert; die Route bleibt im Worker, damit ein künftiger
+Test eine Zeile statt einer Neuentwicklung ist.
+
 Weiterhin offen bleibt der **Preis** für Bahn-Fernverkehr. Falls die DB je
 einen offiziellen Zugang öffnet, wäre das die Stelle.
 
