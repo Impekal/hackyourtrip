@@ -699,8 +699,39 @@ wird: moderne REST-API, Sandbox- und Produktions-Key ohne Vertrag,
 Provisionsmodell. Der Anschluss wäre ein Provider plus eine Worker-Route,
 kein Umbau.
 
-Weiterhin offen bleibt der **Preis** für Bahn. DB-Wrapper regelmässig neu
-prüfen: kämen sie zurück, gäbe es dort sogar Sparpreise.
+**Runde 11 (08.08.2026) - db-prices / db-hafas / pyhafas: die Bibliotheken
+leben, der Endpunkt dahinter nicht.**
+Von aussen kam der Hinweis auf die Community-Projekte `db-prices`,
+`db-hafas` und `pyhafas`, die die internen DB-Schnittstellen ansprechen.
+Runde 7 hatte nur die *Wrapper* geprüft; der HAFAS-Endpunkt `mgate.exe`
+selbst, den diese Projekte **direkt** aufrufen, war nie dran. Nachgeholt -
+mit einer **Kontrolle**, ohne die das Ergebnis nicht deutbar gewesen wäre:
+die ÖBB fährt dasselbe HAFAS, also wurde dieselbe Anfrageform dorthin
+geschickt.
+
+| Ziel | Ergebnis |
+|---|---|
+| **Kontrolle** `fahrplan.oebb.at/bin/mgate.exe` | **200, `err=OK`, 5 Treffer** ("Wien Hbf (U)" …) |
+| `reiseauskunft.bahn.de/bin/mgate.exe` | **DNS existiert nicht** |
+| `hafas.db.de/bin/mgate.exe` | DNS existiert nicht |
+| `fahrplan.bahn.de/bin/mgate.exe` | DNS existiert nicht |
+| `reiseauskunft.bahn.de/bin/query.exe` (db-prices, alt) | DNS existiert nicht |
+| `ps.bahn.de` (Sparpreis-Suche, alt) | DNS existiert nicht |
+| `v6`/`v5.db.transport.rest` | 503 (wie Runde 7) |
+
+Die Kontrolle ist der Punkt: **identische Anfrage, identisches Client-Profil -
+die ÖBB antwortet einwandfrei.** Es liegt also nicht an unserer Anfrage, an
+den Zugangsdaten oder am Rechenzentrum. Die DB hat ihr HAFAS schlicht
+abgeschaltet; sogar `reiseauskunft.bahn.de` löst nicht mehr auf. Die
+genannten Bibliotheken sind echt und funktionierten - ihr Gegenüber gibt es
+nicht mehr. Deshalb ist auch `db-rest` dauerhaft 503 und nicht nur gestört.
+
+**Diese Spur ist damit abschliessend erledigt.** Wer sie erneut vorschlägt:
+erst obige Tabelle lesen. Der einzige noch lebende DB-Preispfad ist
+`www.bahn.de/web/api/angebote/*` - und der ist bewacht (Runde 8).
+
+Weiterhin offen bleibt der **Preis** für Bahn-Fernverkehr. Falls die DB je
+einen offiziellen Zugang öffnet, wäre das die Stelle.
 
 ## Deutschland-Ticket: der einzige echte Bahnpreis, den wir bekommen
 
