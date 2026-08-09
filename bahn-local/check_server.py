@@ -220,5 +220,38 @@ with tempfile.TemporaryDirectory() as tmp:
           time.time() - old.stat().st_mtime < 5)
 
 
+# --- Ein belegter Port muss sich erklaeren ---------------------------------
+# Mit `nohup ... &` gestartet sieht man im Terminal nur "exit 1"; ein
+# Traceback verschwindet unsichtbar in der Logdatei. Genau dann braucht die
+# Meldung Klartext - sonst steht man vor einem Server, der einfach nicht
+# startet, ohne jeden Anhaltspunkt.
+import io
+import socket
+from contextlib import redirect_stdout
+
+belegt = socket.socket()
+belegt.bind(("127.0.0.1", 0))
+belegt.listen(1)
+_port, _host = server.PORT, server.HOST
+server.PORT, server.HOST = belegt.getsockname()[1], "127.0.0.1"
+ausgabe = io.StringIO()
+try:
+    with redirect_stdout(ausgabe):
+        server.main()
+    code = None
+except SystemExit as exc:
+    code = exc.code
+finally:
+    server.PORT, server.HOST = _port, _host
+    belegt.close()
+text = ausgabe.getvalue()
+
+check("belegter Port beendet den Start mit Fehlercode", code == 1, repr(code))
+check("und sagt im Klartext, was los ist", "bereits belegt" in text, text)
+check("nennt den wahrscheinlichsten Grund", "läuft schon" in text, text)
+check("und wie man den alten beendet", "pkill -f bahn-server.py" in text, text)
+check("kein Traceback", "Traceback" not in text, text)
+
+
 print(f"\n{sum(results)}/{len(results)} checks bestanden")
 sys.exit(0 if all(results) else 1)

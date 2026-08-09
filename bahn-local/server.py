@@ -474,8 +474,48 @@ def _lan_address() -> str | None:
         return None
 
 
+def _bind_failed(exc: OSError) -> None:
+    """Warum der Start scheiterte - in Klartext statt als Traceback.
+
+    Der haeufigste Fall ist ein noch laufender Server aus einem anderen
+    Fenster. Gestartet mit `nohup ... &` landet ein Traceback unsichtbar in
+    der Logdatei, und im Terminal steht nur "exit 1" - man sieht also
+    ausgerechnet dann nichts, wenn man am wenigsten hinsieht.
+    """
+    print("─" * 60)
+    print(" HackYourTrip – Server konnte NICHT starten")
+    print("")
+    if exc.errno in (48, 98):  # EADDRINUSE (macOS / Linux)
+        print(f"   Port {PORT} ist bereits belegt.")
+        print("   Fast immer: der Server läuft schon – in einem anderen")
+        print("   Terminal-Fenster oder im Hintergrund.")
+        print("")
+        print("   Läuft er schon? Dann bist du fertig, einfach benutzen:")
+        print(f"      http://127.0.0.1:{PORT}/health   sollte {{\"ok\": true}} zeigen")
+        print("")
+        print("   Den alten beenden und neu starten:")
+        print("      pkill -f bahn-server.py")
+    elif exc.errno == 13:  # EACCES
+        print(f"   Keine Berechtigung für Port {PORT}.")
+    else:
+        print(f"   {exc}")
+    print("─" * 60)
+
+
 def main():
-    server = ThreadingHTTPServer((HOST, PORT), Handler)
+    # Ohne das schreibt Python bei `nohup ... > log` gepuffert - die
+    # Startmeldung stuende erst Minuten spaeter in der Datei, und ein
+    # `cat` direkt nach dem Start zeigte eine leere Datei.
+    try:
+        sys.stdout.reconfigure(line_buffering=True)
+        sys.stderr.reconfigure(line_buffering=True)
+    except Exception:
+        pass
+    try:
+        server = ThreadingHTTPServer((HOST, PORT), Handler)
+    except OSError as exc:
+        _bind_failed(exc)
+        raise SystemExit(1)
     print("─" * 60)
     print(" HackYourTrip – lokaler Bahn-Preis-Server läuft")
     print("")

@@ -174,6 +174,7 @@ das ist ein kleiner Zusatzschritt, kein Umbau.
 | `403` / „gesperrt" in der Antwort | Du bist nicht auf einer Wohn-IP (VPN aus? nicht über einen Server?). Die DB lässt nur normale Heimanschlüsse durch. |
 | App zeigt keine Live-Preise, nur „Preis unbekannt" | Fast immer: die App wurde über die **github.io**-Adresse geöffnet statt über `http://127.0.0.1:8899/`. Siehe unten. Zur Diagnose in der Browser-Konsole `await bahnLocalStatus()` eingeben. |
 | `curl: command not found` | Sehr selten. Auf dem Mac über die Xcode-Command-Line-Tools nachinstallierbar. |
+| Start endet sofort mit `exit 1` | Meist läuft der Server schon (anderes Fenster oder im Hintergrund) – Port 8899 ist dann belegt. Prüfen mit `cat ~/bahn-server.log`; dort steht der Grund im Klartext. Alten beenden: `pkill -f bahn-server.py`. |
 
 ## Technische Notiz
 
