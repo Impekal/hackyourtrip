@@ -4,7 +4,7 @@
 // guessing: if this doesn't match, the browser is running a cached old
 // app.js and any "the fix didn't work" report is about the old file. Bump
 // together with the ?v= in index.html.
-const BUILD_STAMP = '2026-08-09-13';
+const BUILD_STAMP = '2026-08-09-14';
 document.getElementById('buildStamp').textContent = BUILD_STAMP;
 
 /* =========================================================================
@@ -866,6 +866,15 @@ const LOCAL_BAR_AUTO_KEY = 'bahnLocalSwitchAuto';
 // man unterwegs in einer Schleife fest.
 const LOCAL_BAR_BOUNCE_KEY = 'bahnLocalSwitchTried';
 const LOCAL_BAR_BOUNCE_MS = 60000;
+// Drei Zustaende statt an/aus. 'paused' ist der Fall unterwegs: der
+// automatische Sprung ist eingeschaltet, aber gerade fehlgeschlagen. Bliebe
+// es bei an/aus, wuerde jeder Aufruf ausserhalb des Heimnetzes erneut auf
+// eine Fehlerseite laufen - einmal pro Tag ist das aergerlich, zehnmal
+// schaltet man die Funktion ab. Pausiert wird sie beim naechsten Wechseln
+// von Hand wieder scharf.
+const AUTO_ON = '1';
+const AUTO_OFF = '0';
+const AUTO_PAUSED = 'paused';
 
 function lsGet(key) { try { return localStorage.getItem(key); } catch (e) { return null; } }
 function lsSet(key, value) { try { localStorage.setItem(key, value); } catch (e) { /* egal */ } }
@@ -889,34 +898,53 @@ function setUpLocalSwitch() {
   const input = document.getElementById('localBarUrl');
   const auto = document.getElementById('localBarAuto');
   const stored = lsGet(LOCAL_BAR_URL_KEY) || '';
+  const autoState = lsGet(LOCAL_BAR_AUTO_KEY) || AUTO_OFF;
   input.value = stored;
-  auto.checked = lsGet(LOCAL_BAR_AUTO_KEY) === '1';
+  // Pausiert heisst: eingeschaltet, aber gerade nicht erreichbar. Das
+  // Haekchen bleibt gesetzt - der Wunsch des Nutzers hat sich ja nicht
+  // geaendert, nur das WLAN.
+  auto.checked = autoState !== AUTO_OFF;
 
   const go = () => {
     const url = normaliseLocalUrl(input.value);
     if (!url) { input.focus(); return; }
     lsSet(LOCAL_BAR_URL_KEY, url);
-    lsSet(LOCAL_BAR_AUTO_KEY, auto.checked ? '1' : '0');
+    // Ein Wechsel von Hand macht die Automatik wieder scharf: wer hier
+    // tippt, ist offenbar wieder zuhause.
+    lsSet(LOCAL_BAR_AUTO_KEY, auto.checked ? AUTO_ON : AUTO_OFF);
     lsSet(LOCAL_BAR_BOUNCE_KEY, String(Date.now()));
     location.href = url + '/';
   };
   document.getElementById('localBarGo').addEventListener('click', go);
   input.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') go(); });
-  auto.addEventListener('change', () => lsSet(LOCAL_BAR_AUTO_KEY, auto.checked ? '1' : '0'));
+  auto.addEventListener('change',
+    () => lsSet(LOCAL_BAR_AUTO_KEY, auto.checked ? AUTO_ON : AUTO_OFF));
 
   // Der Rueckkehr-Schutz: war der letzte Sprung gerade eben, ist er
   // offenbar schiefgegangen (sonst waere man nicht wieder hier).
   const tried = Number(lsGet(LOCAL_BAR_BOUNCE_KEY) || 0);
   const justFailed = tried && (Date.now() - tried) < LOCAL_BAR_BOUNCE_MS;
-  if (auto.checked && stored && !justFailed) {
+  if (justFailed && autoState === AUTO_ON) {
+    // Nicht nur diesen einen Aufruf ueberspringen, sondern bis zum
+    // naechsten Wechseln von Hand ruhig bleiben. Sonst laeuft man
+    // unterwegs bei jedem Oeffnen erneut in dieselbe Fehlerseite.
+    lsSet(LOCAL_BAR_AUTO_KEY, AUTO_PAUSED);
+  }
+  if (autoState === AUTO_ON && stored && !justFailed) {
     lsSet(LOCAL_BAR_BOUNCE_KEY, String(Date.now()));
     location.href = stored + '/';
     return;
   }
   if (justFailed) {
     bar.querySelector('.localbar-text').innerHTML =
-      '<strong>🚆 Live-Bahnpreise</strong> – der lokale Server war eben nicht erreichbar. '
-      + 'Läuft er noch? Bist du im selben WLAN? Adresse prüfen und erneut wechseln.';
+      '<strong>🚆 Live-Bahnpreise</strong> – der lokale Server war eben nicht erreichbar, '
+      + 'der automatische Wechsel pausiert deshalb. Bist du unterwegs, ist alles in Ordnung: '
+      + 'Flüge, Hotels und Bus laufen hier ohnehin. Zuhause einmal auf <strong>Wechseln</strong> '
+      + 'tippen – dann schaltet sich die Automatik wieder ein.';
+  } else if (autoState === AUTO_PAUSED) {
+    bar.querySelector('.localbar-text').innerHTML =
+      '<strong>🚆 Live-Bahnpreise</strong> – automatischer Wechsel pausiert, weil der lokale '
+      + 'Server zuletzt nicht erreichbar war. Zuhause einmal auf <strong>Wechseln</strong> tippen.';
   }
   bar.hidden = false;
 }
