@@ -807,10 +807,43 @@ unveraendert Transitous-Fahrplan + D-Ticket-Logik + Deep-Link. Nie ein
 erfundener Preis, nie ein Bruch ohne die lokale Quelle. Fuer naechtliche
 Alarme spaeter ein immer-an-Geraet (Pi) mit derselben Konfiguration.
 
-Der letzte offene Punkt vor dem Parser-Bau: eine echte Preis-Antwort von
-der Maschine des Nutzers sehen, um das Feld-Mapping final zu bestaetigen
-statt gegen die (stabile, aber ungeprueft-am-echten-Fall) FPTF-Form zu
-bauen.
+**Runde 15 (09.08.2026) - ES LÄUFT: echte DB-Live-Preise.**
+Live auf dem MacBook des Nutzers gemessen, `int.bahn.de/web/api/angebote/fahrplan`
+mit gueltigem Suchkoerper: **HTTP 201, echte Sparpreise** (`"betrag": 39.99`,
+`49.99` fuer Berlin->Muenchen). Der Weg steht.
+
+Zwei Dinge mussten stimmen, beide vom Nutzer gemessen:
+1. **Wohn-IP** - der VPS/Server bleibt 403, das MacBook zuhause kommt durch.
+2. **curl-Fingerabdruck** - db-vendo-client (Node) bekam von *derselben*
+   Maschine 403, rohes `curl` 201. Die DB fingerprintet den TLS-/HTTP-Stack;
+   curl sieht aus wie ein Browser, Node/Python nicht. Deshalb geht der Weg
+   **nicht** ueber db-vendo-client, sondern ueber curl.
+
+**Gebaut:** `bahn-local/server.py` - ein nur-lokaler Python-Stdlib-Server
+(kein pip, kein Docker), der die DB per `curl`-Unterprozess fragt und der App
+`/health`, `/orte`, `/fahrplan` bereitstellt. CORS offen (nur-lokal,
+oeffentliche Fahrplandaten), 5-Minuten-Cache. Antwort-Parser gegen die echte
+Struktur getestet: `check_server.py`, 24 checks. Anleitung: `bahn-local/README.md`.
+
+**App-Anbindung (docs/app.js):** `groundOffersFor(route,'train')` probt beim
+Suchen `http://127.0.0.1:8899/health` (1,5s Timeout, einmal pro Seitenaufruf
+gecacht). Erreichbar -> echte DB-Preise mit `priceSource:'db-live'` und Chip
+"🟢 Live-Preis DB". Nicht erreichbar -> unveraendert Transitous-Fahrplan +
+D-Ticket. Adresse ueber `localStorage['bahnLocalUrl']` umstellbar (Pi/Tunnel
+spaeter, ohne Code-Aenderung). Auch der mixed_return-Zugschenkel laeuft jetzt
+ueber `groundOffersFor`, bekommt also live-Preise.
+Tests: `ui_bahn_live.py` (9 checks, beide Faelle - Server an *und* aus).
+
+**Offen / Verfeinerungen (nicht dringend):**
+- D-Ticket-Abdeckung wird im Live-Pfad noch nicht gesetzt (nur im
+  Transitous-Pfad). Wenn Live-Preise da sind, fehlt der 0-EUR-Hinweis fuers
+  D-Ticket. Zusammenfuehren waere die naechste Ausbaustufe.
+- Bestpreissuche (`/angebote/tagesbestpreis`) ist im Server noch nicht als
+  Route; `/fahrplan` liefert bereits `angebotsPreis` pro Verbindung, das deckt
+  den Kernbedarf.
+- Safari blockt teils `http://localhost` von einer https-Seite; Chrome nicht.
+  Im README vermerkt.
+- Dauerbetrieb fuer Alarme = server.py auf einem immer-an-Geraet (Pi).
 
 ## Deutschland-Ticket: der einzige echte Bahnpreis, den wir bekommen
 

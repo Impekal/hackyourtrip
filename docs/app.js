@@ -4,7 +4,7 @@
 // guessing: if this doesn't match, the browser is running a cached old
 // app.js and any "the fix didn't work" report is about the old file. Bump
 // together with the ?v= in index.html.
-const BUILD_STAMP = '2026-08-08-2';
+const BUILD_STAMP = '2026-08-09-1';
 document.getElementById('buildStamp').textContent = BUILD_STAMP;
 
 /* =========================================================================
@@ -770,9 +770,141 @@ async function fetchNearbyStations(name, radiusKm, limit = 2) {
   return found;
 }
 
+/* =========================================================================
+ * Lokaler Bahn-Preis-Server (bahn-local/server.py).
+ *
+ * Die DB sperrt Preisabfragen von Server-IPs, lässt sie von einer Wohn-IP
+ * aber durch - und nur über curls Fingerabdruck, nicht Nodes/Pythons. Der
+ * kleine lokale Server (curl-Unterprozess) läuft beim Nutzer und liefert
+ * genau deshalb echte Sparpreise. Diese App fragt ihn, wenn er erreichbar
+ * ist; ist er es nicht (Handy, Rechner aus), fällt alles lautlos auf den
+ * Transitous-Fahrplan + D-Ticket-Logik zurück - nie ein erfundener Preis,
+ * nie ein Bruch.
+ *
+ * Die Adresse ist über localStorage überschreibbar ('bahnLocalUrl'), damit
+ * später ein Pi oder Tunnel ohne Code-Änderung eingehängt werden kann.
+ * ===================================================================== */
+const BAHN_LOCAL_DEFAULT = 'http://127.0.0.1:8899';
+function bahnLocalUrl() {
+  try { return (localStorage.getItem('bahnLocalUrl') || BAHN_LOCAL_DEFAULT).replace(/\/+$/, ''); }
+  catch (e) { return BAHN_LOCAL_DEFAULT; }
+}
+
+// Einmal pro Seitenaufruf geprüft: ein toter Server darf nicht jede Suche
+// um sein Timeout verzögern. null = noch nicht geprüft.
+let _bahnLocalReachable = null;
+async function bahnLocalReachable() {
+  if (_bahnLocalReachable !== null) return _bahnLocalReachable;
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 1500);
+    const res = await fetch(bahnLocalUrl() + '/health', { signal: ctrl.signal });
+    clearTimeout(timer);
+    const body = await res.json().catch(() => ({}));
+    _bahnLocalReachable = res.ok && body.ok === true;
+  } catch (e) {
+    _bahnLocalReachable = false; // nicht gestartet, oder Browser blockt http://localhost
+  }
+  return _bahnLocalReachable;
+}
+
+async function bahnLocalJson(path, params) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 30000);
+  try {
+    const url = bahnLocalUrl() + path + (params ? '?' + params.toString() : '');
+    const res = await fetch(url, { signal: ctrl.signal });
+    return await res.json();
+  } finally { clearTimeout(timer); }
+}
+
+async function bahnLocalResolveId(name) {
+  const list = await bahnLocalJson('/orte', new URLSearchParams({ q: name }));
+  if (!Array.isArray(list) || !list.length) return null;
+  const needle = (name || '').trim().toLowerCase();
+  const exact = list.find(o => (o.name || '').trim().toLowerCase() === needle);
+  return (exact || list[0]).id || null;
+}
+
+// One trimmed DB connection -> an Offer in this app's shape. A price the DB
+// did not name stays priceKnown:false - never a fabricated 0.
+function bahnConnectionToOffer(conn, route) {
+  if (!conn || !conn.depart) return null;
+  const depart = new Date(conn.depart);
+  if (isNaN(depart)) return null;
+  const priceKnown = typeof conn.price === 'number';
+  const lineLabel = (conn.legs || []).map(l => l.line).filter(Boolean).join(' → ');
+  return {
+    mode: 'train',
+    isMock: false,
+    priceKnown,
+    price: priceKnown ? conn.price : 0,
+    currency: conn.currency || route.currency,
+    // A real, bookable fare from bahn.de - the deep link goes to the booking.
+    bookingSite: 'bahn.de',
+    url: 'https://www.bahn.de/buchung/fahrplan/suche',
+    lineLabel,
+    depart,
+    durationHours: conn.durationSeconds ? round2(conn.durationSeconds / 3600) : null,
+    bagFee: 0,
+    isLowCost: false,
+    returnDepart: null,
+    stops: Number(conn.transfers || 0),
+    wifiOnboard: false,
+    powerOutlets: false,
+    legroomCm: null,
+    punctualityPct: null,
+    track: '',
+    // Marks the offer as coming from the live DB source, for a badge and so
+    // nothing downstream mistakes it for the price-less timetable offers.
+    priceSource: 'db-live',
+  };
+}
+
+async function fetchLocalBahnOffers(route) {
+  if (!(await bahnLocalReachable())) return null;
+  let fromId, toId;
+  try {
+    [fromId, toId] = await Promise.all([
+      bahnLocalResolveId(route.origin),
+      bahnLocalResolveId(route.destination),
+    ]);
+  } catch (e) { return null; }
+  if (!fromId || !toId) return null;
+
+  const offers = [];
+  const seen = new Set();
+  for (const day of dayCandidates(route).slice(0, TRANSIT_MAX_DAYS)) {
+    let data;
+    try {
+      data = await bahnLocalJson('/fahrplan', new URLSearchParams({
+        from: fromId, to: toId, date: isoDay(day),
+        class: route.bahncard === '100' ? '1' : '2',
+      }));
+    } catch (e) { continue; }
+    for (const conn of (data && data.connections) || []) {
+      const offer = bahnConnectionToOffer(conn, route);
+      if (!offer) continue;
+      if (isoDay(offer.depart) !== isoDay(day)) continue; // rolled past midnight
+      const key = offer.depart.toISOString() + '|' + offer.lineLabel;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      offers.push(offer);
+    }
+  }
+  return offers;
+}
+
 // One direction, one mode, priced sources first - shared by the plain search
 // and the nearby-station variants so both stay in step.
 async function groundOffersFor(route, mode) {
+  if (mode === 'train') {
+    // Real DB fares when the local server is up; otherwise the timetable
+    // (price-less, but with the Deutschland-Ticket logic) as before.
+    const live = await fetchLocalBahnOffers(route);
+    if (live && live.length) return live;
+    return (await fetchRealTransitOffers(route, 'train')) || [];
+  }
   const priced = mode === 'bus' ? await fetchFlixbusOffers(route) : [];
   const timetable = await fetchRealTransitOffers(route, mode);
   return [...priced, ...(timetable || [])];
@@ -1847,9 +1979,9 @@ async function runSearch(route) {
     for (const m of MIXED_RETURN_MODES) {
       let found = [];
       if (m === 'flight') found = (await fetchRealFlightOffers(variant)) || [];
-      else if (m === 'bus') found = [...(await fetchFlixbusOffers(variant)),
-                                      ...((await fetchRealTransitOffers(variant, 'bus')) || [])];
-      else found = (await fetchRealTransitOffers(variant, m)) || [];
+      // groundOffersFor gives the train leg real DB prices when the local
+      // server is up - a mixed trip only counts a leg it can price anyway.
+      else found = (await groundOffersFor(variant, m)) || [];
       for (const offer of found) {
         // A round-trip fare can't be split, and a leg with no price can't be
         // added to a total.
@@ -2156,6 +2288,9 @@ function offerChips(offer) {
     }
   } else if (['flight', 'train', 'bus'].includes(offer.mode)) {
     chips.push(offer.stops === 0 ? 'Direkt' : `${offer.stops}x Umstieg`);
+    // A real, bookable DB fare (not the price-less timetable) earns a badge,
+    // so it's clear this price came live from bahn.de.
+    if (offer.priceSource === 'db-live') chips.push('🟢 Live-Preis DB');
     // Only stated when it is decided. `null` means "not decidable" and gets
     // no chip at all - an absent claim, not a negative one.
     if (offer.dTicketCovered === true) {
