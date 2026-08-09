@@ -1,0 +1,170 @@
+name: "Probe round 16 - liefert der LiteAPI-Sandbox-Key echte Hotelpreise?"
+
+# Der Produktionsschluessel kostet eine hinterlegte Kreditkarte. Frei ist nur
+# der Sandbox-Schluessel. Die Marketing-Aussagen widersprechen sich
+# ("Sandbox = production" gegen "simulierte Daten ohne echte Buchung"), also
+# wird gemessen statt geglaubt.
+#
+# Die eine Frage: sind die Preise aus der Sandbox ECHT?
+#
+# Ein einzelner Preis beantwortet das nicht - 89,00 EUR sieht echt aus, egal
+# ob er es ist. Entschieden wird es durch Variation: echte Preise reagieren
+# auf Datum, Wochentag, Aufenthaltsdauer und Belegung, erfundene nicht. Wenn
+# alle vier Varianten denselben Betrag liefern, sind es Testdaten - und dann
+# duerfen sie nie in der App landen (Grundregel des Projekts: kein Preis,
+# der nicht echt ist).
+#
+# Gegenprobe fuer die Messung selbst: dieselbe Anfrage ohne Schluessel muss
+# 401 geben. Sonst misst man womoeglich einen offenen Endpunkt und haelt das
+# fuer einen Erfolg des Schluessels.
+#
+# Voraussetzung: Repo-Secret LITEAPI_KEY mit dem Sandbox-Schluessel.
+# Wird nach der Auswertung geloescht.
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Sandbox-Preise messen
+        env:
+          LITEAPI_KEY: ${{ secrets.LITEAPI_KEY }}
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.error, urllib.parse, urllib.request
+          from datetime import date, timedelta
+
+          KEY = os.environ.get("LITEAPI_KEY", "")
+          if not KEY:
+              print("Kein LITEAPI_KEY gesetzt - nichts zu messen.")
+              raise SystemExit(0)
+          # Der Praefix verraet, welche Umgebung wirklich antwortet.
+          print("Schluessel-Praefix:", KEY[:8] + "...", "| Laenge:", len(KEY))
+
+          BASE = "https://api.liteapi.travel/v3.0"
+
+          def call(url, method="GET", body=None, key=KEY, timeout=45):
+              headers = {"Accept": "application/json",
+                         "User-Agent": "HackYourTrip-Probe/1.0"}
+              if key:
+                  headers["X-API-Key"] = key
+              data = None
+              if body is not None:
+                  data = json.dumps(body).encode()
+                  headers["Content-Type"] = "application/json"
+              req = urllib.request.Request(url, data=data, headers=headers, method=method)
+              try:
+                  with urllib.request.urlopen(req, timeout=timeout) as r:
+                      return r.status, json.loads(r.read().decode("utf-8", "replace"))
+              except urllib.error.HTTPError as e:
+                  raw = e.read().decode("utf-8", "replace")
+                  try:
+                      return e.code, json.loads(raw)
+                  except Exception:
+                      return e.code, {"_raw": raw[:400]}
+              except Exception as e:
+                  return None, {"_fehler": f"{type(e).__name__}: {e}"}
+
+          # --- Gegenprobe: ohne Schluessel muss es 401 geben ------------------
+          print("\n=== Gegenprobe: dieselbe Anfrage OHNE Schluessel ===")
+          status, _ = call(f"{BASE}/data/hotels?countryCode=DE&cityName=Berlin&limit=1", key="")
+          print("  ohne Key ->", status, "(401 erwartet; alles andere macht die Messung wertlos)")
+
+          # --- Schritt 1: echte Hotels in Berlin? ----------------------------
+          print("\n=== Hotels in Berlin ===")
+          status, data = call(f"{BASE}/data/hotels?" + urllib.parse.urlencode(
+              {"countryCode": "DE", "cityName": "Berlin", "limit": 5}))
+          print("  HTTP", status)
+          hotels = (data or {}).get("data") or (data if isinstance(data, list) else [])
+          if not hotels:
+              print("  Antwort:", json.dumps(data)[:600])
+              raise SystemExit(0)
+          for h in hotels[:5]:
+              print(f"   - {h.get('id')}  {h.get('name')}  {h.get('city') or ''}")
+          ids = [h["id"] for h in hotels[:3] if h.get("id")]
+          print("  -> echte, nachpruefbare Hotelnamen?  (bitte selbst ansehen)")
+
+          # --- Schritt 2: Preise in vier Varianten ---------------------------
+          # Echte Preise unterscheiden sich zwischen diesen Faellen. Testdaten
+          # nicht. Genau das ist die Messung.
+          heute = date.today()
+          varianten = {
+              "in 30 Tagen, Di->Mi, 1 Nacht, 2 Erw.":
+                  (heute + timedelta(days=30), 1, [{"adults": 2}]),
+              "in 31 Tagen, 1 Nacht, 2 Erw. (Nachbartag)":
+                  (heute + timedelta(days=31), 1, [{"adults": 2}]),
+              "in 30 Tagen, 3 Naechte, 2 Erw.":
+                  (heute + timedelta(days=30), 3, [{"adults": 2}]),
+              "in 30 Tagen, 1 Nacht, 1 Erw.":
+                  (heute + timedelta(days=30), 1, [{"adults": 1}]),
+              "in 240 Tagen, 1 Nacht, 2 Erw. (weit weg)":
+                  (heute + timedelta(days=240), 1, [{"adults": 2}]),
+          }
+
+          gesehen = {}
+          feldnamen_gezeigt = False
+          for label, (start, naechte, occ) in varianten.items():
+              body = {
+                  "hotelIds": ids,
+                  "occupancies": occ,
+                  "currency": "EUR",
+                  "guestNationality": "DE",
+                  "checkin": start.isoformat(),
+                  "checkout": (start + timedelta(days=naechte)).isoformat(),
+              }
+              status, data = call(f"{BASE}/hotels/rates", "POST", body)
+              print(f"\n--- {label}  [HTTP {status}]")
+              if status != 200:
+                  print("   ", json.dumps(data)[:400])
+                  continue
+
+              eintraege = (data or {}).get("data") or []
+              if not eintraege:
+                  print("    keine Raten:", json.dumps(data)[:300])
+                  continue
+
+              # Einmal die Rohstruktur zeigen - danach steht das Feldformat
+              # fest und muss beim Bauen des Providers nicht geraten werden.
+              # (Genau dieses Raten hat beim Bahn-Server Stunden gekostet.)
+              if not feldnamen_gezeigt:
+                  feldnamen_gezeigt = True
+                  print("    ROHSTRUKTUR (einmalig, fuers Feldformat):")
+                  print("     ", json.dumps(eintraege[0])[:1500])
+
+              for e in eintraege:
+                  hid = e.get("hotelId")
+                  preise = []
+                  for rr in e.get("roomTypes") or []:
+                      retail = ((rr.get("offerRetailRate") or {}).get("amount")
+                                or (rr.get("suggestedSellingPrice") or [{}])[0].get("amount"))
+                      if retail is not None:
+                          preise.append(float(retail))
+                  if preise:
+                      guenstigster = min(preise)
+                      gesehen.setdefault(hid, {})[label] = guenstigster
+                      print(f"    {hid}: ab {guenstigster:.2f} EUR  ({len(preise)} Raten)")
+                  else:
+                      print(f"    {hid}: keine Betraege lesbar - Felder:",
+                            sorted((e.get('roomTypes') or [{}])[0].keys())[:12])
+
+          # --- Das Urteil ----------------------------------------------------
+          print("\n=== URTEIL: reagieren die Preise auf die Anfrage? ===")
+          if not gesehen:
+              print("  Keine Preise gelesen - Frage bleibt offen.")
+              raise SystemExit(0)
+          for hid, werte in gesehen.items():
+              eindeutige = sorted(set(round(v, 2) for v in werte.values()))
+              print(f"  {hid}: {len(eindeutige)} verschiedene Preise aus "
+                    f"{len(werte)} Varianten -> {eindeutige}")
+          alle = [round(v, 2) for w in gesehen.values() for v in w.values()]
+          if len(set(alle)) <= 1:
+              print("\n  ==> IMMER DERSELBE BETRAG. Das sind Testdaten, keine Preise.")
+              print("      Sie duerfen nicht in die App - lieber keine Angabe als "
+                    "eine erfundene.")
+          else:
+              print("\n  ==> Die Preise variieren mit Datum/Dauer/Belegung.")
+              print("      Das spricht fuer echte Raten. Letzter Schritt bleibt der "
+                    "Handtest: einen der Betraege oben auf booking.com nachsehen.")
+          PY

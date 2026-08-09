@@ -699,6 +699,25 @@ wird: moderne REST-API, Sandbox- und Produktions-Key ohne Vertrag,
 Provisionsmodell. Der Anschluss wäre ein Provider plus eine Worker-Route,
 kein Umbau.
 
+**Nachtrag (09.08.2026): „ohne Vertrag" heißt nicht „ohne Kreditkarte."**
+Im Konto stehen zwei Schlüssel. Der **Sandbox-Key ist frei**, der
+**Production-Key verlangt ein hinterlegtes Zahlungsmittel** („Add Payment
+Method"). Das ist kein Abo: LiteAPI verdient an Buchungsprovision, die Karte
+ist die Abrechnungshinterlegung. Für dieses Projekt ist die Unterscheidung
+trotzdem zweitrangig, denn **wir buchen nichts** – wir zeigen Preise und
+verlinken zum Anbieter. Gebraucht wird also nur die *Preisauskunft*, nicht
+der Buchungsweg.
+
+Damit steht und fällt alles an einer einzigen, messbaren Frage: **liefert
+der Sandbox-Key echte Raten oder Testdaten?** Die Anbieter-Aussagen
+widersprechen sich („Sandbox = production" gegen „simulierte Buchungen ohne
+echte Daten"), also wird gemessen – `probe-round16.yml`. Ein einzelner
+plausibler Betrag beweist nichts; entschieden wird über **Variation**:
+dieselben Hotels an fünf verschiedenen Daten/Dauern/Belegungen. Echte Preise
+reagieren darauf, erfundene nicht. Kommt überall derselbe Betrag, ist die
+Quelle für uns wertlos – ein erfundener Hotelpreis ist schlimmer als gar
+keiner.
+
 **Runde 11 (08.08.2026) - db-prices / db-hafas / pyhafas: die Bibliotheken
 leben, der Endpunkt dahinter nicht.**
 Von aussen kam der Hinweis auf die Community-Projekte `db-prices`,
