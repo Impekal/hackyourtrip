@@ -91,6 +91,11 @@ _cache: dict[str, tuple[float, object]] = {}
 PRODUKTGATTUNGEN = ["ICE", "EC_IC", "IR", "REGIONAL", "SBAHN", "BUS",
                     "SCHIFF", "UBAHN", "TRAM", "ANRUFPFLICHTIG"]
 
+# Genau die Gattungen, die das Deutschland-Ticket abdeckt. Fuer die Frage
+# "komme ich da auch ohne Fernverkehr hin?" - der Kern des Spar-Tricks,
+# eine Fahrkarte aufzuteilen.
+D_TICKET_PRODUKTGATTUNGEN = ["REGIONAL", "SBAHN", "BUS", "UBAHN", "TRAM"]
+
 CURL_TIMEOUT_SECONDS = 30
 
 
@@ -198,6 +203,15 @@ def _trim_connection(conn: dict) -> dict:
     legs = []
     for leg in legs_raw:
         vm = leg.get("verkehrsmittel") or {}
+        # Zwischenhalte mitgeben: sie sind die Kandidaten fuers Aufteilen
+        # der Fahrkarte ("mit D-Ticket bis Bremen, ab da erst zahlen").
+        # Ohne sie muesste die App raten, wo eine Verbindung teilbar waere.
+        halts = []
+        for halt in (leg.get("halte") or []):
+            name = halt.get("name")
+            if name:
+                halts.append({"name": name, "id": halt.get("id"),
+                              "extId": halt.get("extId")})
         legs.append({
             "line": _first(vm, "name", "displayName", "kategorie") or "",
             "product": vm.get("produktGattung") or "",
@@ -205,6 +219,7 @@ def _trim_connection(conn: dict) -> dict:
             "to": _first(leg, "ankunftsOrt", "ankunftsOrtName") or "",
             "depart": _leg_time(leg, "abfahrt", "abfahrtsZeitpunkt"),
             "arrive": _leg_time(leg, "ankunft", "ankunftsZeitpunkt"),
+            "halts": halts,
         })
 
     depart = legs[0]["depart"] if legs else None
@@ -243,24 +258,31 @@ def get_orte(query: str) -> object:
     return slim
 
 
-def get_fahrplan(from_id: str, to_id: str, when: str, klasse: str) -> object:
-    key = f"fahrplan:{from_id}|{to_id}|{when}|{klasse}"
+def get_fahrplan(from_id: str, to_id: str, when: str, klasse: str,
+                  products: str = "") -> object:
+    key = f"fahrplan:{from_id}|{to_id}|{when}|{klasse}|{products}"
     hit = _cache.get(key)
     if hit and time.time() - hit[0] < CACHE_TTL_SECONDS:
         return hit[1]
 
+    # `products=regional` sucht gezielt Nahverkehr. Ohne das liefert die DB
+    # bevorzugt schnelle Fernverbindungen - fuer die Frage "geht das auch mit
+    # dem Deutschland-Ticket?" also genau das Falsche.
+    regional_only = products == "regional"
     body = {
         "abfahrtsHalt": from_id,
         "ankunftsHalt": to_id,
         "anfrageZeitpunkt": when,
         "ankunftSuche": "ABFAHRT",
         "klasse": "KLASSE_1" if klasse == "1" else "KLASSE_2",
-        "produktgattungen": PRODUKTGATTUNGEN,
+        "produktgattungen": D_TICKET_PRODUKTGATTUNGEN if regional_only else PRODUKTGATTUNGEN,
         "reisende": [{"typ": "ERWACHSENER",
                       "ermaessigungen": [{"art": "KEINE_ERMAESSIGUNG",
                                            "klasse": "KLASSENLOS"}],
                       "alter": [], "anzahl": 1}],
-        "schnelleVerbindungen": True,
+        # Bei der Nahverkehrssuche waere "schnell" kontraproduktiv:
+        # gesucht ist die guenstige Verbindung, nicht die schnellste.
+        "schnelleVerbindungen": not regional_only,
         "sitzplatzOnly": False,
         "bikeCarriage": False,
         "reservierungsKontingenteVorhanden": False,
@@ -394,7 +416,8 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send(400, {
                         "error": "from, to und date (YYYY-MM-DD) noetig."})
                 return self._send(200, get_fahrplan(
-                    from_id, to_id, when, params.get("class", "2")))
+                    from_id, to_id, when, params.get("class", "2"),
+                    params.get("products", "")))
             return self._send(404, {"error": "Unbekannter Endpunkt."})
         except BahnError as exc:
             self._send(exc.status, {"error": str(exc),

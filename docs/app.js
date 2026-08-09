@@ -4,7 +4,7 @@
 // guessing: if this doesn't match, the browser is running a cached old
 // app.js and any "the fix didn't work" report is about the old file. Bump
 // together with the ?v= in index.html.
-const BUILD_STAMP = '2026-08-09-8';
+const BUILD_STAMP = '2026-08-09-9';
 document.getElementById('buildStamp').textContent = BUILD_STAMP;
 
 /* =========================================================================
@@ -1069,6 +1069,142 @@ function bahnConnectionToOffer(conn, route, stops = {}) {
   };
 }
 
+/* =========================================================================
+ * Spar-Trick: die Fahrkarte teilen.
+ *
+ * Hamburg -> Hannover kostet im ICE 30 EUR. Der Nahverkehr kostet mit dem
+ * Deutschland-Ticket aber nichts - also faehrt man damit bis zu einem
+ * Zwischenhalt und zahlt nur den Rest. Statt 30 EUR vielleicht 5 EUR, fuer
+ * eine halbe Stunde mehr Fahrzeit.
+ *
+ * Das kann kein Buchungsportal, weil keines das Deutschland-Ticket kennt.
+ *
+ * Die Zwischenhalte der teuren Verbindung sind die Kandidaten. Fuer jeden
+ * wird gefragt: komme ich mit reinem Nahverkehr dorthin (dann 0 EUR), und
+ * was kostet der Rest ab dort? Bewusst sparsam - die DB vertraegt rund 60
+ * Anfragen pro Minute, und jeder Kandidat kostet zwei.
+ * ===================================================================== */
+const SPLIT_MAX_CANDIDATES = 4;
+// Darunter lohnt der zusaetzliche Umstieg den Aufwand nicht.
+const SPLIT_MIN_SAVING_EUR = 3;
+// Realistische Umsteigezeit am Teilungsbahnhof.
+const SPLIT_MIN_TRANSFER_MIN = 8;
+// Mehr Fahrzeit als das macht aus dem Spartipp eine Zumutung.
+const SPLIT_MAX_EXTRA_HOURS = 3;
+
+function splitCandidateStops(conn) {
+  // Zwischenhalte aller Abschnitte, ohne Start und Ziel. Von der Mitte nach
+  // aussen sortiert: dort ist der Nahverkehrsanteil am groessten und damit
+  // die Ersparnis am hoechsten.
+  const halts = [];
+  for (const leg of (conn && conn.legs) || []) {
+    for (const halt of leg.halts || []) {
+      if (halt && halt.id && !halts.some(h => h.id === halt.id)) halts.push(halt);
+    }
+  }
+  const inner = halts.slice(1, -1);
+  const middle = Math.floor(inner.length / 2);
+  return inner
+    .map((h, i) => ({ halt: h, distance: Math.abs(i - middle) }))
+    .sort((a, b) => a.distance - b.distance)
+    .slice(0, SPLIT_MAX_CANDIDATES)
+    .map(x => x.halt);
+}
+
+function hoursBetween(a, b) { return (b - a) / 3600000; }
+
+/**
+ * Guenstigere Varianten, bei denen der erste Teil mit dem
+ * Deutschland-Ticket gefahren wird. Liefert fertige Angebote, die sich ganz
+ * normal einsortieren - mit Vermerk, wo geteilt wird und was das spart.
+ */
+async function findSplitTicketOffers(route, liveOffers, stops) {
+  if (route.deutschlandticket !== true) return [];
+  const priced = liveOffers.filter(o => o.priceKnown && o.price > 0 && o.raw);
+  if (!priced.length) return [];
+
+  // Referenz ist die guenstigste normale Verbindung - nur wer die
+  // unterbietet, ist ein Spartipp.
+  const baseline = priced.reduce((a, b) => (b.price < a.price ? b : a));
+  if (baseline.price <= SPLIT_MIN_SAVING_EUR) return [];
+  const day = isoDay(baseline.depart);
+  const found = [];
+
+  for (const halt of splitCandidateStops(baseline.raw)) {
+    let regional;
+    try {
+      // Teil 1: kommt man mit reinem Nahverkehr dorthin?
+      regional = await bahnLocalJson('/fahrplan', new URLSearchParams({
+        from: stops.origin.id, to: halt.id, date: day, products: 'regional',
+      }));
+    } catch (e) { continue; }
+
+    const covered = ((regional && regional.connections) || [])
+      .filter(c => c.depart && dbTicketCoverage(c.legs, stops.origin, halt) === true)
+      .sort((a, b) => new Date(a.depart) - new Date(b.depart));
+    if (!covered.length) continue;
+
+    for (const first of covered.slice(0, 2)) {
+      const arriveAtHalt = new Date(first.arrive || first.depart);
+      if (isNaN(arriveAtHalt)) continue;
+      let rest;
+      try {
+        // Teil 2: was kostet der Rest ab dort, ab der Ankunftszeit?
+        rest = await bahnLocalJson('/fahrplan', new URLSearchParams({
+          from: halt.id, to: stops.destination.id,
+          date: arriveAtHalt.toISOString().slice(0, 19),
+        }));
+      } catch (e) { continue; }
+
+      const usable = ((rest && rest.connections) || []).filter(c => {
+        if (!c.depart || typeof c.price !== 'number') return false;
+        // Umsteigen braucht Zeit; ein Anschluss zwei Minuten spaeter waere
+        // auf dem Papier guenstig und in der Praxis nicht zu schaffen.
+        return hoursBetween(arriveAtHalt, new Date(c.depart)) * 60 >= SPLIT_MIN_TRANSFER_MIN;
+      }).sort((a, b) => a.price - b.price);
+      if (!usable.length) continue;
+
+      const second = usable[0];
+      const saving = round2(baseline.price - second.price);
+      if (saving < SPLIT_MIN_SAVING_EUR) continue;
+
+      const depart = new Date(first.depart);
+      const arrive = new Date(second.arrive || second.depart);
+      const totalHours = round2(hoursBetween(depart, arrive));
+      const extraHours = round2(totalHours - (baseline.durationHours || totalHours));
+      if (!(totalHours > 0) || extraHours > SPLIT_MAX_EXTRA_HOURS) continue;
+
+      found.push({
+        mode: 'train',
+        isMock: false,
+        priceKnown: true,
+        price: second.price,
+        currency: second.currency || route.currency,
+        bookingSite: 'bahn.de',
+        url: 'https://www.bahn.de/buchung/fahrplan/suche',
+        lineLabel: [...(first.legs || []).map(l => l.line),
+                    ...(second.legs || []).map(l => l.line)].filter(Boolean).join(' → '),
+        depart,
+        durationHours: totalHours,
+        bagFee: 0, isLowCost: false, returnDepart: null,
+        stops: Number(first.transfers || 0) + Number(second.transfers || 0) + 1,
+        wifiOnboard: false, powerOutlets: false, legroomCm: null,
+        punctualityPct: null, track: '',
+        priceSource: 'db-live',
+        // Macht diesen Eintrag aus - fuer Abzeichen und Erklaerung.
+        splitAt: halt.name,
+        splitSaving: saving,
+        splitExtraHours: extraHours > 0 ? extraHours : 0,
+        splitBaselinePrice: baseline.price,
+      });
+      break; // ein Vorschlag je Teilungsbahnhof genuegt
+    }
+  }
+  // Groesste Ersparnis zuerst, hoechstens zwei - sonst ueberschwemmen
+  // Varianten desselben Tricks die Liste.
+  return found.sort((a, b) => b.splitSaving - a.splitSaving).slice(0, 2);
+}
+
 async function fetchLocalBahnOffers(route) {
   if (!(await bahnLocalReachable())) return null;
   let fromStop, toStop;
@@ -1098,9 +1234,21 @@ async function fetchLocalBahnOffers(route) {
       const key = offer.depart.toISOString() + '|' + offer.lineLabel;
       if (seen.has(key)) continue;
       seen.add(key);
+      // Die Rohantwort bleibt am Angebot haengen: nur dort stehen die
+      // Zwischenhalte, und die sind die Kandidaten fuers Aufteilen.
+      offer.raw = conn;
       offers.push(offer);
     }
   }
+
+  // Erst jetzt, mit allen normalen Preisen als Vergleichsmassstab: gibt es
+  // eine guenstigere Variante, bei der der erste Teil aufs D-Ticket geht?
+  try {
+    const split = await findSplitTicketOffers(route, offers,
+                                               { origin: fromStop, destination: toStop });
+    offers.push(...split);
+  } catch (e) { /* ein Spartipp darf die Suche nie scheitern lassen */ }
+
   return offers;
 }
 
@@ -2519,6 +2667,12 @@ function offerChips(offer) {
     // A real, bookable DB fare (not the price-less timetable) earns a badge,
     // so it's clear this price came live from bahn.de.
     if (offer.priceSource === 'db-live') chips.push('🟢 Live-Preis DB');
+    // Der Spar-Trick: bis hierher mit dem D-Ticket, erst ab da zahlen.
+    if (offer.splitAt) {
+      chips.push(`🎫 bis ${offer.splitAt} mit D-Ticket`);
+      chips.push(`spart ${offer.splitSaving.toFixed(2)} ${offer.currency}`);
+      if (offer.splitExtraHours > 0) chips.push(`+${offer.splitExtraHours}h`);
+    }
     // Only stated when it is decided. `null` means "not decidable" and gets
     // no chip at all - an absent claim, not a negative one.
     if (offer.dTicketCovered === true) {
@@ -3194,14 +3348,21 @@ async function renderOptionList(route, section, options, flightFallbackReason, b
         // "already paid for with a ticket you hold".
         const dTicket = opt.offers.some(o => o.priceNote === 'im Deutschland-Ticket enthalten')
           ? '<span class="badge good">🎫 im Deutschland-Ticket enthalten</span>' : '';
+        // Der Spar-Trick soll ins Auge springen - er ist der Grund, warum es
+        // diese App gibt, und er steht sonst unscheinbar zwischen den anderen.
+        const split = opt.offers.find(o => o.splitAt);
+        const splitHtml = split ? `<span class="badge deal">💡 Spar-Trick – ${
+          split.splitSaving.toFixed(2)} ${split.currency} günstiger${
+          split.splitExtraHours > 0 ? `, +${split.splitExtraHours}h` : ', ohne Zeitverlust'}</span>` : '';
         return `
-        <div class="option${mock ? ' is-mock' : ''}${noPrice ? ' is-timetable' : ''}">
+        <div class="option${mock ? ' is-mock' : ''}${noPrice ? ' is-timetable' : ''}${split ? ' is-split' : ''}">
           <span class="rank mono">${i + 1}</span>
           <div class="price-row">
             ${priceHtml}
             ${mock ? '<span class="badge warn">Beispieldaten – nicht buchbar</span>' : ''}
             ${noPrice ? '<span class="badge info">Echter Fahrplan – Preis beim Anbieter</span>' : ''}
             ${dTicket}
+            ${splitHtml}
             ${detourHtml}
             ${opt.isBelowMedian ? '<span class="badge good">Deal</span>' : ''}
           </div>
@@ -3548,7 +3709,7 @@ async function loadAlerts() {
         const noPrice = Boolean(opt.has_unknown_price);
         const line = opt.offers.map(o => o.line_label).filter(Boolean).join(', ');
         return `
-        <div class="option${mock ? ' is-mock' : ''}${noPrice ? ' is-timetable' : ''}">
+        <div class="option${mock ? ' is-mock' : ''}${noPrice ? ' is-timetable' : ''}${split ? ' is-split' : ''}">
           <span class="rank mono">${i + 1}</span>
           <div class="price-row">
             ${noPrice

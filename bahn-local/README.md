@@ -61,6 +61,25 @@ curl -sS "http://127.0.0.1:8899/fahrplan?from=$(curl -sS 'http://127.0.0.1:8899/
 
 Erscheinen Zeilen mit `"price": 39.99` o.ä., läuft alles.
 
+## Der Spar-Trick: Fahrkarte teilen
+
+Mit gesetztem Haken „Deutschlandticket vorhanden" sucht die App zusätzlich
+nach Verbindungen, bei denen der **erste Teil aufs D-Ticket geht**:
+
+> 💡 **Spar-Trick – 25,00 € günstiger, +0.5h**
+> 🎫 bis Bremen Hbf mit D-Ticket · spart 25,00 EUR
+
+Statt Hamburg → Hannover für 30 € im ICE: mit dem D-Ticket bis Bremen (kostet
+nichts extra), ab dort nur den Rest zahlen. Solche Vorschläge sind farblich
+hervorgehoben und stehen mit ihrem **echten Gesamtpreis** in der Sortierung –
+sie konkurrieren also fair mit den normalen Verbindungen.
+
+Vorgeschlagen wird nur, was sich lohnt und machbar ist: mindestens 3 € Ersparnis,
+höchstens 3 Stunden Mehrfahrzeit, mindestens 8 Minuten zum Umsteigen, und der
+erste Teil muss nachweislich reiner Nahverkehr in Deutschland sein. Ist eine
+Bedingung nicht erfüllt, erscheint kein Vorschlag – lieber keiner als ein
+falscher.
+
 ## Auf dem Handy nutzen (gleiches WLAN)
 
 `127.0.0.1` ist auf dem Handy **das Handy selbst** – dort läuft kein Server.

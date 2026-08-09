@@ -161,6 +161,10 @@
   .badge.alert { background: var(--alert-bg); color: var(--alert); }
   .badge.good { background: var(--good-bg); color: var(--good); }
   .badge.warn { background: var(--alert-bg); color: var(--alert); }
+  /* Der Spar-Trick ist der Grund, warum es diese App gibt - er darf nicht
+     unscheinbar zwischen den anderen Abzeichen stehen. */
+  .badge.deal { background: var(--accent); color: #17130a; }
+  .option.is-split { border-left: 3px solid var(--accent); padding-left: 0.6rem; }
 
   /* Example data must be impossible to mistake for a bookable fare. */
   .option.is-mock .price { opacity: 0.65; text-decoration: line-through; text-decoration-thickness: 1px; }
@@ -726,6 +730,6 @@
 <!-- The ?v= is deliberate: GitHub Pages lets browsers cache app.js, so a
      fix could ship and the visitor would keep running the old file. Bump
      this whenever app.js changes in a way users need to see. -->
-<script src="./app.js?v=2026-08-09-8"></script>
+<script src="./app.js?v=2026-08-09-9"></script>
 </body>
 </html>
