@@ -202,6 +202,22 @@
   .ai-note { color: var(--text-dim); font-size: 0.76rem; }
   .ai-result { margin-top: 0.8rem; padding-top: 0.8rem; border-top: 1px solid var(--line); font-size: 0.86rem; line-height: 1.5; white-space: pre-wrap; }
 
+  /* Streifen zum lokalen Bahn-Server - nur auf der https-Seite sichtbar. */
+  .localbar {
+    background: var(--accent-bg); border: 1px solid var(--accent-dim); border-radius: 12px;
+    padding: 0.8rem 1rem; margin-bottom: 1.1rem; font-size: 0.85rem;
+  }
+  .localbar-text { margin-bottom: 0.6rem; }
+  .localbar-row { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+  .localbar-row input { flex: 1 1 220px; font-size: 0.85rem; }
+  .localbar-row button { white-space: nowrap; }
+  .localbar-auto {
+    display: flex; align-items: center; gap: 0.4rem; margin-top: 0.6rem;
+    font-size: 0.82rem; text-transform: none; letter-spacing: normal; color: var(--text);
+  }
+  .localbar-auto input { width: auto; }
+  .localbar-hint { color: var(--text-dim); font-size: 0.76rem; margin: 0.5rem 0 0; }
+
   .track-box { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 1rem 1.25rem; margin-top: 1.5rem; }
   .track-box h3 { margin: 0 0 0.4rem; font-size: 0.95rem; }
   .track-box p { color: var(--text-dim); font-size: 0.82rem; margin: 0 0 0.7rem; }
@@ -277,6 +293,30 @@
     <h1>🧳 Hack<span class="accent">Your</span>Trip</h1>
     <span class="sub">Flug · Bahn · Bus · Hotel im Vergleich</span>
   </header>
+
+  <!-- Nur auf der veröffentlichten https-Seite: von dort darf der Browser den
+       lokalen Bahn-Server nicht befragen - bei einer Heimnetz-IP ist das eine
+       harte Sperre, die sich von der Seite aus nicht aufheben lässt. Statt die
+       Live-Preise stillschweigend wegzulassen, führt dieser Streifen mit einem
+       Klick zur lokalen Adresse. -->
+  <div class="localbar" id="localBar" hidden>
+    <div class="localbar-text">
+      <strong>🚆 Live-Bahnpreise</strong> gibt es nur über deinen lokalen Server –
+      diese Seite läuft über <code class="mono">https</code> und darf ihn nicht direkt fragen.
+    </div>
+    <div class="localbar-row">
+      <input type="text" id="localBarUrl" inputmode="url" spellcheck="false"
+             placeholder="http://192.168.0.81:8899" aria-label="Adresse des lokalen Bahn-Servers">
+      <button type="button" class="secondary" id="localBarGo">Wechseln</button>
+    </div>
+    <label class="localbar-auto">
+      <input type="checkbox" id="localBarAuto"> künftig automatisch dorthin wechseln
+    </label>
+    <p class="localbar-hint">
+      Die Adresse zeigt dir der Server beim Start an (<code class="mono">python3 bahn-server.py --lan</code>).
+      Sie wird nur in diesem Browser gespeichert.
+    </p>
+  </div>
 
   <div class="maintabs" role="tablist">
     <button class="maintab active" id="tab-search" role="tab" aria-selected="true" aria-controls="panel-search">🔍 Suche</button>
@@ -686,6 +726,6 @@
 <!-- The ?v= is deliberate: GitHub Pages lets browsers cache app.js, so a
      fix could ship and the visitor would keep running the old file. Bump
      this whenever app.js changes in a way users need to see. -->
-<script src="./app.js?v=2026-08-09-6"></script>
+<script src="./app.js?v=2026-08-09-7"></script>
 </body>
 </html>

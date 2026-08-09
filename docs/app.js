@@ -4,7 +4,7 @@
 // guessing: if this doesn't match, the browser is running a cached old
 // app.js and any "the fix didn't work" report is about the old file. Bump
 // together with the ?v= in index.html.
-const BUILD_STAMP = '2026-08-09-6';
+const BUILD_STAMP = '2026-08-09-7';
 document.getElementById('buildStamp').textContent = BUILD_STAMP;
 
 /* =========================================================================
@@ -850,6 +850,78 @@ async function bahnLocalReachable() {
   _bahnLocalLastError = reasons.join(' · ');
   return false;
 }
+
+/* --- Umstieg auf den lokalen Server -------------------------------------
+ * Von der veroeffentlichten https-Seite aus darf der Browser den lokalen
+ * Server nicht befragen, sobald der unter einer Heimnetz-IP laeuft:
+ * https -> http ist bei normalen Adressen hart gesperrt, nur 127.0.0.1 gilt
+ * als vertrauenswuerdig. Ein *Wechsel per Navigation* ist dagegen erlaubt -
+ * deshalb dieser Weg: Adresse einmal merken, danach ein Klick oder
+ * automatisch.
+ * ----------------------------------------------------------------------- */
+const LOCAL_BAR_URL_KEY = 'bahnLocalSwitchUrl';
+const LOCAL_BAR_AUTO_KEY = 'bahnLocalSwitchAuto';
+// Kommt man von einem automatischen Wechsel zurueck, weil der Server nicht
+// erreichbar war, darf nicht sofort wieder gewechselt werden - sonst sitzt
+// man unterwegs in einer Schleife fest.
+const LOCAL_BAR_BOUNCE_KEY = 'bahnLocalSwitchTried';
+const LOCAL_BAR_BOUNCE_MS = 60000;
+
+function lsGet(key) { try { return localStorage.getItem(key); } catch (e) { return null; } }
+function lsSet(key, value) { try { localStorage.setItem(key, value); } catch (e) { /* egal */ } }
+
+function normaliseLocalUrl(raw) {
+  let url = (raw || '').trim().replace(/\/+$/, '');
+  if (!url) return '';
+  if (!/^https?:\/\//i.test(url)) url = 'http://' + url;
+  // Ohne Portangabe waere es Port 80 - der Server hoert auf 8899.
+  if (!/:\d+$/.test(url.replace(/^https?:\/\//i, ''))) url += ':8899';
+  try { new URL(url); } catch (e) { return ''; }
+  return url;
+}
+
+function setUpLocalSwitch() {
+  const bar = document.getElementById('localBar');
+  if (!bar) return;
+  // Auf der lokal ausgelieferten Seite gibt es nichts zu wechseln.
+  if (location.protocol !== 'https:') return;
+
+  const input = document.getElementById('localBarUrl');
+  const auto = document.getElementById('localBarAuto');
+  const stored = lsGet(LOCAL_BAR_URL_KEY) || '';
+  input.value = stored;
+  auto.checked = lsGet(LOCAL_BAR_AUTO_KEY) === '1';
+
+  const go = () => {
+    const url = normaliseLocalUrl(input.value);
+    if (!url) { input.focus(); return; }
+    lsSet(LOCAL_BAR_URL_KEY, url);
+    lsSet(LOCAL_BAR_AUTO_KEY, auto.checked ? '1' : '0');
+    lsSet(LOCAL_BAR_BOUNCE_KEY, String(Date.now()));
+    location.href = url + '/';
+  };
+  document.getElementById('localBarGo').addEventListener('click', go);
+  input.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') go(); });
+  auto.addEventListener('change', () => lsSet(LOCAL_BAR_AUTO_KEY, auto.checked ? '1' : '0'));
+
+  // Der Rueckkehr-Schutz: war der letzte Sprung gerade eben, ist er
+  // offenbar schiefgegangen (sonst waere man nicht wieder hier).
+  const tried = Number(lsGet(LOCAL_BAR_BOUNCE_KEY) || 0);
+  const justFailed = tried && (Date.now() - tried) < LOCAL_BAR_BOUNCE_MS;
+  if (auto.checked && stored && !justFailed) {
+    lsSet(LOCAL_BAR_BOUNCE_KEY, String(Date.now()));
+    location.href = stored + '/';
+    return;
+  }
+  if (justFailed) {
+    bar.querySelector('.localbar-text').innerHTML =
+      '<strong>🚆 Live-Bahnpreise</strong> – der lokale Server war eben nicht erreichbar. '
+      + 'Läuft er noch? Bist du im selben WLAN? Adresse prüfen und erneut wechseln.';
+  }
+  bar.hidden = false;
+}
+
+setUpLocalSwitch();
 
 // In der Browser-Konsole aufrufbar: zeigt Adresse, Erreichbarkeit und den
 // letzten Fehlergrund, statt dass man raten muss, warum keine Live-Preise
