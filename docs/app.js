@@ -4,7 +4,7 @@
 // guessing: if this doesn't match, the browser is running a cached old
 // app.js and any "the fix didn't work" report is about the old file. Bump
 // together with the ?v= in index.html.
-const BUILD_STAMP = '2026-08-09-12';
+const BUILD_STAMP = '2026-08-09-13';
 document.getElementById('buildStamp').textContent = BUILD_STAMP;
 
 /* =========================================================================
@@ -48,16 +48,16 @@ const MODE_TAB_CONFIG = {
   train:           { origin: true,  nights: false, duration: true,  flight: false, train: true,  hotel: false, transportExtra: true,  roundTrip: true,  singleDate: true,  placeSource: 'rail',   modes: ['train'] },
   bus:             { origin: true,  nights: false, duration: true,  flight: false, train: false, hotel: false, transportExtra: true,  roundTrip: true,  singleDate: true,  placeSource: 'rail',   modes: ['bus'] },
   hotel:           { origin: false, nights: true,  duration: false, flight: false, train: false, hotel: true,  transportExtra: false, roundTrip: false, singleDate: false, placeSource: 'city',   modes: ['hotel'] },
-  train_or_bus:    { origin: true,  nights: false, duration: true,  flight: false, train: true,  hotel: false, transportExtra: true,  roundTrip: true,  singleDate: true,  placeSource: 'rail',   modes: ['train_or_bus'] },
-  flight_or_train: { origin: true,  nights: false, duration: true,  flight: true,  train: true,  hotel: false, transportExtra: true,  roundTrip: true,  singleDate: true,  placeSource: 'flight', modes: ['flight_or_train'] },
-  flight_or_bus:   { origin: true,  nights: false, duration: true,  flight: true,  train: false, hotel: false, transportExtra: true,  roundTrip: true,  singleDate: true,  placeSource: 'flight', modes: ['flight_or_bus'] },
-  flight_hotel:    { origin: true,  nights: true,  duration: true,  flight: true,  train: false, hotel: true,  transportExtra: true,  roundTrip: false, singleDate: false, placeSource: 'flight', modes: ['flight_hotel'] },
-  train_hotel:     { origin: true,  nights: true,  duration: true,  flight: false, train: true,  hotel: true,  transportExtra: true,  roundTrip: false, singleDate: false, placeSource: 'rail',   modes: ['train_hotel'] },
+  train_or_bus:    { origin: true,  nights: false, duration: true,  flight: false, train: true,  hotel: false, transportExtra: true,  roundTrip: true,  singleDate: true,  placeSource: 'railcity', modes: ['train_or_bus'] },
+  flight_or_train: { origin: true,  nights: false, duration: true,  flight: true,  train: true,  hotel: false, transportExtra: true,  roundTrip: true,  singleDate: true,  placeSource: 'combo' , modes: ['flight_or_train'] },
+  flight_or_bus:   { origin: true,  nights: false, duration: true,  flight: true,  train: false, hotel: false, transportExtra: true,  roundTrip: true,  singleDate: true,  placeSource: 'combo' , modes: ['flight_or_bus'] },
+  flight_hotel:    { origin: true,  nights: true,  duration: true,  flight: true,  train: false, hotel: true,  transportExtra: true,  roundTrip: false, singleDate: false, placeSource: 'combo' , modes: ['flight_hotel'] },
+  train_hotel:     { origin: true,  nights: true,  duration: true,  flight: false, train: true,  hotel: true,  transportExtra: true,  roundTrip: false, singleDate: false, placeSource: 'railcity', modes: ['train_hotel'] },
   // Fly out, take the bus back - or any other pairing. No booking portal
   // offers this, because each of them sells one mode; a personal tool has
   // no such constraint, and the saving can be substantial.
-  mixed_return:    { origin: true,  nights: false, duration: true,  flight: true,  train: true,  hotel: false, transportExtra: true,  roundTrip: true,  singleDate: true,  placeSource: 'flight', modes: ['mixed_return'] },
-  bus_hotel:       { origin: true,  nights: true,  duration: true,  flight: false, train: false, hotel: true,  transportExtra: true,  roundTrip: false, singleDate: false, placeSource: 'rail',   modes: ['bus_hotel'] },
+  mixed_return:    { origin: true,  nights: false, duration: true,  flight: true,  train: true,  hotel: false, transportExtra: true,  roundTrip: true,  singleDate: true,  placeSource: 'combo' , modes: ['mixed_return'] },
+  bus_hotel:       { origin: true,  nights: true,  duration: true,  flight: false, train: false, hotel: true,  transportExtra: true,  roundTrip: false, singleDate: false, placeSource: 'railcity', modes: ['bus_hotel'] },
 };
 
 let activeMode = 'flight';
@@ -959,14 +959,52 @@ async function bahnLocalJson(path, params) {
  * findet sie nichts, und die Verbindung landet ohne Preis in der Liste,
  * obwohl der Server laeuft. Deshalb dieselbe Reihenfolge wie beim Bus.
  */
-function bahnStopQueries(name) {
+/* =========================================================================
+ * Flughafencode -> Stadtname.
+ *
+ * Bahn, Bus und Hotels kennen keine IATA-Codes. Solange nur die feste
+ * Tabelle `AIRPORT_CITY_NAMES` uebersetzte, funktionierten Kombis genau
+ * fuer die rund 90 Staedte, die dort stehen - fuer alle anderen fiel das
+ * Boden- oder Hotelbein still aus, und in der Liste stand "Preis
+ * unbekannt", ohne dass irgendwo der Grund gestanden haette.
+ *
+ * Dieselbe Ortssuche, die schon die Vorschlaege fuellt, kennt zu jedem Code
+ * die Stadt. Die Tabelle bleibt als schneller, netzunabhaengiger Weg fuer
+ * die haeufigen Faelle davor.
+ * ===================================================================== */
+const _cityForCode = new Map();
+
+async function cityNameForCode(code) {
+  const key = (code || '').trim().toUpperCase();
+  // Nur echte Codes uebersetzen: "Bremen" ist kein Code, und eine Suche
+  // danach wuerde nur eine unnoetige Abfrage kosten.
+  if (!/^[A-Z]{3}$/.test(key)) return '';
+  if (AIRPORT_CITY_NAMES[key]) return AIRPORT_CITY_NAMES[key];
+  if (_cityForCode.has(key)) return _cityForCode.get(key);
+  let name = '';
+  try {
+    const params = new URLSearchParams({ term: key, locale: 'de' });
+    params.append('types[]', 'city');
+    params.append('types[]', 'airport');
+    const resp = await fetch(`${PLACES_API_URL}?${params.toString()}`);
+    if (resp.ok) {
+      const data = await resp.json();
+      const hit = data.find(p => (p.code || '').toUpperCase() === key);
+      name = (hit && (hit.city_name || hit.name)) || '';
+    }
+  } catch (e) { /* offline: die Tabelle oben hat es dann nicht gewusst */ }
+  _cityForCode.set(key, name);
+  return name;
+}
+
+async function bahnStopQueries(name) {
   const queries = [];
   const push = (q) => {
     q = (q || '').trim();
     if (q && !queries.includes(q)) queries.push(q);
   };
   // "BER" -> "Berlin": ein roher Code trifft bei der Bahn leicht daneben.
-  push(AIRPORT_CITY_NAMES[(name || '').toUpperCase()]);
+  push(await cityNameForCode(name));
   push(name);
   // "Münster(Westf) Hbf" -> "Münster Hbf"
   push((name || '').replace(/\s*\([^)]*\)\s*/g, ' '));
@@ -974,7 +1012,7 @@ function bahnStopQueries(name) {
 }
 
 async function bahnLocalResolveStop(name) {
-  for (const query of bahnStopQueries(name)) {
+  for (const query of await bahnStopQueries(name)) {
     let list;
     try {
       list = await bahnLocalJson('/orte', new URLSearchParams({ q: query }));
@@ -1815,14 +1853,14 @@ function foldPlaceName(name) {
 
 // Anfragen von der genauesten zur gröbsten - die erste, die einen passenden
 // Treffer liefert, gewinnt.
-function flixbusCityQueries(name) {
+async function flixbusCityQueries(name) {
   const queries = [];
   const push = (q) => {
     q = (q || '').trim();
     if (q && !queries.includes(q)) queries.push(q);
   };
   // IATA zuerst übersetzen: "BER" konkurriert sonst mit "Bergen".
-  push(AIRPORT_CITY_NAMES[(name || '').toUpperCase()]);
+  push(await cityNameForCode(name));
   push(name);
   const stripped = (name || '').replace(FLIXBUS_STATION_SUFFIX, '');
   push(stripped);
@@ -1853,7 +1891,7 @@ const flixbusCityCache = new Map();
 async function flixbusResolveCity(name) {
   if (flixbusCityCache.has(name)) return flixbusCityCache.get(name);
   let found = null;
-  for (const query of flixbusCityQueries(name)) {
+  for (const query of await flixbusCityQueries(name)) {
     const payload = await fetchProxyJson('flixbus/cities', new URLSearchParams({ q: query, lang: 'de' }));
     found = flixbusPickCity(Array.isArray(payload) ? payload : [], query);
     if (found) break;
@@ -2069,11 +2107,22 @@ function transitLegLabel(leg) {
 // The geocoder mixes stations (type STOP) with POIs (type PLACE) - the top
 // hit for "München Hbf" was a sauna next to the station. Only STOPs route.
 async function transitResolveStop(text) {
-  const payload = await fetchProxyJson('transit/geocode', new URLSearchParams({ text, language: 'de' }));
-  const stops = (Array.isArray(payload) ? payload : []).filter(h => h && h.type === 'STOP' && h.id);
-  if (!stops.length) return null;
-  const needle = text.trim().toLowerCase();
-  return stops.find(h => (h.name || '').trim().toLowerCase() === needle) || stops[0];
+  // Ein Flughafencode ist fuer einen Fahrplandienst kein Ort. Ohne diese
+  // Uebersetzung fand der Geocoder zu "BER" nichts Brauchbares - und die
+  // Kombi "Flug + Bahn" blieb ohne Bahnbein, obwohl es die Strecke gibt.
+  for (const query of [await cityNameForCode(text), text].filter(Boolean)) {
+    const payload = await fetchProxyJson('transit/geocode',
+      new URLSearchParams({ text: query, language: 'de' }));
+    const hits = (Array.isArray(payload) ? payload : []).filter(h => h && h.id);
+    // Haltestellen zuerst; eine Adresse ist als Ausgangspunkt brauchbar,
+    // aber eine echte Station ist die bessere Antwort, wenn es sie gibt.
+    const stops = hits.filter(h => h.type === 'STOP');
+    const usable = stops.length ? stops : hits.filter(h => h.lat != null && h.lon != null);
+    if (!usable.length) continue;
+    const needle = query.trim().toLowerCase();
+    return usable.find(h => (h.name || '').trim().toLowerCase() === needle) || usable[0];
+  }
+  return null;
 }
 
 function transitItineraryToOffer(itinerary, mode, route, tz, stops = {}) {
@@ -2666,7 +2715,8 @@ async function runSearch(route) {
     // Measured against this section's own dates - the return leg's "exact
     // date" is the return date, not the outbound one.
     for (const c of candidates) c.dateDeviation = dateDeviationDays(c, variant);
-    return { id, label, note, variant, candidates, pools: built.pools };
+    return { id, label, note, variant, candidates, pools: built.pools,
+             returnPools: built.returnPools || null };
   }
 
   const isRoundTrip = Boolean(route.roundTrip && route.returnDate);
@@ -2710,7 +2760,10 @@ async function runSearch(route) {
       `Einzelpreise für ${route.destination} → ${route.origin} am ${fmtDay(route.returnDate)}.`,
       { out: route.maxDurationReturn, back: null }),
     makeSection('combined', 'Hin + Zurück', route,
-      { candidates: combinedCandidates, pools: outBuilt.pools },
+      // Die Rueckfahrt-Pools kommen mit, damit der Spar-Berater auch fuer
+      // den Rueckweg etwas sagen kann statt nur fuer die Hinfahrt.
+      { candidates: combinedCandidates, pools: outBuilt.pools,
+        returnPools: backBuilt.pools },
       'Gesamtpreis für beide Richtungen: echte Hin-/Rückflug-Tickets und aus zwei Einzelfahrten zusammengesetzte Reisen. '
       + 'Zwei Einzeltickets sind oft günstiger als ein Rückflugticket - vergleiche mit den beiden Reitern links.'),
   ];
@@ -2798,21 +2851,61 @@ function cheapest(list) {
   return list.reduce((a, b) => (b.price < a.price ? b : a));
 }
 
+/** Das Angebot der gemeinten Richtung: ohne Angabe das erste. */
+function legOffer(candidate, leg) {
+  if (leg === 'Rückfahrt') return returnLeg(candidate);
+  return candidate.offers[0];
+}
+
+/**
+ * Braucht diese Option ueberhaupt eine Richtungsangabe?
+ *
+ * Bei einer einfachen Fahrt waere "Hinfahrt: 1h früher" nur Ballast. Bei
+ * zwei Richtungen ist sie unverzichtbar - genau daran ist der Hinweis
+ * bisher gescheitert: "1h früher" liess offen, welches der beiden Tickets
+ * gemeint war, und damit war er nicht umsetzbar.
+ */
+function needsLegLabel(candidate) {
+  const first = candidate.offers[0];
+  return Boolean(returnLeg(candidate)) || Boolean(first && first.returnDepart);
+}
+
+// Zwei verschiedene Verbindungen koennen zur selben Minute abfahren. Dann
+// ist "frueher/spaeter" keine sinnvolle Beschreibung - herausgekommen ist
+// dabei "21:50 statt 21:50 spart 46 EUR", was wie ein Programmfehler
+// aussieht und auch einer war. Unterhalb dieser Schwelle wird der Tipp
+// deshalb anders formuliert: gleiche Zeit, anderes Angebot.
+const SAME_TIME_MINUTES = 5;
+
 /**
  * Spar-Vorschlaege fuer eine Option, aus den bereits geladenen Angeboten -
  * ohne zusaetzliche Abfragen. Jeder Vorschlag nennt Ersparnis *und* Preis.
+ *
+ * `leg` benennt die Richtung ('Hinfahrt'/'Rückfahrt') und ist bei einer
+ * Hin-und-Zurueck-Reise nicht optional: "1h frueher" ohne Angabe, welche
+ * Richtung gemeint ist, kann der Leser nicht umsetzen - er weiss nicht,
+ * welches Ticket er anders buchen soll.
  */
-function savingsTips(candidate, route, pools) {
-  const primary = candidate.offers[0];
+function savingsTips(candidate, route, pools, leg = '', max = 3) {
+  const primary = legOffer(candidate, leg);
   if (!primary || primary.priceKnown === false) return [];
   const tips = [];
   const cur = primary.currency;
   const day = isoDay(primary.depart);
+  const wo = leg ? `${leg}: ` : '';
 
   // Nur Angebote, die auch die eigenen Vorgaben erfuellen - sonst schlaegt
   // die App eine Zeit vor, die der Nutzer selbst ausgeschlossen hat.
+  //
+  // Und nur Vergleichbares: im Reiter "Hin + Zurück" stehen Rückflug-
+  // TICKETS (ein Preis für beide Richtungen) neben Einzelfahrten, waehrend
+  // die Vergleichsliste aus Einzelfahrten besteht. Ein 200-EUR-Rückflug-
+  // ticket gegen eine 80-EUR-Einzelfahrt zu halten ergab "spart 120 EUR" -
+  // eine Ersparnis, die es nicht gibt, weil im billigeren Preis der
+  // Rückweg gar nicht mehr steckt.
+  const gleicheArt = o => Boolean(o.returnDepart) === Boolean(primary.returnDepart);
   const usable = (list) => (list || []).filter(
-    o => o.priceKnown !== false && o.price < primary.price
+    o => o.priceKnown !== false && o.price < primary.price && gleicheArt(o)
          && meetsTransportPrefs(o, route.transportPrefs));
 
   const samePool = usable((pools && pools[primary.mode]) || []);
@@ -2822,13 +2915,21 @@ function savingsTips(candidate, route, pools) {
   if (sameDay.length) {
     const best = cheapest(sameDay);
     const saving = round2(primary.price - best.price);
-    const shift = round1(Math.abs(best.depart - primary.depart) / 3600000);
+    const minutes = Math.abs(best.depart - primary.depart) / 60000;
+    const shift = round1(minutes / 60);
     const later = best.depart > primary.depart;
     // Eine andere Abfahrtszeit am selben Tag ist die kleinste Umstellung -
     // die Wartezeit zaehlt hier trotzdem als Last.
     if (savingIsWorthIt(saving, { hours: shift })) {
-      tips.push(`🕐 ${shift}h ${later ? 'später' : 'früher'} (${fmtHM(best.depart)} statt ${
-        fmtHM(primary.depart)}) spart ${saving} ${cur} – dann ${best.price.toFixed(2)} ${cur}.`);
+      const wie = minutes < SAME_TIME_MINUTES
+        // Gleiche Abfahrtszeit, nur ein anderes Angebot - das ist der
+        // seltene Fall ganz ohne Nachteil, und er verdient es, als solcher
+        // dazustehen statt als "0h später".
+        ? `🔀 ${wo}Gleiche Abfahrt um ${fmtHM(primary.depart)}, anderes Angebot (${
+            best.lineLabel || best.bookingSite})`
+        : `🕐 ${wo}${shift}h ${later ? 'später' : 'früher'} (${fmtHM(best.depart)} statt ${
+            fmtHM(primary.depart)})`;
+      tips.push(`${wie} spart ${saving} ${cur} – dann ${best.price.toFixed(2)} ${cur}.`);
     }
   }
 
@@ -2838,7 +2939,7 @@ function savingsTips(candidate, route, pools) {
     const best = cheapest(otherDays);
     const saving = round2(primary.price - best.price);
     if (savingIsWorthIt(saving, { otherDay: true })) {
-      tips.push(`📅 Am ${fmtDay(best.depart)} statt ${fmtDay(primary.depart)} spart ${
+      tips.push(`📅 ${wo}Am ${fmtDay(best.depart)} statt ${fmtDay(primary.depart)} spart ${
         saving} ${cur} – dann ${best.price.toFixed(2)} ${cur}.`);
     }
   }
@@ -2858,7 +2959,7 @@ function savingsTips(candidate, route, pools) {
     if (savingIsWorthIt(saving, { hours: Math.max(extraHours, 0) })) {
       const timePart = extraHours > 0 ? `, dauert ${extraHours}h länger`
         : (extraHours < 0 ? `, sogar ${Math.abs(extraHours)}h schneller` : '');
-      tips.push(`🔄 Mit ${MODE_LABEL[mode]} statt ${MODE_LABEL[primary.mode]} ${
+      tips.push(`🔄 ${wo}Mit ${MODE_LABEL[mode]} statt ${MODE_LABEL[primary.mode]} ${
         best.price.toFixed(2)} ${cur} – spart ${saving} ${cur}${timePart}.`);
     }
   }
@@ -2873,7 +2974,7 @@ function savingsTips(candidate, route, pools) {
     const extraHours = (best.durationHours != null && primary.durationHours != null)
       ? Math.max(round1(best.durationHours - primary.durationHours), 0) : 0;
     if (savingIsWorthIt(saving, { transfers: extraStops, hours: extraHours })) {
-      tips.push(`🔁 Mit ${extraStops} Umstieg${extraStops > 1 ? 'en' : ''} mehr${
+      tips.push(`🔁 ${wo}Mit ${extraStops} Umstieg${extraStops > 1 ? 'en' : ''} mehr${
         extraHours > 0 ? ` und ${extraHours}h länger` : ''} nur ${
         best.price.toFixed(2)} ${cur} – spart ${saving} ${cur}.`);
     }
@@ -2882,7 +2983,9 @@ function savingsTips(candidate, route, pools) {
   // Mehr als drei Vorschlaege liest niemand; die groesste Ersparnis zuerst
   // waere schoener, aber die Reihenfolge oben ist bereits die nach
   // steigender Zumutung - und die ist fuer die Entscheidung nuetzlicher.
-  return tips.slice(0, 3);
+  // Bei zwei Richtungen bekommt jede weniger, damit die Zeile nicht zur
+  // Wand wird.
+  return tips.slice(0, max);
 }
 
 /**
@@ -2940,7 +3043,7 @@ function hotelTips(h, route, pools) {
   return tips.slice(0, 4);
 }
 
-async function addRecommendations(route, options, pools) {
+async function addRecommendations(route, options, pools, returnPools = null) {
   const rates = await getRatesPerEur();
   for (const c of options) {
     c.recommendations = [];
@@ -2959,7 +3062,19 @@ async function addRecommendations(route, options, pools) {
     }
 
     if (['flight', 'train', 'bus'].includes(primary.mode)) {
-      c.recommendations.push(...savingsTips(c, route, pools));
+      // Bei zwei Richtungen wird jede fuer sich betrachtet UND benannt. Ohne
+      // den Namen war der Tipp nicht umsetzbar; ohne die zweite Richtung
+      // blieb der Rueckweg unbeachtet, obwohl dort genauso viel zu holen
+      // ist - "hin fliegen, zurueck Bahn" ist der Klassiker.
+      const beide = needsLegLabel(c);
+      const back = returnLeg(c);
+      const proRichtung = back && returnPools ? 2 : 3;
+      c.recommendations.push(
+        ...savingsTips(c, route, pools, beide ? 'Hinfahrt' : '', proRichtung));
+      if (back && returnPools) {
+        c.recommendations.push(
+          ...savingsTips(c, route, returnPools, 'Rückfahrt', proRichtung));
+      }
     }
 
     // Hotels: dieselben Kompromiss-Regeln (anderer Anreisetag, anderes Haus)
@@ -3227,7 +3342,7 @@ function filterRailStations(term) {
   return [...starts, ...contains].slice(0, 8).map(name => ({ label: `🚉 ${name}`, value: name }));
 }
 
-async function fetchLivePlaces(term, { includeAirports }) {
+async function fetchLivePlaces(term, { includeAirports, cityAsName = false }) {
   if (term.trim().length < 2) return [];
   try {
     const params = new URLSearchParams({ term, locale: 'de' });
@@ -3245,8 +3360,12 @@ async function fetchLivePlaces(term, { includeAirports }) {
         ? {
             label: p.type === 'airport'
               ? `✈️ ${p.name} (${p.code}) – ${p.city_name || p.country_name}`
-              : `🏙️ ${p.name} (${p.code}) – ${p.country_name}${p.main_airport_name ? ', alle Flughäfen' : ''}`,
-            value: p.code,
+              // Im Kombi-Modus traegt der Stadteintrag den Stadtnamen ein,
+              // damit auch Bahn, Bus und Hotel damit suchen koennen.
+              : `🏙️ ${p.name}${cityAsName ? '' : ` (${p.code})`} – ${p.country_name}${
+                  cityAsName ? ', alle Flughäfen & Bahnhöfe'
+                             : (p.main_airport_name ? ', alle Flughäfen' : '')}`,
+            value: (cityAsName && p.type !== 'airport') ? p.name : p.code,
           }
         : { label: `🏙️ ${p.name} – ${p.country_name}`, value: p.name });
   } catch (e) {
@@ -3258,28 +3377,64 @@ async function fetchLivePlaces(term, { includeAirports }) {
 // itself routes with - so a picked suggestion is guaranteed to resolve to a
 // stop later on. RAIL_STATIONS stays as the offline fallback (and for when
 // the proxy isn't configured at all).
-async function fetchTransitStops(term) {
+async function fetchTransitStops(term, { includeAddresses = false } = {}) {
   if (term.trim().length < 2 || !PROXY_URL) return filterRailStations(term);
   const payload = await fetchProxyJson('transit/geocode', new URLSearchParams({ text: term, language: 'de' }));
-  const stops = (Array.isArray(payload) ? payload : []).filter(h => h && h.type === 'STOP' && h.name);
-  if (!stops.length) return filterRailStations(term);
+  const hits = (Array.isArray(payload) ? payload : []).filter(h => h && h.name);
+  const stops = hits.filter(h => h.type === 'STOP');
+  // Bei reiner Bahn/Bus-Suche darf es auch eine Adresse sein: der Router
+  // rechnet den Fussweg zur naechsten Haltestelle selbst. "Musterstr. 5"
+  // ist fuer eine Tuer-zu-Tuer-Auskunft die ehrlichere Eingabe als der
+  // Hauptbahnhof, den man erst noch erreichen muss.
+  const addresses = includeAddresses
+    ? hits.filter(h => h.type !== 'STOP' && h.lat != null && h.lon != null)
+    : [];
+  if (!stops.length && !addresses.length) return filterRailStations(term);
   const seen = new Set();
   const suggestions = [];
-  for (const stop of stops) {
-    // The geocoder returns one entry per platform/feed for a big station;
-    // the name is what gets typed back into the field, so collapse them.
-    if (seen.has(stop.name)) continue;
-    seen.add(stop.name);
-    suggestions.push({ label: `🚉 ${stop.name}${stop.country ? ` – ${stop.country}` : ''}`, value: stop.name });
-    if (suggestions.length === 8) break;
+  for (const [list, icon] of [[stops, '🚉'], [addresses, '📍']]) {
+    for (const hit of list) {
+      // The geocoder returns one entry per platform/feed for a big station;
+      // the name is what gets typed back into the field, so collapse them.
+      if (seen.has(hit.name)) continue;
+      seen.add(hit.name);
+      const wo = [hit.street && hit.houseNumber ? `${hit.street} ${hit.houseNumber}` : '',
+                  hit.city || '', hit.country || ''].filter(Boolean).join(', ');
+      suggestions.push({ label: `${icon} ${hit.name}${wo ? ` – ${wo}` : ''}`, value: hit.name });
+      if (suggestions.length === 8) return suggestions;
+    }
   }
   return suggestions;
 }
 
-function placeSuggestions(term) {
+/**
+ * Vorschlaege fuer Von/Nach - je nach Reiter aus einer anderen Quelle.
+ *
+ * 'combo' ist der Fall, an dem die Kombis bisher gescheitert sind: der
+ * Flug-Reiter trug als Wert einen Flughafencode ein ("BER"), und mit dem
+ * konnten Bahn, Bus und Hotel nichts anfangen. Fuer Kombis gewinnt deshalb
+ * der **Stadtname** - den versteht jede Gattung, und die Flugsuche loest
+ * ihn ohnehin selbst in einen Code auf. Wer ausdruecklich einen bestimmten
+ * Flughafen will, waehlt weiter den Flughafen-Eintrag; dann bleibt der Code
+ * stehen.
+ */
+async function placeSuggestions(term) {
   const source = MODE_TAB_CONFIG[activeMode].placeSource;
-  if (source === 'rail') return fetchTransitStops(term);
+  // Reine Bahn/Bus-Suche: Haltestellen und Adressen, so genau wie moeglich.
+  if (source === 'rail') return fetchTransitStops(term, { includeAddresses: true });
   if (source === 'city') return fetchLivePlaces(term, { includeAirports: false });
+  if (source === 'combo') return fetchLivePlaces(term, { includeAirports: true, cityAsName: true });
+  // Boden-Kombis (Bahn/Bus + Hotel): die Stadt zuerst, weil nur sie beide
+  // Beine bedienen kann - ein Bahnhofsname ist fuer die Hotelsuche kein Ort.
+  // Die Haltestellen bleiben darunter, fuer alle, die es genau wollen.
+  if (source === 'railcity') {
+    const [cities, stops] = await Promise.all([
+      fetchLivePlaces(term, { includeAirports: false }),
+      fetchTransitStops(term),
+    ]);
+    const seen = new Set(cities.map(c => c.value));
+    return [...cities.slice(0, 4), ...stops.filter(s => !seen.has(s.value))].slice(0, 8);
+  }
   return fetchLivePlaces(term, { includeAirports: true });
 }
 
@@ -3612,7 +3767,7 @@ function renderActiveSection() {
 }
 
 async function renderOptionList(route, section, options, flightFallbackReason, busPriceReason, hotelFallbackReason) {
-  await addRecommendations(route, options, section.pools);
+  await addRecommendations(route, options, section.pools, section.returnPools);
   // The AI recommendation reasons about what is actually on screen.
   lastSearch = { route, options };
   const label = route.origin ? `${route.origin} → ${route.destination}` : route.destination;
