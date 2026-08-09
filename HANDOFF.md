@@ -942,6 +942,22 @@ Hotels". Was offen bleibt, sagt die App am Angebot dazu
 „erfüllt" wird. `hotel_comfort_score` wertet Schweigen als Mittelwert, nicht
 als Mangel - sonst landete jedes echte Hotel hinter jedem erfundenen.
 
+**Bekannte Grenze, ehrlich benannt: die Auswahl kann eine Steuer nicht
+erzwingen, die nicht dasteht.** Der Live-Rauchtest nach dem Deploy lieferte
+für alle drei Berliner Hotels `extraTax = 0`, während Probe 17 an derselben
+Strecke eine City Tax von 19,56 EUR zeigte - schlicht, weil diesmal andere
+Raten gewonnen haben. Daraus folgt eine Frage, die die Daten nicht
+beantworten: Ist eine Rate ohne ausgewiesene Steuer wirklich
+steuerfrei/all-inclusive, oder schweigt sie nur? Wenn Letzteres, bevorzugt
+„günstigster Gesamtpreis" systematisch die schweigsame Rate.
+
+Bewusst **nicht** wegoptimiert, weil jede Gegenmaßnahme geraten wäre. Was
+stattdessen gilt: Die App behauptet nie, es kämen keine Kosten mehr dazu -
+der Hinweis „inkl. X Steuer vor Ort" erscheint nur, wenn eine Steuer
+ausgewiesen ist, und Schweigen bleibt Schweigen. Wer das verbessern will,
+bräuchte zuerst eine Messung, ob LiteAPI je Rate zuverlässig
+`taxesAndFees` füllt - nicht eine Heuristik.
+
 Offen geblieben (kein Blocker): `/data/facilities` könnte die
 `facilityIds` in Namen auflösen und damit WLAN/Parkplatz/Pool beantwortbar
 machen. Nicht gemessen, deshalb nicht gebaut.
