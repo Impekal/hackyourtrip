@@ -4,7 +4,7 @@
 // guessing: if this doesn't match, the browser is running a cached old
 // app.js and any "the fix didn't work" report is about the old file. Bump
 // together with the ?v= in index.html.
-const BUILD_STAMP = '2026-08-09-14';
+const BUILD_STAMP = '2026-08-09-15';
 document.getElementById('buildStamp').textContent = BUILD_STAMP;
 
 /* =========================================================================
@@ -582,11 +582,24 @@ function monthsCovering(route) {
 // Documented Aviasales search-results deep link (named query params, not the
 // fragile compact "MOW1502BKK1"-style code some older docs mention):
 // https://support.travelpayouts.com/hc/en-us/articles/5711895629714
+// Aviasales kennt drei Klassen; Premium Economy hat dort keinen eigenen
+// Code und laeuft als Economy - die Klasse wird beim Anbieter nachgewaehlt.
+const AVIASALES_TRIP_CLASS = {
+  economy: '0', premium_economy: '0', business: '1', first: '2',
+};
+
 function buildBookingUrl(route, departIso, returnAt) {
+  // Die Reisegruppe gehoert in den Link: der angezeigte Preis ist ein
+  // Index je Erwachsenem, der Anbieter zeigt dann die echte Summe fuer
+  // alle Mitreisenden.
   const params = new URLSearchParams({
     origin_iata: route.origin, destination_iata: route.destination,
     depart_date: departIso.slice(0, 10),
-    adults: '1', children: '0', infants: '0', trip_class: '0', locale: 'de',
+    adults: String(route.adults || 1),
+    children: String(route.children || 0),
+    infants: String(route.infants || 0),
+    trip_class: AVIASALES_TRIP_CLASS[route.cabinClass] || '0',
+    locale: 'de',
   });
   if (returnAt) {
     params.set('return_date', returnAt.slice(0, 10));
@@ -950,6 +963,7 @@ function setUpLocalSwitch() {
 }
 
 setUpLocalSwitch();
+setUpChildAges();
 
 // In der Browser-Konsole aufrufbar: zeigt Adresse, Erreichbarkeit und den
 // letzten Fehlergrund, statt dass man raten muss, warum keine Live-Preise
@@ -987,6 +1001,46 @@ async function bahnLocalJson(path, params) {
  * findet sie nichts, und die Verbindung landet ohne Preis in der Liste,
  * obwohl der Server laeuft. Deshalb dieselbe Reihenfolge wie beim Bus.
  */
+/* =========================================================================
+ * Die Reisegruppe.
+ *
+ * Jede Gattung rechnet damit, aber unterschiedlich - und genau darin liegt
+ * die Falle. Hotels bepreisen die tatsaechliche Belegung, der Preis gilt
+ * also fuer alle zusammen. Die Flugpreis-Quellen dagegen fuehren einen
+ * *Index je Erwachsenem*: dort gibt es keine Kinderermaessigung und keine
+ * Gruppensumme. Wer beides addiert, bekommt eine Zahl, die fuer niemanden
+ * stimmt - deshalb tragen Transportangebote `perPerson` und die Oberflaeche
+ * sagt es dazu, statt still zu summieren.
+ * ===================================================================== */
+function readParty() {
+  const num = (id, min, max) => {
+    const raw = Number(document.getElementById(id).value || 0);
+    return Math.max(min, Math.min(Number.isFinite(raw) ? raw : min, max));
+  };
+  const adults = num('adults', 1, 9);
+  const children = num('children', 0, 8);
+  const infants = num('infants', 0, 4);
+  // Alter nur so weit uebernehmen, wie es Kinder gibt; fehlende Angaben
+  // werden nicht erfunden, sondern bleiben leer - die Hotelabfrage sagt
+  // dann, dass sie ohne Alter nur die Erwachsenen bepreisen kann.
+  const ages = (document.getElementById('childAges').value || '')
+    .split(',').map(s => parseInt(s.trim(), 10))
+    .filter(n => Number.isInteger(n) && n >= 0 && n <= 17)
+    .slice(0, children);
+  return { adults, children, infants, childAges: ages,
+           travellers: adults + children + infants };
+}
+
+// Das Altersfeld hat nur einen Sinn, wenn Kinder mitreisen.
+function setUpChildAges() {
+  const children = document.getElementById('children');
+  const field = document.getElementById('childAgesField');
+  if (!children || !field) return;
+  const sync = () => { field.hidden = Number(children.value || 0) < 1; };
+  children.addEventListener('input', sync);
+  sync();
+}
+
 /* =========================================================================
  * Flughafencode -> Stadtname.
  *
@@ -1297,7 +1351,8 @@ async function fetchLocalBahnOffers(route) {
     try {
       data = await bahnLocalJson('/fahrplan', new URLSearchParams({
         from: fromId, to: toId, date: isoDay(day),
-        class: route.bahncard === '100' ? '1' : '2',
+        // Gewaehlte Klasse; BahnCard 100 gilt ohnehin fuer die 1. Klasse.
+        class: (route.trainClass === 1 || route.bahncard === '100') ? '1' : '2',
       }));
     } catch (e) { continue; }
     for (const conn of (data && data.connections) || []) {
@@ -1426,11 +1481,9 @@ async function fetchFlightOffersWithNeighbours(route) {
  *    Das ist keine geschaetzte Ersparnis, sondern ein Vergleich mit Quelle.
  * ===================================================================== */
 const HOTEL_MAX_CHECKINS = 3;   // je Anreisetag eine Ratenabfrage
-// Die Flugsuche fragt `adults=1`; ein Zimmer fuer zwei zu bepreisen und in
-// einer Flug+Hotel-Kombi mit einem Einzelflug zu addieren, ergaebe eine
-// Summe, die fuer niemanden stimmt. Ein Feld fuer die Personenzahl gibt es
-// noch nicht - sobald es eins gibt, gehoert es hierhin.
-const HOTEL_ADULTS = 1;
+// Die Belegung kommt jetzt aus dem Formular. Kinder werden ueber ihr Alter
+// bepreist, nicht ueber ihre Anzahl - fehlt das Alter, faehrt die Abfrage
+// nur mit den Erwachsenen, und das Angebot sagt es dazu.
 const HOTEL_LIST_LIMIT = 20;
 let lastHotelError = '';
 
@@ -1486,7 +1539,9 @@ async function fetchRealHotelOffers(route) {
     const rates = await fetchProxyJson('hotels/rates', new URLSearchParams({
       ids: hotels.map(h => h.id).join(','),
       checkin: isoDay(checkin), checkout: isoDay(checkout),
-      adults: String(HOTEL_ADULTS), currency: route.currency || 'EUR',
+      adults: String(route.adults || 1),
+      childAges: (route.childAges || []).join(','),
+      currency: route.currency || 'EUR',
     }));
     for (const r of (rates && rates.offers) || []) {
       const hotel = byId[r.hotelId];
@@ -1505,6 +1560,12 @@ async function fetchRealHotelOffers(route) {
         address: hotel.address || null,
         chain: hotel.chain || null,
         thumbnail: hotel.thumbnail || null,
+        // Fuer wen dieser Preis gilt. Eine Hotelzahl ohne Belegung ist
+        // bedeutungslos - und wenn Kinderalter fehlen, wurde ohne sie
+        // gesucht; das gehoert ans Angebot, nicht ins Kleingedruckte.
+        forAdults: route.adults || 1,
+        forChildAges: (route.childAges || []).slice(),
+        missingChildAges: Math.max((route.children || 0) - (route.childAges || []).length, 0),
         // Aus der Rate. `freeCancellation` bleibt null statt false, wenn die
         // Rate nichts dazu sagt - sonst waere "unbekannt" ein "nein".
         roomName: r.roomName, boardName: r.boardName,
@@ -1700,7 +1761,11 @@ const RYANAIR_BOOKING_BASE = 'https://www.ryanair.com/de/de/trip/flights/select'
 
 function ryanairBookingUrl(route, departDay, returnDay) {
   const params = new URLSearchParams({
-    adults: '1', teens: '0', children: '0', infants: '0',
+    // Ryanair kennt zusaetzlich "teens" (12-15); die trennt unser Formular
+    // nicht, sie zaehlen hier als Kinder und lassen sich auf der
+    // Buchungsseite umstellen.
+    adults: String(route.adults || 1), teens: '0',
+    children: String(route.children || 0), infants: String(route.infants || 0),
     originIata: route.origin, destinationIata: route.destination,
     dateOut: departDay, isConnectedFlight: 'false', discount: '0',
     isReturn: returnDay ? 'true' : 'false',
@@ -3027,6 +3092,20 @@ function hotelTips(h, route, pools) {
   const tips = [];
   const cur = h.currency;
 
+  // 0. Fuer wen der Preis gilt. Ohne das ist eine Hotelzahl nicht lesbar -
+  //    280 EUR fuer zwei ist etwas anderes als 280 EUR fuer vier.
+  if (h.forAdults != null) {
+    const kinder = (h.forChildAges || []).length
+      ? ` + ${h.forChildAges.length} Kind${h.forChildAges.length > 1 ? 'er' : ''} (${h.forChildAges.join(', ')} J.)`
+      : '';
+    tips.push(`👥 Preis für ${h.forAdults} Erwachsene${kinder} – Gesamtpreis für die Unterkunft, nicht pro Person.`);
+  }
+  if (h.missingChildAges > 0) {
+    tips.push(`⚠️ Für ${h.missingChildAges} Kind${h.missingChildAges > 1 ? 'er' : ''} fehlt das Alter – `
+      + 'gesucht wurde ohne sie. Hotels berechnen Kinder je nach Alter unterschiedlich; '
+      + 'trage das Alter oben ein, dann stimmt der Preis.');
+  }
+
   // 1. Die Steuer, die im Schaufensterpreis fehlt. Das ist kein Detail:
   //    ohne diesen Satz vergleicht man 260 mit 280 und haelt es fuer
   //    dasselbe.
@@ -3068,7 +3147,7 @@ function hotelTips(h, route, pools) {
     tips.push(`❔ Zu diesen Wünschen sagt die Preisquelle nichts: ${
       offen.slice(0, 4).join(', ')}${offen.length > 4 ? ' u.a.' : ''} – bitte beim Hotel prüfen.`);
   }
-  return tips.slice(0, 4);
+  return tips.slice(0, 6);
 }
 
 async function addRecommendations(route, options, pools, returnPools = null) {
@@ -3569,7 +3648,10 @@ function readRouteFromForm() {
     carryOnMaxKg: document.getElementById('carryOnMaxKgAny').checked
       ? null : Number(document.getElementById('carryOnMaxKg').value || 8),
     bahncard: document.getElementById('bahncard').value,
+    trainClass: document.getElementById('trainClass').value === '1' ? 1 : 2,
+    cabinClass: document.getElementById('cabinClass').value,
     deutschlandticket: document.getElementById('deutschlandticket').checked,
+    ...readParty(),
     lowCost: document.getElementById('lowCost').value,
     dealsOnly: document.getElementById('dealsOnly').value === 'deals',
     // Off by default: invented prices are for exercising the ranking logic,
@@ -3867,6 +3949,22 @@ async function renderOptionList(route, section, options, flightFallbackReason, b
     && options.some(o => o.offers.some(x => x.mode === 'hotel'))) ? `
     <br><br><strong>Warum beim Hotel keine echten Preise?</strong> ${hotelFallbackReason}.
     Tipp: den Ort aus der Vorschlagsliste auswählen - die Hotelquelle braucht eine erkannte Stadt.` : '';
+  // Bei mehr als einer reisenden Person laufen zwei Preisarten nebeneinander,
+  // und das darf nicht unter den Tisch fallen: Hotels bepreisen die
+  // Belegung (Gesamtpreis), die Flugpreis-Quellen fuehren einen Index je
+  // Erwachsenem ohne Kinderermaessigung. Sie einfach zu addieren ergaebe
+  // eine Zahl, die fuer niemanden stimmt - also wird gesagt, was was ist.
+  const party = (route.travellers || 1);
+  const hasTransport = options.some(o => o.offers.some(
+    x => ['flight', 'train', 'bus'].includes(x.mode) && x.priceKnown !== false));
+  const partyNote = (party > 1 && hasTransport) ? `
+    <p class="timetable-note">👥 <strong>${route.adults} Erwachsene${
+      route.children ? `, ${route.children} Kinder` : ''}${
+      route.infants ? `, ${route.infants} Kleinkinder` : ''}</strong> gewählt.
+    Flug-, Bahn- und Buspreise gelten <strong>pro Person</strong> – die Quellen führen einen
+    Preisindex je Erwachsenem und kennen keine Kinderermäßigung. Hotelpreise gelten dagegen
+    für die gesamte Belegung. Die Buchungslinks unten tragen die volle Reisegruppe, dort
+    steht die echte Summe.</p>` : '';
   const mockModes = mockModeLabels(options);
   const affected = mockModes.length ? ` – betrifft: <strong>${mockModes.join(', ')}</strong>` : '';
   const warning = mockCount ? `
@@ -3918,6 +4016,7 @@ async function renderOptionList(route, section, options, flightFallbackReason, b
 
   searchResultsEl.innerHTML = `
     ${sectionNote}
+    ${partyNote}
     ${warning}
     ${timetableNote}
     <div class="route">
@@ -4084,6 +4183,12 @@ function buildYamlSnippet(route) {
     flex_days_after: ${route.flexAfter}
     min_nights: ${route.minNights}
     max_nights: ${route.maxNights}
+    adults: ${route.adults}
+    children: ${route.children}
+    infants: ${route.infants}
+    child_ages: [${(route.childAges || []).join(', ')}]
+    cabin_class: ${route.cabinClass}
+    train_class: ${route.trainClass}
     budget: ${route.budget ?? 'null'}
     currency: ${route.currency}
     max_duration_hours: ${route.maxDuration ?? 'null'}

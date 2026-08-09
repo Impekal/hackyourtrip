@@ -45,12 +45,6 @@ TIMEOUT = 30
 # Sekunde, ein Preisalarm liegt weit darunter.
 MAX_CHECKINS = 3
 MAX_HOTELS = 20
-# Der Rest der App rechnet durchgehend mit einer reisenden Person (die
-# Flugsuche fragt `adults=1`). Ein Hotelzimmer für zwei zu bepreisen und in
-# einer Flug+Hotel-Kombi mit einem Einzelflug zu addieren, ergäbe eine Summe,
-# die für niemanden stimmt. Ein Feld für die Personenzahl gibt es (noch)
-# nicht - sobald es eins gibt, gehört es hierhin.
-ADULTS = 1
 
 # LiteAPI nennt die Verpflegung im Klartext. Alles, was hier nicht steht,
 # bleibt None - lieber keine Angabe als eine geratene.
@@ -190,9 +184,15 @@ class LiteApiHotelProvider(Provider):
         offers: list[Offer] = []
         for checkin in date_candidates(route)[:MAX_CHECKINS]:
             checkout = checkin + timedelta(days=nights)
+            # Kinder gehen ueber ihr Alter mit, nicht ueber ihre Anzahl.
+            # Fehlt das Alter, faehrt die Abfrage nur mit den Erwachsenen -
+            # ein geratenes Alter waere ein geratener Preis.
+            occupancy = {"adults": max(1, route.adults or 1)}
+            if route.child_ages:
+                occupancy["children"] = list(route.child_ages)
             payload = self._post("/hotels/rates", {
                 "hotelIds": list(by_id),
-                "occupancies": [{"adults": ADULTS}],
+                "occupancies": [occupancy],
                 "currency": route.currency or "EUR",
                 "guestNationality": "DE",
                 "checkin": checkin.isoformat(),

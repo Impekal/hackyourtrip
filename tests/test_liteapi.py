@@ -231,3 +231,26 @@ def test_verpflegung_aus_klartext():
     # "keine Verpflegung", und die steht da nicht.
     assert _meal_plan("Zimmer mit Meerblick") is None
     assert _meal_plan(None) is None
+
+
+# --- Reisegruppe: geht sie wirklich an die Quelle? ------------------------
+
+def test_belegung_geht_mit_erwachsenen_und_kinderalter_raus():
+    session = _Session({"data": [HOTEL_RECORD]}, {"data": [RATE_ENTRY]})
+    provider = LiteApiHotelProvider(api_key="sand_test", session=session)
+    provider.search(_route(adults=2, children=1, child_ages=[8]))
+    posts = [c for c in session.calls if c[0] == "POST"]
+    occ = posts[0][2]["occupancies"][0]
+    assert occ["adults"] == 2
+    assert occ["children"] == [8]
+
+
+def test_ohne_kinderalter_wird_kein_alter_erfunden():
+    # Ein geratenes Alter waere ein geratener Preis: manche Haeuser lassen
+    # Kleinkinder umsonst mit, andere berechnen ab sechs Jahren voll.
+    session = _Session({"data": [HOTEL_RECORD]}, {"data": [RATE_ENTRY]})
+    provider = LiteApiHotelProvider(api_key="sand_test", session=session)
+    provider.search(_route(adults=2, children=2, child_ages=[]))
+    occ = [c for c in session.calls if c[0] == "POST"][0][2]["occupancies"][0]
+    assert occ["adults"] == 2
+    assert "children" not in occ

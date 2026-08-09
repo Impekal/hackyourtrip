@@ -154,6 +154,26 @@ stubFetch(RATE_SHAPE);
   report(JSON.stringify(sent.hotelIds) === '["a","b"]' && sent.occupancies[0].adults === 3
     && sent.currency === 'EUR' && sent.checkin === '2026-09-08' && sent.checkout === '2026-09-11',
     'IDs, Belegung, Waehrung und Daten landen im Body', JSON.stringify(sent));
+  report(!('children' in sent.occupancies[0]),
+    'ohne Kinderalter wird kein children-Feld erfunden', JSON.stringify(sent.occupancies));
+}
+
+// Kinder werden ueber ihr Alter bepreist, nicht ueber ihre Anzahl: je nach
+// Haus zahlt ein Dreijaehriger nichts und ein Elfjaehriger voll. Ein
+// geratenes Alter waere ein geratener Preis.
+{
+  const { last } = await call('/hotels/rates?ids=a&checkin=2026-09-08&checkout=2026-09-09'
+    + '&adults=2&childAges=8,10');
+  const occ = JSON.parse(last.init.body).occupancies[0];
+  report(occ.adults === 2 && JSON.stringify(occ.children) === '[8,10]',
+    'Kinderalter gehen als Alter mit, nicht als blosse Anzahl', JSON.stringify(occ));
+}
+{
+  const { last } = await call('/hotels/rates?ids=a&checkin=2026-09-08&checkout=2026-09-09'
+    + '&adults=2&childAges=acht,10,99');
+  const occ = JSON.parse(last.init.body).occupancies[0];
+  report(JSON.stringify(occ.children) === '[10]',
+    'unlesbare und unmoegliche Altersangaben fliegen raus', JSON.stringify(occ));
   report(last.init.headers['X-API-Key'] === 'sand_test',
     'der Schluessel geht als X-API-Key raus - und nur von hier, nie aus dem Browser');
 }

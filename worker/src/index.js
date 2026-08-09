@@ -754,14 +754,29 @@ async function handleHotelsRequest(incoming, request, ctx, env, allowedOrigin) {
         return jsonResponse({ error: `${name} must be YYYY-MM-DD.` }, 400, allowedOrigin);
       }
     }
-    const adults = Math.max(1, Math.min(Number(incoming.searchParams.get("adults")) || 2, 8));
+    const adults = Math.max(1, Math.min(Number(incoming.searchParams.get("adults")) || 1, 8));
+    // Kinder werden über ihr Alter bepreist, nicht über ihre Anzahl - je
+    // nach Haus zahlt ein Dreijähriger nichts und ein Elfjähriger voll.
+    // Ohne Alter also lieber gar nicht mitschicken: ein geratenes Alter
+    // wäre ein geratener Preis.
+    const childAges = (incoming.searchParams.get("childAges") || "")
+      .split(",")
+      // Leere Felder zuerst weg: `Number("")` ist 0, und 0 ist ein
+      // gueltiges Alter - ein leerer Parameter haette so ein Kleinkind
+      // erfunden, das gar nicht mitreist.
+      .map((s) => s.trim()).filter(Boolean)
+      .map(Number)
+      .filter((n) => Number.isInteger(n) && n >= 0 && n <= 17)
+      .slice(0, 8);
+    const occupancy = { adults };
+    if (childAges.length) occupancy.children = childAges;
     upstreamUrl = `${LITEAPI_BASE}/hotels/rates`;
     init = {
       ...init,
       method: "POST",
       body: JSON.stringify({
         hotelIds: ids,
-        occupancies: [{ adults }],
+        occupancies: [occupancy],
         currency: (incoming.searchParams.get("currency") || "EUR").toUpperCase(),
         guestNationality: incoming.searchParams.get("nationality") || "DE",
         checkin,

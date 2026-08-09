@@ -77,6 +77,16 @@ def _parse_route(raw: dict) -> RoutePreference:
         flex_days_after=int(raw.get("flex_days_after", 0)),
         min_nights=int(raw.get("min_nights", 0)),
         max_nights=int(raw.get("max_nights", 0)),
+        adults=max(1, int(raw.get("adults", 1))),
+        children=max(0, int(raw.get("children", 0))),
+        infants=max(0, int(raw.get("infants", 0))),
+        # Nur plausible Alter uebernehmen - ein unlesbarer Eintrag wird
+        # verworfen, nicht auf 0 gesetzt: 0 waere ein Saeugling, den es
+        # nicht gibt.
+        child_ages=[int(a) for a in raw.get("child_ages", []) or []
+                    if str(a).strip().isdigit() and 0 <= int(a) <= 17],
+        cabin_class=str(raw.get("cabin_class", "economy")),
+        train_class=2 if int(raw.get("train_class", 2)) != 1 else 1,
         budget=raw.get("budget"),
         currency=raw.get("currency", "EUR"),
         max_duration_hours=raw.get("max_duration_hours"),

@@ -155,6 +155,22 @@ class RoutePreference:
     flex_days_after: int = 0
     min_nights: int = 0
     max_nights: int = 0
+    # Wer reist. Hotels bepreisen die tatsächliche Belegung, dort entscheidet
+    # die Gruppe den Preis unmittelbar; die Flugpreis-Indizes nennen einen
+    # Preis je Erwachsenem und kennen keine Kinderermäßigung.
+    #
+    # `child_ages` ist kein Beiwerk: Hotels rechnen Kinder nach Alter ab -
+    # ein Haus lässt den Dreijährigen umsonst mit und berechnet den
+    # Elfjährigen voll. Eine leere Liste bei `children > 0` heißt deshalb
+    # ausdrücklich "Alter nicht angegeben", und die Suche sagt das dazu,
+    # statt ein Alter zu erfinden.
+    adults: int = 1
+    children: int = 0
+    infants: int = 0
+    child_ages: list[int] = field(default_factory=list)
+    # "economy" | "premium_economy" | "business" | "first"
+    cabin_class: str = "economy"
+    train_class: int = 2
     budget: Optional[float] = None
     currency: str = "EUR"
     max_duration_hours: Optional[float] = None

@@ -471,9 +471,45 @@
         </div>
       </div>
 
+      <!-- Reisende gelten für jeden Modus: Flug, Bahn, Bus und Hotel
+           rechnen alle damit, nur eben unterschiedlich. -->
+      <fieldset>
+        <legend>Reisende</legend>
+        <div class="row3">
+          <div class="field">
+            <label for="adults">Erwachsene</label>
+            <input type="number" id="adults" min="1" max="9" value="1">
+          </div>
+          <div class="field">
+            <label for="children">Kinder (2–11)</label>
+            <input type="number" id="children" min="0" max="8" value="0">
+          </div>
+          <div class="field">
+            <label for="infants">Kleinkinder (&lt;2)</label>
+            <input type="number" id="infants" min="0" max="4" value="0">
+          </div>
+        </div>
+        <!-- Das Alter ist keine Spielerei: Hotels berechnen Kinder je nach
+             Alter unterschiedlich, manche kostenlos. Deshalb sichtbar und
+             änderbar, statt im Hintergrund geraten. -->
+        <div class="field" id="childAgesField" hidden style="margin-top:0.5rem">
+          <label for="childAges">Alter der Kinder (mit Komma getrennt)</label>
+          <input type="text" id="childAges" inputmode="numeric" placeholder="8, 10">
+        </div>
+      </fieldset>
+
       <fieldset data-group="flightGroup">
         <legend>Flug-Optionen</legend>
-        <label style="display:block;">Aufgegebenes Gepäck</label>
+        <div class="field">
+          <label for="cabinClass">Reiseklasse</label>
+          <select id="cabinClass">
+            <option value="economy" selected>Economy</option>
+            <option value="premium_economy">Premium Economy</option>
+            <option value="business">Business</option>
+            <option value="first">First</option>
+          </select>
+        </div>
+        <label style="display:block; margin-top:0.8rem;">Aufgegebenes Gepäck</label>
         <div class="row3" style="margin-top:0.3rem">
           <div class="field">
             <label for="checkedBagKg">kg pro Koffer</label>
@@ -509,6 +545,13 @@
       <fieldset data-group="trainGroup">
         <legend>Bahn-Optionen</legend>
         <div class="row3">
+          <div class="field">
+            <label for="trainClass">Klasse</label>
+            <select id="trainClass">
+              <option value="2" selected>2. Klasse</option>
+              <option value="1">1. Klasse</option>
+            </select>
+          </div>
           <div class="field">
             <label for="bahncard">BahnCard</label>
             <select id="bahncard">
@@ -730,6 +773,6 @@
 <!-- The ?v= is deliberate: GitHub Pages lets browsers cache app.js, so a
      fix could ship and the visitor would keep running the old file. Bump
      this whenever app.js changes in a way users need to see. -->
-<script src="./app.js?v=2026-08-09-14"></script>
+<script src="./app.js?v=2026-08-09-15"></script>
 </body>
 </html>
