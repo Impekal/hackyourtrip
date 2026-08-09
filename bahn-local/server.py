@@ -32,7 +32,21 @@ Ein winziger, nur-lokaler HTTP-Server (nur Python-Standardbibliothek, kein
     GET /fahrplan?from=<id>&to=<id>&date=YYYY-MM-DD[THH:MM:SS]&class=2
                                      -> Verbindungen mit echtem Preis
 
+Und – der entscheidende Teil – er liefert die App gleich selbst aus:
+
+    GET /                            -> die HackYourTrip-Oberfläche
+
+Das ist kein Komfort, sondern notwendig. Ruft man die App von ihrer
+öffentlichen https-Adresse auf, verbietet Chrome ihr den Zugriff auf
+`http://127.0.0.1` ("Mixed Content" bzw. "Private Network Access") – die
+Live-Preise bleiben dann ohne erkennbaren Grund aus, und in der Oberfläche
+sieht das genauso aus, als liefe dieser Server gar nicht. Kommt die Seite
+dagegen von *hier*, sind Seite und Preisabfrage dieselbe Herkunft: kein
+Mixed Content, kein CORS, keine Sonderregel. Die beiden App-Dateien werden
+beim ersten Aufruf von GitHub geholt und daneben zwischengespeichert.
+
 Starten:  python3 server.py
+Danach:   http://127.0.0.1:8899/ im Browser öffnen
 Stoppen:  Strg+C
 
 Nichts davon verlässt deinen Rechner ausser den Abfragen an bahn.de selbst –
@@ -46,6 +60,7 @@ import subprocess
 import sys
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from urllib.parse import parse_qs, quote, urlparse
 
 HOST = "127.0.0.1"
@@ -245,6 +260,38 @@ def get_fahrplan(from_id: str, to_id: str, when: str, klasse: str) -> object:
     return result
 
 
+# --- Die App selbst ausliefern ---------------------------------------------
+# Damit Seite und Preisabfrage dieselbe Herkunft haben (siehe Modul-Doku).
+# Die Dateien liegen neben diesem Skript; fehlen sie, werden sie einmalig
+# von GitHub geholt.
+APP_FILES = {
+    "/": ("index.html", "text/html; charset=utf-8"),
+    "/index.html": ("index.html", "text/html; charset=utf-8"),
+    "/app.js": ("app.js", "application/javascript; charset=utf-8"),
+}
+APP_SOURCE = "https://raw.githubusercontent.com/kalivolut/hackyourtrip/main/docs/"
+_app_dir = Path(__file__).resolve().parent / "app"
+
+
+def _app_file(name: str) -> bytes | None:
+    """Datei aus dem lokalen App-Ordner, notfalls einmalig herunterladen."""
+    path = _app_dir / name
+    if path.exists():
+        return path.read_bytes()
+    try:
+        _app_dir.mkdir(parents=True, exist_ok=True)
+        proc = subprocess.run(
+            ["curl", "-sS", "-f", "--max-time", "30", APP_SOURCE + name],
+            capture_output=True, timeout=40)
+        if proc.returncode != 0 or not proc.stdout:
+            return None
+        path.write_bytes(proc.stdout)
+        print(f"  App-Datei geladen: {name} ({len(proc.stdout)} Bytes)")
+        return proc.stdout
+    except Exception:
+        return None
+
+
 def _widen_date(raw: str) -> str | None:
     """Blankes Datum -> voller Zeitstempel; volles durchlassen; sonst None."""
     if not raw:
@@ -286,6 +333,26 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         route = parsed.path.rstrip("/")
         params = {k: v[0] for k, v in parse_qs(parsed.query).items()}
+
+        # Die App zuerst: sie kommt von hier, damit sie die Preisabfrage
+        # unten ohne Browser-Sonderregeln erreichen darf.
+        app_entry = APP_FILES.get(parsed.path) or APP_FILES.get(route or "/")
+        if app_entry:
+            name, content_type = app_entry
+            data = _app_file(name)
+            if data is None:
+                return self._send(503, {
+                    "error": f"App-Datei {name} liess sich nicht laden. "
+                             "Internetverbindung pruefen."})
+            self.send_response(200)
+            self.send_header("Content-Type", content_type)
+            # Nicht zwischenspeichern: sonst haengt nach einem Update die
+            # alte Fassung im Browser fest, was die Fehlersuche verdirbt.
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            return self.wfile.write(data)
+
         try:
             if route == "/health":
                 return self._send(200, {"ok": True, "service": "hackyourtrip-bahn"})
@@ -315,8 +382,12 @@ def main():
     server = ThreadingHTTPServer((HOST, PORT), Handler)
     print("─" * 58)
     print(" HackYourTrip – lokaler Bahn-Preis-Server läuft")
-    print(f"   Adresse:  http://{HOST}:{PORT}")
-    print("   Test:     http://127.0.0.1:8899/health")
+    print("")
+    print(f"   ▶  App öffnen:  http://{HOST}:{PORT}/")
+    print("      (genau diese Adresse benutzen – nicht die github.io-Seite,")
+    print("       sonst blockt der Browser die Live-Preise)")
+    print("")
+    print(f"   Test:     http://{HOST}:{PORT}/health")
     print("   Stoppen:  Strg+C")
     print("─" * 58)
     try:

@@ -26,12 +26,13 @@ Fahrplan und den Deutschland-Ticket-Preis – nie einen erfundenen Preis.
 1. **Terminal öffnen.** Auf dem Mac: `Cmd`+`Leertaste`, „Terminal" tippen,
    Enter.
 
-2. **In diesen Ordner wechseln und den Server starten.** Ersetze den Pfad
-   durch den Ort, wo dieser Ordner bei dir liegt:
+2. **Server holen und starten.** `server.py` ist eine einzelne Datei ohne
+   Abhängigkeiten – das ganze Projekt braucht man dafür nicht:
 
    ```bash
-   cd ~/hackyourtrip/bahn-local
-   python3 server.py
+   cd ~
+   curl -sS -o bahn-server.py https://raw.githubusercontent.com/kalivolut/hackyourtrip/main/bahn-local/server.py
+   python3 bahn-server.py
    ```
 
    Es erscheint:
@@ -39,15 +40,14 @@ Fahrplan und den Deutschland-Ticket-Preis – nie einen erfundenen Preis.
    ```
    ──────────────────────────────────────────────────────────
     HackYourTrip – lokaler Bahn-Preis-Server läuft
-      Adresse:  http://127.0.0.1:8899
-      Test:     http://127.0.0.1:8899/health
-      Stoppen:  Strg+C
+
+      ▶  App öffnen:  http://127.0.0.1:8899/
    ──────────────────────────────────────────────────────────
    ```
 
-3. **Fertig.** Lass dieses Fenster offen. Öffne die HackYourTrip-App im
-   **selben Browser auf demselben Rechner** und suche eine Bahnverbindung –
-   die echten Preise erscheinen mit einem grünen „🟢 Live-Preis DB"-Abzeichen.
+3. **Dieses Fenster offen lassen** (kein `Strg`+`C`!) und im Browser
+   **http://127.0.0.1:8899/** öffnen. Bahnverbindung suchen – die echten
+   Preise erscheinen mit einem grünen „🟢 Live-Preis DB"-Abzeichen.
 
 Zum Stoppen im Terminal `Strg`+`C` drücken.
 
@@ -60,13 +60,6 @@ curl -sS "http://127.0.0.1:8899/fahrplan?from=$(curl -sS 'http://127.0.0.1:8899/
 ```
 
 Erscheinen Zeilen mit `"price": 39.99` o.ä., läuft alles.
-
-## Wichtig zum Browser
-
-Die veröffentlichte App läuft über **https**, der lokale Server über **http**.
-**Chrome** erlaubt den Zugriff auf `http://127.0.0.1` problemlos. **Safari**
-blockt ihn teilweise – wenn die Live-Preise in Safari nicht kommen, nutze
-Chrome, oder öffne die App lokal.
 
 ## Später: rund um die Uhr (für Preisalarme)
 
@@ -82,7 +75,7 @@ das ist ein kleiner Zusatzschritt, kein Umbau.
 | Symptom | Ursache / Lösung |
 |---|---|
 | `403` / „gesperrt" in der Antwort | Du bist nicht auf einer Wohn-IP (VPN aus? nicht über einen Server?). Die DB lässt nur normale Heimanschlüsse durch. |
-| App zeigt keine Live-Preise, nur „Preis unbekannt" | Server läuft nicht, oder Safari blockt `http://localhost` → Chrome nutzen. |
+| App zeigt keine Live-Preise, nur „Preis unbekannt" | Fast immer: die App wurde über die **github.io**-Adresse geöffnet statt über `http://127.0.0.1:8899/`. Siehe unten. Zur Diagnose in der Browser-Konsole `await bahnLocalStatus()` eingeben. |
 | `curl: command not found` | Sehr selten. Auf dem Mac über die Xcode-Command-Line-Tools nachinstallierbar. |
 
 ## Technische Notiz
@@ -95,3 +88,29 @@ darunter). Die Antwort-Struktur (`angebotsPreis.betrag`,
 `verbindungsDauerInSeconds`, `verbindungsAbschnitte[].verkehrsmittel.name`)
 ist gegen eine echte Live-Antwort geprüft; die Parser-Tests stehen in
 `check_server.py` (`python3 check_server.py`).
+
+---
+
+## Wichtig: die App **über den Server** öffnen
+
+Nach dem Start steht im Terminal:
+
+```
+▶  App öffnen:  http://127.0.0.1:8899/
+```
+
+**Diese Adresse benutzen – nicht die github.io-Seite.**
+
+Warum: Ruft man die App von ihrer öffentlichen `https`-Adresse auf, verbietet
+Chrome ihr den Zugriff auf `http://127.0.0.1` („Mixed Content" bzw. „Private
+Network Access"). Die Live-Preise bleiben dann ohne erkennbaren Grund aus –
+und in der Oberfläche sieht das genauso aus, als liefe der Server gar nicht.
+
+Kommt die Seite dagegen von diesem Server, sind Seite und Preisabfrage
+dieselbe Herkunft: kein Mixed Content, kein CORS, keine Sonderregel. Die
+beiden App-Dateien holt der Server beim ersten Aufruf von GitHub und legt sie
+daneben in `app/` ab (beim nächsten Start ist es sofort da). Zum Aktualisieren
+den Ordner `app/` löschen.
+
+Die github.io-Seite bleibt für alles andere nutzbar (Flug, Bus, Hotel,
+Fahrplan) – nur die Bahn-Live-Preise brauchen den Aufruf über `127.0.0.1`.
