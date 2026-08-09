@@ -26,6 +26,7 @@ from traveldeals.providers.base import (CompositeProvider,
                                          NearbyAirportsProvider,
                                          NearbyStationsProvider, Provider)
 from traveldeals.providers.flixbus import FlixbusProvider
+from traveldeals.providers.liteapi import LiteApiHotelProvider
 from traveldeals.providers.mock import (MockBusProvider, MockFlightProvider,
                                          MockHotelProvider, MockTrainProvider)
 from traveldeals.providers.ryanair import RyanairFlightProvider
@@ -87,8 +88,19 @@ def build_providers(real_transit: bool = True) -> dict[Mode, Provider]:
         Mode.BUS: NearbyStationsProvider(
             Mode.BUS, CompositeProvider(Mode.BUS, [FlixbusProvider(), TransitousBusProvider()]))
                    if real_transit else MockBusProvider(),
-        Mode.HOTEL: MockHotelProvider(),
+        Mode.HOTEL: _select_hotel_provider(allow_mock=not real_transit),
     }
+
+
+def _select_hotel_provider(allow_mock: bool) -> Provider:
+    """Hotels haben seit LiteAPI eine echte Preisquelle - vorher gab es
+    ueberhaupt keine. Ohne LITEAPI_KEY bleibt es beim bisherigen Verhalten,
+    damit ein Lauf ohne Schluessel nicht ploetzlich leer ausgeht."""
+    liteapi = LiteApiHotelProvider()
+    if liteapi.configured:
+        return (CompositeProvider(Mode.HOTEL, [liteapi, MockHotelProvider()])
+                if allow_mock else liteapi)
+    return MockHotelProvider()
 
 
 def build_notifiers() -> list[Notifier]:

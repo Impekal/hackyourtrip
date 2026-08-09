@@ -4,7 +4,7 @@
 // guessing: if this doesn't match, the browser is running a cached old
 // app.js and any "the fix didn't work" report is about the old file. Bump
 // together with the ?v= in index.html.
-const BUILD_STAMP = '2026-08-09-11';
+const BUILD_STAMP = '2026-08-09-12';
 document.getElementById('buildStamp').textContent = BUILD_STAMP;
 
 /* =========================================================================
@@ -1341,6 +1341,145 @@ async function fetchFlightOffersWithNeighbours(route) {
   return offers;
 }
 
+/* =========================================================================
+ * Echte Hotelpreise (LiteAPI ueber den Worker).
+ *
+ * Bis hierher war Hotel der einzige Modus ganz ohne Preisquelle - alles
+ * andere ist entweder abgeschaltet (Hotellook) oder braucht einen Vertrag.
+ * LiteAPI vergibt Schluessel selbst, und der freie Sandbox-Schluessel
+ * liefert nachweislich echte Raten (Probe 16: fuenf Abfragevarianten, fuenf
+ * verschiedene Preise je Hotel).
+ *
+ * Zwei Dinge, die diese Quelle von den Portalen unterscheidet und die
+ * deshalb erhalten bleiben muessen:
+ *
+ *  - Die City Tax ist im genannten Betrag NICHT enthalten. Der Worker
+ *    rechnet sie drauf; hier zaehlt nur noch `total`. Wer den Schaufenster-
+ *    preis anzeigt, ist billiger als die Wahrheit.
+ *  - LiteAPI nennt den Preis desselben Zimmers auf booking.com gleich mit.
+ *    Das ist keine geschaetzte Ersparnis, sondern ein Vergleich mit Quelle.
+ * ===================================================================== */
+const HOTEL_MAX_CHECKINS = 3;   // je Anreisetag eine Ratenabfrage
+// Die Flugsuche fragt `adults=1`; ein Zimmer fuer zwei zu bepreisen und in
+// einer Flug+Hotel-Kombi mit einem Einzelflug zu addieren, ergaebe eine
+// Summe, die fuer niemanden stimmt. Ein Feld fuer die Personenzahl gibt es
+// noch nicht - sobald es eins gibt, gehoert es hierhin.
+const HOTEL_ADULTS = 1;
+const HOTEL_LIST_LIMIT = 20;
+let lastHotelError = '';
+
+// LiteAPI will Stadtname + Laenderkuerzel. Im Formular steht je nach Reiter
+// eine Stadt ("Barcelona") oder ein Flughafencode ("BCN") - beides loest
+// dieselbe Ortssuche auf, die auch die Vorschlaege fuellt.
+async function resolveHotelCity(term) {
+  const text = (term || '').trim();
+  if (!text) return null;
+  try {
+    const params = new URLSearchParams({ term: text, locale: 'de' });
+    params.append('types[]', 'city');
+    params.append('types[]', 'airport');
+    const resp = await fetch(`${PLACES_API_URL}?${params.toString()}`);
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    const upper = text.toUpperCase();
+    // Ein exakt getippter Code gewinnt gegen einen zufaelligen Namenstreffer.
+    const hit = data.find(p => (p.code || '').toUpperCase() === upper)
+      || data.find(p => p.type === 'city')
+      || data[0];
+    if (!hit || !hit.country_code) return null;
+    return { city: hit.city_name || hit.name, country: hit.country_code };
+  } catch (e) {
+    return null;
+  }
+}
+
+async function fetchRealHotelOffers(route) {
+  if (!PROXY_URL) return null;
+  lastHotelError = '';
+  const place = await resolveHotelCity(route.destination);
+  if (!place) {
+    lastHotelError = `„${route.destination}" nicht als Stadt erkannt`;
+    return null;
+  }
+
+  const list = await fetchProxyJson('hotels/list', new URLSearchParams({
+    city: place.city, country: place.country, limit: String(HOTEL_LIST_LIMIT),
+  }));
+  const hotels = (list && list.hotels) || [];
+  if (!hotels.length) {
+    lastHotelError = lastProxyError || `Keine Hotels für ${place.city} hinterlegt`;
+    return null;
+  }
+  const byId = Object.fromEntries(hotels.map(h => [h.id, h]));
+
+  const nights = Math.max(route.minNights || 1, 1);
+  const offers = [];
+  for (const checkin of dayCandidates(route).slice(0, HOTEL_MAX_CHECKINS)) {
+    const checkout = new Date(checkin);
+    checkout.setDate(checkout.getDate() + nights);
+    const rates = await fetchProxyJson('hotels/rates', new URLSearchParams({
+      ids: hotels.map(h => h.id).join(','),
+      checkin: isoDay(checkin), checkout: isoDay(checkout),
+      adults: String(HOTEL_ADULTS), currency: route.currency || 'EUR',
+    }));
+    for (const r of (rates && rates.offers) || []) {
+      const hotel = byId[r.hotelId];
+      if (!hotel || !(r.total > 0)) continue;
+      offers.push({
+        mode: 'hotel', isMock: false, priceKnown: true,
+        price: r.total, currency: r.currency,
+        bookingSite: hotel.name,
+        url: hotelSearchUrl(hotel, checkin, checkout),
+        depart: checkin, durationHours: nights * 24, nights,
+        bagFee: 0, isLowCost: false,
+        // Gemessen (Probe 18): diese Felder liefert die Quelle wirklich.
+        stars: hotel.stars ?? null,
+        rating: hotel.rating ?? null,
+        reviewCount: hotel.reviewCount ?? null,
+        address: hotel.address || null,
+        chain: hotel.chain || null,
+        thumbnail: hotel.thumbnail || null,
+        // Aus der Rate. `freeCancellation` bleibt null statt false, wenn die
+        // Rate nichts dazu sagt - sonst waere "unbekannt" ein "nein".
+        roomName: r.roomName, boardName: r.boardName,
+        mealPlan: mealPlanFromBoard(r.boardName),
+        freeCancellation: r.refundable,
+        extraTax: r.extraTax, basePrice: r.price,
+        compareAt: r.compareAt, compareSource: r.compareSource,
+        // Alles Uebrige (WLAN, Parken, Pool ...) sagt diese Quelle nicht.
+        // Bewusst nicht auf false gesetzt: siehe meetsHotelPrefs.
+      });
+    }
+  }
+  if (!offers.length && !lastHotelError) {
+    lastHotelError = lastProxyError || 'Keine buchbaren Zimmer in diesem Zeitraum';
+  }
+  return offers.length ? offers : null;
+}
+
+// LiteAPI liefert Verpflegung als Klartext ("Room Only", "Breakfast").
+// Unbekanntes bleibt null - lieber keine Angabe als eine falsche.
+function mealPlanFromBoard(boardName) {
+  const text = (boardName || '').toLowerCase();
+  if (!text) return null;
+  if (text.includes('all inclusive')) return 'all_inclusive';
+  if (text.includes('full board')) return 'full_board';
+  if (text.includes('half board')) return 'half_board';
+  if (text.includes('breakfast')) return 'breakfast';
+  if (text.includes('room only')) return 'none';
+  return null;
+}
+
+// Wir verkaufen nichts - der Link geht dorthin, wo man das Zimmer wirklich
+// bucht, mit Namen und Daten vorbelegt.
+function hotelSearchUrl(hotel, checkin, checkout) {
+  const params = new URLSearchParams({
+    ss: `${hotel.name}${hotel.city ? `, ${hotel.city}` : ''}`,
+    checkin: isoDay(checkin), checkout: isoDay(checkout),
+  });
+  return `https://www.booking.com/searchresults.de.html?${params.toString()}`;
+}
+
 async function fetchRealFlightOffers(route) {
   if (!PROXY_URL) return null; // not configured - caller falls back to mock
   lastProxyError = '';
@@ -2094,16 +2233,59 @@ function comfortScore(candidate) {
   return scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : 0.5;
 }
 
+/**
+ * Erfuellt ein Hotel die Vorgaben?
+ *
+ * Entscheidend ist der Unterschied zwischen "nein" und "weiss ich nicht".
+ * Die Beispieldaten kennen jedes Merkmal (true oder false). Eine echte
+ * Quelle kennt nur einen Teil: LiteAPI sagt etwas ueber Verpflegung und
+ * Stornierbarkeit, aber nichts ueber Haustiere oder Klimaanlage.
+ *
+ * Wuerde ein unbekanntes Merkmal wie ein "nein" wirken, verschwaende ein
+ * Haken bei "WLAN" saemtliche echten Hotels - und die Suche saehe aus, als
+ * gaebe es dort keine. Deshalb schliesst nur ein ausdrueckliches `false`
+ * aus. Was offen bleibt, wird spaeter am Angebot vermerkt
+ * (`unverifiedPrefs`), damit aus "ungeprueft" nie stillschweigend
+ * "erfuellt" wird.
+ */
+function unknown(value) { return value === undefined || value === null; }
+
+// Die deutsche Bezeichnung steht schon am Ankreuzfeld. Sie dort abzulesen
+// ist zuverlaessiger als eine zweite Liste zu pflegen, die irgendwann von
+// der Oberflaeche abweicht - genau das ist bei den Amenity-Listen dieses
+// Projekts schon mehrfach passiert.
+function prefLabel(prefFlag) {
+  const box = typeof document !== 'undefined' && document.getElementById(prefFlag);
+  const text = box && box.parentElement && box.parentElement.textContent;
+  return (text || '').trim() || prefFlag;
+}
+
 function meetsHotelPrefs(o, p) {
-  if (p.minStars != null && (o.stars ?? 0) < p.minStars) return false;
-  if (p.minRating != null && (o.rating ?? 0) < p.minRating) return false;
-  if (p.maxDistanceKm != null && (o.distanceKm ?? 0) > p.maxDistanceKm) return false;
-  if (p.propertyTypes && p.propertyTypes.length && !p.propertyTypes.includes(o.propertyType)) return false;
-  if (p.minMealPlan && MEAL_PLAN_TIERS.indexOf(o.mealPlan ?? 'none') < MEAL_PLAN_TIERS.indexOf(p.minMealPlan)) return false;
+  if (p.minStars != null && !unknown(o.stars) && o.stars < p.minStars) return false;
+  if (p.minRating != null && !unknown(o.rating) && o.rating < p.minRating) return false;
+  if (p.maxDistanceKm != null && !unknown(o.distanceKm) && o.distanceKm > p.maxDistanceKm) return false;
+  if (p.propertyTypes && p.propertyTypes.length && !unknown(o.propertyType)
+      && !p.propertyTypes.includes(o.propertyType)) return false;
+  if (p.minMealPlan && !unknown(o.mealPlan)
+      && MEAL_PLAN_TIERS.indexOf(o.mealPlan) < MEAL_PLAN_TIERS.indexOf(p.minMealPlan)) return false;
   for (const [prefFlag, offerField] of HOTEL_AMENITY_REQUIREMENTS) {
-    if (p[prefFlag] && !o[offerField]) return false;
+    if (p[prefFlag] && o[offerField] === false) return false;
   }
   return true;
+}
+
+/** Vorgaben, zu denen dieses Angebot schlicht nichts sagt. */
+function unverifiedHotelPrefs(o, p) {
+  const offen = [];
+  if (p.minStars != null && unknown(o.stars)) offen.push('Sterne');
+  if (p.minRating != null && unknown(o.rating)) offen.push('Bewertung');
+  if (p.maxDistanceKm != null && unknown(o.distanceKm)) offen.push('Entfernung');
+  if (p.propertyTypes && p.propertyTypes.length && unknown(o.propertyType)) offen.push('Unterkunftsart');
+  if (p.minMealPlan && unknown(o.mealPlan)) offen.push('Verpflegung');
+  for (const [prefFlag, offerField] of HOTEL_AMENITY_REQUIREMENTS) {
+    if (p[prefFlag] && unknown(o[offerField])) offen.push(prefLabel(prefFlag));
+  }
+  return offen;
 }
 function minutesSinceMidnight(hhmm) {
   const [h, m] = hhmm.split(':').map(Number);
@@ -2299,6 +2481,9 @@ async function runSearch(route) {
   // Same for the bus: FlixBus is the only bus source with prices, so when it
   // has nothing the whole mode drops to timetables without a price.
   let busPriceReason = '';
+  // Und dasselbe fuer Hotels, seit es dort ueberhaupt eine Preisquelle gibt.
+  let usedRealHotelData = false;
+  let hotelFallbackReason = '';
   // Invented prices are opt-in now, and off by default. They exist to
   // exercise the ranking logic, not to fill a results list - and filling the
   // list was actively harmful: a search that found no real fares showed
@@ -2338,10 +2523,19 @@ async function runSearch(route) {
       }
       poolCache[key] = merged.length ? merged : fallback(variant, mode);
     } else {
-      // No free hotel source exists at all, so this mode is empty unless
-      // example data is switched on - the provider links below are the
-      // honest answer for hotels.
-      poolCache[key] = fallback(variant, 'hotel');
+      // Hotels haben seit Probe 16 eine echte Preisquelle (LiteAPI ueber den
+      // Worker). Beispieldaten bleiben der Notnagel - und nur, wenn sie
+      // ausdruecklich eingeschaltet sind.
+      const real = await fetchRealHotelOffers(variant);
+      if (real && real.length) {
+        poolCache[key] = real;
+        usedRealHotelData = true;
+      } else {
+        hotelFallbackReason = !PROXY_URL
+          ? 'Kein Proxy konfiguriert'
+          : (lastHotelError || 'Für diese Stadt und diesen Zeitraum liefert die Quelle keine Preise');
+        poolCache[key] = fallback(variant, 'hotel');
+      }
     }
     return poolCache[key];
   }
@@ -2481,6 +2675,7 @@ async function runSearch(route) {
     return {
       sections: [makeSection('all', '', route, built)],
       usedRealFlightData, flightFallbackReason, busPriceReason,
+      usedRealHotelData, hotelFallbackReason,
     };
   }
 
@@ -2519,7 +2714,8 @@ async function runSearch(route) {
       'Gesamtpreis für beide Richtungen: echte Hin-/Rückflug-Tickets und aus zwei Einzelfahrten zusammengesetzte Reisen. '
       + 'Zwei Einzeltickets sind oft günstiger als ein Rückflugticket - vergleiche mit den beiden Reitern links.'),
   ];
-  return { sections, usedRealFlightData, flightFallbackReason, busPriceReason };
+  return { sections, usedRealFlightData, flightFallbackReason, busPriceReason,
+           usedRealHotelData, hotelFallbackReason };
 }
 
 /* Sorting - runs on the already-fetched candidates, never triggers a search. */
@@ -2689,6 +2885,61 @@ function savingsTips(candidate, route, pools) {
   return tips.slice(0, 3);
 }
 
+/**
+ * Hinweise zu einem echten Hotelangebot.
+ *
+ * Drei Dinge, die kein Portal so nebeneinanderstellt: was der Preis
+ * wirklich enthaelt, was dasselbe Zimmer woanders kostet, und ob ein
+ * anderer Anreisetag im gewaehlten Zeitraum guenstiger waere.
+ */
+function hotelTips(h, route, pools) {
+  const tips = [];
+  const cur = h.currency;
+
+  // 1. Die Steuer, die im Schaufensterpreis fehlt. Das ist kein Detail:
+  //    ohne diesen Satz vergleicht man 260 mit 280 und haelt es fuer
+  //    dasselbe.
+  if (h.extraTax > 0) {
+    tips.push(`🧾 Enthalten: ${h.basePrice.toFixed(2)} ${cur} Zimmer + ${
+      h.extraTax.toFixed(2)} ${cur} vor Ort fällige Steuer – zusammen ${
+      h.price.toFixed(2)} ${cur}.`);
+  }
+
+  // 2. Der Vergleich mit booking.com kommt von der Quelle selbst, samt
+  //    Herkunftsangabe. Deshalb wird die Quelle auch genannt - eine
+  //    Ersparnis ohne Beleg waere nur eine Behauptung.
+  if (h.compareAt && h.compareAt > h.price) {
+    const saving = round2(h.compareAt - h.price);
+    if (savingIsWorthIt(saving, {})) {
+      tips.push(`🏷️ Dasselbe Zimmer kostet laut ${h.compareSource || 'Vergleichsquelle'} ${
+        h.compareAt.toFixed(2)} ${cur} – hier ${saving} ${cur} weniger.`);
+    }
+  }
+
+  // 3. Anderer Anreisetag im gewaehlten Zeitraum, nach denselben Regeln wie
+  //    ueberall sonst: ein anderer Tag muss sich deutlich lohnen.
+  const day = isoDay(h.depart);
+  const cheaper = (pools.hotel || []).filter(
+    o => o.priceKnown !== false && o.price < h.price && isoDay(o.depart) !== day);
+  if (cheaper.length) {
+    const best = cheapest(cheaper);
+    const saving = round2(h.price - best.price);
+    if (savingIsWorthIt(saving, { otherDay: true })) {
+      tips.push(`📅 Anreise am ${fmtDay(best.depart)} statt ${fmtDay(h.depart)}: ${
+        best.bookingSite} für ${best.price.toFixed(2)} ${cur} – spart ${saving} ${cur}.`);
+    }
+  }
+
+  // 4. Was die Quelle zu den eigenen Vorgaben schlicht nicht sagt. Lieber
+  //    unbequem ehrlich als stillschweigend "erfuellt".
+  const offen = unverifiedHotelPrefs(h, route.hotelPrefs || {});
+  if (offen.length) {
+    tips.push(`❔ Zu diesen Wünschen sagt die Preisquelle nichts: ${
+      offen.slice(0, 4).join(', ')}${offen.length > 4 ? ' u.a.' : ''} – bitte beim Hotel prüfen.`);
+  }
+  return tips.slice(0, 4);
+}
+
 async function addRecommendations(route, options, pools) {
   const rates = await getRatesPerEur();
   for (const c of options) {
@@ -2709,6 +2960,12 @@ async function addRecommendations(route, options, pools) {
 
     if (['flight', 'train', 'bus'].includes(primary.mode)) {
       c.recommendations.push(...savingsTips(c, route, pools));
+    }
+
+    // Hotels: dieselben Kompromiss-Regeln (anderer Anreisetag, anderes Haus)
+    // plus die beiden Dinge, die nur diese Quelle liefert.
+    for (const h of c.offers.filter(o => o.mode === 'hotel' && o.isMock === false)) {
+      c.recommendations.push(...hotelTips(h, route, pools));
     }
 
     if (primary.bagFee > 0) {
@@ -2778,8 +3035,21 @@ const HOTEL_AMENITY_LABELS = {
 function offerChips(offer) {
   const chips = [];
   if (offer.mode === 'hotel') {
+    // Echter Preis aus einer Buchungsquelle - dasselbe Abzeichen-Prinzip wie
+    // beim Live-Preis der Bahn, damit man Quelle und Beispiel unterscheiden
+    // kann, ohne die Zeile zu lesen.
+    if (offer.isMock === false && offer.priceKnown !== false) chips.push('🟢 Live-Preis Hotel');
     if (offer.stars) chips.push('⭐'.repeat(offer.stars));
-    if (offer.rating) chips.push(`${offer.rating}/10`);
+    if (offer.rating) {
+      chips.push(`${offer.rating}/10${offer.reviewCount ? ` (${offer.reviewCount} Bew.)` : ''}`);
+    }
+    if (offer.roomName) chips.push(offer.roomName);
+    // Die Steuer gehoert an die Zeile, nicht nur in die Empfehlung: wer nur
+    // ueberfliegt, muss trotzdem sehen, dass da noch etwas dazukommt.
+    if (offer.extraTax > 0) chips.push(`inkl. ${offer.extraTax.toFixed(2)} ${offer.currency} Steuer vor Ort`);
+    if (offer.compareAt > offer.price) {
+      chips.push(`${round2(offer.compareAt - offer.price)} ${offer.currency} unter ${offer.compareSource || 'Vergleichspreis'}`);
+    }
     if (PROPERTY_TYPE_LABELS[offer.propertyType]) chips.push(PROPERTY_TYPE_LABELS[offer.propertyType]);
     if (offer.distanceKm != null) chips.push(`${offer.distanceKm} km`);
     if (offer.wifi) chips.push('WLAN');
@@ -3232,8 +3502,8 @@ function renderProviderLinks(route) {
     <div class="provider-links">
       <h3>Echte Preise direkt prüfen</h3>
       <p class="provider-note">Kein kostenloser Zugang deckt alle Anbieter ab - Ryanair und Travelpayouts liefern
-      echte Flugpreise, Transitous echte Fahrpläne ohne Preis, für Hotels gibt es gar keine freie Quelle.
-      Hier die Anbieter selbst, für <strong>${routeLine}</strong>:</p>
+      echte Flugpreise, Transitous echte Fahrpläne ohne Preis, LiteAPI echte Hotelraten, und die Bahn nur über
+      den lokalen Preis-Server. Hier die Anbieter selbst, für <strong>${routeLine}</strong>:</p>
       ${groups.map(g => `
         <div class="provider-group">
           <span class="provider-title">${GROUP_TITLES[g]}</span>
@@ -3294,6 +3564,7 @@ function renderResults(route, result) {
     sections: result.sections,
     flightFallbackReason: result.flightFallbackReason,
     busPriceReason: result.busPriceReason,
+    hotelFallbackReason: result.hotelFallbackReason,
     // The whole trip is what was searched for, so that is what opens; the
     // two single-direction lists are the comparison next to it.
     sectionId: (result.sections.find(s => s.id === 'combined') || result.sections[0]).id,
@@ -3321,7 +3592,7 @@ function renderResults(route, result) {
 }
 
 function renderActiveSection() {
-  const { route, sections, sectionId, flightFallbackReason, busPriceReason } = shownSearch;
+  const { route, sections, sectionId, flightFallbackReason, busPriceReason, hotelFallbackReason } = shownSearch;
   const section = sections.find(s => s.id === sectionId) || sections[0];
   for (const btn of legTabsEl.querySelectorAll('.legtab')) {
     const on = btn.dataset.section === section.id;
@@ -3337,10 +3608,10 @@ function renderActiveSection() {
   // is actually looking at.
   route.priority = sortByEl.value;
   if (!trackBox.hidden) trackYaml.value = buildYamlSnippet(route);
-  return renderOptionList(route, section, options, flightFallbackReason, busPriceReason);
+  return renderOptionList(route, section, options, flightFallbackReason, busPriceReason, hotelFallbackReason);
 }
 
-async function renderOptionList(route, section, options, flightFallbackReason, busPriceReason) {
+async function renderOptionList(route, section, options, flightFallbackReason, busPriceReason, hotelFallbackReason) {
   await addRecommendations(route, options, section.pools);
   // The AI recommendation reasons about what is actually on screen.
   lastSearch = { route, options };
@@ -3381,7 +3652,12 @@ async function renderOptionList(route, section, options, flightFallbackReason, b
           ? `Keine echten Preise gefunden. ${flightFallbackReason}.`
           : (busPriceReason
               ? `Keine Busverbindung gefunden. ${busPriceReason}.`
-              : 'Keine Angebote in diesem Budget/Zeitrahmen/Filter gefunden - Filter lockern und erneut suchen.'));
+              // Ohne diesen Zweig las sich ein Ausfall der Hotelquelle als
+              // "Filter lockern" - ein Rat, der hier nichts bringt, weil
+              // gar nichts zu filtern da war.
+              : (hotelFallbackReason
+                  ? `Keine Hotelpreise gefunden. ${hotelFallbackReason}.`
+                  : 'Keine Angebote in diesem Budget/Zeitrahmen/Filter gefunden - Filter lockern und erneut suchen.')));
     searchResultsEl.innerHTML = `
       ${sectionNote}
       <p class="empty">${why}</p>
@@ -3401,12 +3677,19 @@ async function renderOptionList(route, section, options, flightFallbackReason, b
     <br><br><strong>Warum bei Flügen keine echten Preise?</strong> ${flightFallbackReason}.
     Tipp: Von/Nach aus der Vorschlagsliste auswählen, ein anderes Datum oder mehr Flex-Tage probieren -
     oder die Strecke unten direkt beim Anbieter prüfen.` : '';
+  // Hotels hatten lange gar keine Preisquelle. Jetzt gibt es eine, also ist
+  // "Beispieldaten" hier keine Selbstverstaendlichkeit mehr, sondern ein
+  // Fehlschlag mit einem Grund - und der gehoert dazugesagt.
+  const hotelReasonHtml = (hotelFallbackReason
+    && options.some(o => o.offers.some(x => x.mode === 'hotel'))) ? `
+    <br><br><strong>Warum beim Hotel keine echten Preise?</strong> ${hotelFallbackReason}.
+    Tipp: den Ort aus der Vorschlagsliste auswählen - die Hotelquelle braucht eine erkannte Stadt.` : '';
   const mockModes = mockModeLabels(options);
   const affected = mockModes.length ? ` – betrifft: <strong>${mockModes.join(', ')}</strong>` : '';
   const warning = mockCount ? `
     <p class="mock-warning">⚠️ <strong>${mockCount === 1 ? 'Eines dieser Angebote enthält' : `${mockCount} dieser Angebote enthalten`} Beispieldaten</strong>${affected}.
     Erfundene Preise zum Testen der Vergleichslogik, keine buchbaren Verbindungen -
-    beim jeweiligen Anbieter unten nachsehen.${flightReasonHtml}</p>` : '';
+    beim jeweiligen Anbieter unten nachsehen.${flightReasonHtml}${hotelReasonHtml}</p>` : '';
   // Beim Bus reicht "diese Quelle hat keine Preise" nicht: es gibt eine
   // Busquelle mit Preisen (FlixBus), und wenn die nichts liefert, will man
   // wissen warum - sonst liest sich jede Zeile wie ein Programmfehler.

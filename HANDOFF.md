@@ -708,7 +708,7 @@ trotzdem zweitrangig, denn **wir buchen nichts** – wir zeigen Preise und
 verlinken zum Anbieter. Gebraucht wird also nur die *Preisauskunft*, nicht
 der Buchungsweg.
 
-Damit steht und fällt alles an einer einzigen, messbaren Frage: **liefert
+Damit stand und fiel alles an einer einzigen, messbaren Frage: **liefert
 der Sandbox-Key echte Raten oder Testdaten?** Die Anbieter-Aussagen
 widersprechen sich („Sandbox = production" gegen „simulierte Buchungen ohne
 echte Daten"), also wird gemessen – `probe-round16.yml`. Ein einzelner
@@ -881,6 +881,70 @@ nicht kostenlos, Auslandsfahrt wird nicht kostenlos.
 - Safari blockt teils `http://localhost` von einer https-Seite; Chrome nicht.
   Im README vermerkt.
 - Dauerbetrieb fuer Alarme = server.py auf einem immer-an-Geraet (Pi).
+
+## Hotels: gelöst (09.08.2026) - der freie Sandbox-Key liefert echte Raten
+
+**Probe 16 - sind die Preise echt?** Ein einzelner plausibler Betrag beweist
+nichts, deshalb wurde über *Variation* entschieden: dieselben drei Berliner
+Hotels über fünf Abfragevarianten.
+
+| Variante | Meliá | NH Collection | Steigenberger |
+|---|---|---|---|
+| 30 Tage, 1 Nacht, 2 Erw. | 260,45 | 284,68 | 245,04 |
+| Nachbartag | 253,27 | 223,06 | 253,49 |
+| 3 Nächte | 958,08 | 841,02 | 659,73 |
+| 1 Erwachsener | 252,06 | 278,45 | 252,57 |
+| 240 Tage Vorlauf | 110,45 | 103,31 | 129,81 |
+
+Fünf von fünf verschieden, bei allen drei Hotels. Gegenprobe: dieselbe
+Anfrage ohne Schlüssel → 401, die Messung misst also wirklich den Schlüssel.
+**Testdaten hätten fünfmal dieselbe Zahl geliefert.** Damit ist die
+Kreditkartenfrage erledigt: der Production-Key ist der *Buchungsweg*, und
+wir buchen nichts.
+
+**Probe 17 - welcher der drei Beträge ist der Preis?** Das war die
+gefährlichste offene Stelle, und Runde 16 hatte sie mit einem `ODER`
+überdeckt (`offerRetailRate` *oder* `suggestedSellingPrice`).
+
+| Feld | Betrag | Bedeutung |
+|---|---|---|
+| `offerRetailRate.amount` | 260,45 | **was der Reisende zahlt** |
+| `suggestedSellingPrice.amount` | 333,13 | Preis desselben Zimmers, `source: booking.com` |
+| `offerInitialPrice.amount` | 260,45 | Preis vor Rabatt |
+| `retailRate.taxesAndFees[]` | City Tax 19,56 **`included: false`**, VAT 17,04 `included: true` | |
+
+Zwei Folgen, beide im Code festgeschrieben und getestet:
+
+1. **260,45 ist nicht der Preis der Nacht - 280,01 ist es.** Die City Tax
+   fehlt im genannten Betrag. Deshalb sucht `trimHotelRates` (Worker) und
+   `_cheapest_offer` (Python) das günstigste Zimmer nach *Gesamtpreis*: eine
+   Rate, die eine Gebühr verschweigt, würde sonst gegen eine gewinnen, die
+   sie enthält - genau falsch herum.
+2. **Der booking.com-Vergleich ist geschenkt.** LiteAPI nennt ihn samt
+   Herkunft, also ist die Ersparnis belegt statt geschätzt.
+
+**Probe 18 - was weiß die Quelle über ein Hotel?** Gefragt, weil beim Bau
+der Worker-Route aus drei gemessenen Feldern stillschweigend sieben
+angenommene geworden waren (der `sollzeit`-Fehler). Ergebnis: `stars`,
+`rating` (0-10), `reviewCount`, `address`, `zip`, `chain`, `latitude`,
+`longitude`, `thumbnail` sind alle befüllt - die Annahme stimmte, ist aber
+jetzt gemessen. **Ausstattung dagegen nicht:** `facilityIds` sind nackte
+Zahlen (`[47, 107, 2]`) ohne Namenstabelle.
+
+Daraus folgt die dritte, weitreichendste Änderung: **unbekannt ist nicht
+nein.** `_meets_hotel_constraints` (Python) und `meetsHotelPrefs` (JS)
+schließen nur noch bei einem ausdrücklichen `false` aus; die
+Ausstattungsfelder in `models.py` sind auf `Optional[bool] = None`
+umgestellt. Vorher hätte ein Haken bei „WLAN" **jedes echte Hotel**
+aussortiert - und das Ergebnis hätte ausgesehen wie „dort gibt es keine
+Hotels". Was offen bleibt, sagt die App am Angebot dazu
+(`unverifiedHotelPrefs`), damit aus „ungeprüft" nie stillschweigend
+„erfüllt" wird. `hotel_comfort_score` wertet Schweigen als Mittelwert, nicht
+als Mangel - sonst landete jedes echte Hotel hinter jedem erfundenen.
+
+Offen geblieben (kein Blocker): `/data/facilities` könnte die
+`facilityIds` in Namen auflösen und damit WLAN/Parkplatz/Pool beantwortbar
+machen. Nicht gemessen, deshalb nicht gebaut.
 
 ## Deutschland-Ticket: der einzige echte Bahnpreis, den wir bekommen
 

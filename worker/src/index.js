@@ -796,10 +796,19 @@ async function handleHotelsRequest(incoming, request, ctx, env, allowedOrigin) {
   // broken on a phone.
   let body;
   if (kind === "list") {
+    // Field names measured, not assumed (probe 18): every one of these came
+    // back filled for all three sample hotels. `facilityIds` is deliberately
+    // dropped - it is a list of bare numbers ([47, 107, 2]) with no lookup
+    // table here, so it cannot answer "has wifi?" and passing it on would
+    // only invite someone to guess.
     body = {
       hotels: (payload.data || []).map((h) => ({
         id: h.id, name: h.name, city: h.city, country: h.country,
-        address: h.address || null, stars: h.stars ?? null,
+        address: h.address || null, zip: h.zip || null,
+        stars: h.stars ?? null,
+        // 0-10, same scale the rest of the app uses for ratings.
+        rating: h.rating ?? null, reviewCount: h.reviewCount ?? null,
+        chain: h.chain || null,
         latitude: h.latitude ?? null, longitude: h.longitude ?? null,
         thumbnail: h.thumbnail || null,
       })),

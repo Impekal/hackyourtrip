@@ -284,35 +284,38 @@ class Offer:
     # hotel amenities
     stars: Optional[int] = None
     rating: Optional[float] = None  # 0..10
-    property_type: str = "hotel"    # one of PROPERTY_TYPES
-    meal_plan: str = "none"         # one of MEAL_PLAN_TIERS
-    free_cancellation: bool = False
+    # None heisst durchgehend "diese Quelle sagt dazu nichts" - nicht "nein".
+    # Die Mock-Provider setzen jedes Feld, echte Quellen kennen nur einen
+    # Teil. _meets_hotel_constraints unterscheidet beides ausdruecklich.
+    property_type: Optional[str] = None   # one of PROPERTY_TYPES
+    meal_plan: Optional[str] = None       # one of MEAL_PLAN_TIERS
+    free_cancellation: Optional[bool] = None
     distance_km: Optional[float] = None
-    parking: bool = False
-    air_conditioning: bool = False
-    pets_allowed: bool = False
-    pool: bool = False
-    gym: bool = False
-    spa: bool = False
-    restaurant: bool = False
-    bar: bool = False
-    room_service: bool = False
-    front_desk_24h: bool = False
-    business_facilities: bool = False
-    laundry_service: bool = False
-    elevator: bool = False
-    balcony_or_terrace: bool = False
-    kitchen: bool = False
-    beachfront: bool = False
-    disabled_access: bool = False
-    ev_charging: bool = False
-    bicycle_rental: bool = False
-    babysitting: bool = False
-    sauna: bool = False
-    hot_tub: bool = False
-    non_smoking: bool = False
-    family_rooms: bool = False
-    airport_shuttle: bool = False
+    parking: Optional[bool] = None
+    air_conditioning: Optional[bool] = None
+    pets_allowed: Optional[bool] = None
+    pool: Optional[bool] = None
+    gym: Optional[bool] = None
+    spa: Optional[bool] = None
+    restaurant: Optional[bool] = None
+    bar: Optional[bool] = None
+    room_service: Optional[bool] = None
+    front_desk_24h: Optional[bool] = None
+    business_facilities: Optional[bool] = None
+    laundry_service: Optional[bool] = None
+    elevator: Optional[bool] = None
+    balcony_or_terrace: Optional[bool] = None
+    kitchen: Optional[bool] = None
+    beachfront: Optional[bool] = None
+    disabled_access: Optional[bool] = None
+    ev_charging: Optional[bool] = None
+    bicycle_rental: Optional[bool] = None
+    babysitting: Optional[bool] = None
+    sauna: Optional[bool] = None
+    hot_tub: Optional[bool] = None
+    non_smoking: Optional[bool] = None
+    family_rooms: Optional[bool] = None
+    airport_shuttle: Optional[bool] = None
     wifi: bool = False
 
     details: dict = field(default_factory=dict)

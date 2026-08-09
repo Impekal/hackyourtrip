@@ -73,12 +73,22 @@ HOTEL_AMENITY_FIELDS = [
 def hotel_comfort_score(offer: Offer) -> float:
     """0..1, higher is better: blends stars, user rating, amenity coverage,
     meal plan, and closeness - equal-weighted since there's no principled
-    reason to prefer one over another without user-specific data."""
+    reason to prefer one over another without user-specific data.
+
+    Unknown values fall back to the middle of their range, not to the worst
+    end. A source that stays silent about the breakfast must not thereby
+    make the hotel look bad; that would quietly rank real offers below
+    invented ones, which is precisely backwards.
+    """
     stars_norm = ((offer.stars or 3) - 1) / 4
     rating_norm = (offer.rating or 7.0) / 10
-    amenity_norm = sum(1 for f in HOTEL_AMENITY_FIELDS if getattr(offer, f)) / len(HOTEL_AMENITY_FIELDS)
+    # Only count amenities that are actually known. Scoring `None` as absent
+    # would punish a source for its silence.
+    known = [f for f in HOTEL_AMENITY_FIELDS if getattr(offer, f) is not None]
+    amenity_norm = (sum(1 for f in known if getattr(offer, f)) / len(known)) if known else 0.5
     distance_norm = 1 - min(offer.distance_km or 3.0, 10) / 10
-    meal_plan_norm = MEAL_PLAN_TIERS.index(offer.meal_plan) / (len(MEAL_PLAN_TIERS) - 1)
+    meal_plan_norm = (MEAL_PLAN_TIERS.index(offer.meal_plan) / (len(MEAL_PLAN_TIERS) - 1)
+                      if offer.meal_plan in MEAL_PLAN_TIERS else 0.5)
     return (stars_norm + rating_norm + amenity_norm + distance_norm + meal_plan_norm) / 5
 
 
@@ -139,18 +149,33 @@ _HOTEL_AMENITY_REQUIREMENTS = {
 
 
 def _meets_hotel_constraints(offer: Offer, pref: HotelPref) -> bool:
-    if pref.min_stars is not None and (offer.stars or 0) < pref.min_stars:
+    """Does this hotel meet the stated requirements?
+
+    `None` means "this source doesn't say", and that must not act like a
+    "no" - the same distinction `price_known` and `d_ticket_covered` draw.
+    The mock provider fills every field, so nothing changes for it. A real
+    source knows some things and not others: LiteAPI states the board type
+    and whether a rate is refundable, but says nothing about pets or air
+    conditioning. Letting that silence exclude the hotel would empty the
+    list for anyone who ticks a single box - and it would look exactly like
+    "there are no hotels there", which is a different, wrong answer.
+    """
+    if pref.min_stars is not None and offer.stars is not None and offer.stars < pref.min_stars:
         return False
-    if pref.min_rating is not None and (offer.rating or 0) < pref.min_rating:
+    if pref.min_rating is not None and offer.rating is not None and offer.rating < pref.min_rating:
         return False
-    if pref.max_distance_km is not None and (offer.distance_km or 0) > pref.max_distance_km:
+    if (pref.max_distance_km is not None and offer.distance_km is not None
+            and offer.distance_km > pref.max_distance_km):
         return False
-    if pref.property_types and offer.property_type not in pref.property_types:
+    if (pref.property_types and offer.property_type is not None
+            and offer.property_type not in pref.property_types):
         return False
-    if pref.min_meal_plan is not None and MEAL_PLAN_TIERS.index(offer.meal_plan) < MEAL_PLAN_TIERS.index(pref.min_meal_plan):
+    if (pref.min_meal_plan is not None and offer.meal_plan is not None
+            and MEAL_PLAN_TIERS.index(offer.meal_plan)
+            < MEAL_PLAN_TIERS.index(pref.min_meal_plan)):
         return False
     for pref_flag, offer_field in _HOTEL_AMENITY_REQUIREMENTS.items():
-        if getattr(pref, pref_flag) and not getattr(offer, offer_field):
+        if getattr(pref, pref_flag) and getattr(offer, offer_field) is False:
             return False
     return True
 

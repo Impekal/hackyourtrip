@@ -159,15 +159,29 @@ stubFetch(RATE_SHAPE);
 }
 
 // --- Hotelliste -----------------------------------------------------------
-stubFetch({ data: [{ id: 'lp1', name: 'Melia Berlin', city: 'Berlin', country: 'DE',
-                     stars: 4, latitude: 52.5, longitude: 13.4, thumbnail: 't.jpg',
+// Feldnamen aus Probe 18, 1:1 - inklusive der Felder, die wir bewusst
+// wegwerfen.
+stubFetch({ data: [{ id: 'lp6aeac', name: 'Steigenberger Hotel Am Kanzleramt',
+                     city: 'Berlin', country: 'de', zip: '10557',
+                     address: 'Ella-Trebe-Straße 5', stars: 5, rating: 9,
+                     reviewCount: 10360, chain: 'Steigenberger Hotels & Resorts',
+                     latitude: 52.523885, longitude: 13.368183,
+                     thumbnail: 'https://static.cupid.travel/hotels/thumbnail/1.jpg',
+                     facilityIds: [47, 107, 2],
                      hotelDescription: 'x'.repeat(5000) }] });
 {
   const { resp, body, last } = await call('/hotels/list?city=Berlin&country=de&limit=5');
-  report(resp.status === 200 && body.hotels[0].id === 'lp1' && body.hotels[0].stars === 4,
+  const h = body.hotels[0];
+  report(resp.status === 200 && h.id === 'lp6aeac' && h.stars === 5,
     'die Hotelliste kommt eingedampft zurueck', JSON.stringify(body));
-  report(!('hotelDescription' in body.hotels[0]),
+  report(h.rating === 9 && h.reviewCount === 10360,
+    'Bewertung und Anzahl der Bewertungen kommen mit - danach wird gefiltert',
+    JSON.stringify(h));
+  report(!('hotelDescription' in h),
     'der kilobyteschwere Beschreibungstext wird nicht durchgereicht - das Handy dankt');
+  report(!('facilityIds' in h),
+    'die nackten Ausstattungs-IDs fliegen raus: [47,107,2] beantwortet kein '
+    + '"hat WLAN?" und wuerde nur zum Raten verleiten');
   report(new URL(last.url).searchParams.get('countryCode') === 'DE',
     'das Laenderkuerzel wird gross geschrieben weitergegeben');
 }
