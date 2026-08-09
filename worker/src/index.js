@@ -111,6 +111,92 @@ const FLIXBUS_HEADERS = {
   "Accept-Language": "de-DE,de;q=0.9,en;q=0.8",
 };
 
+// LiteAPI (Nuitee) - the one live source of hotel *prices* we found. Nine
+// probe rounds established that everything else is either retired
+// (Hotellook/Travelpayouts: 404 everywhere) or needs a signed contract
+// (Booking Demand, RateHawk, Expedia).
+//
+// Measured with a free sandbox key (probe 16/17, 09.08.2026), and the
+// measurements are the reason the shaping below looks the way it does:
+//
+//  - The rates are REAL. Five variants of the same query (neighbouring day,
+//    3 nights, 1 vs 2 adults, 240 days out) returned five different amounts
+//    for every hotel. Test data would have repeated one number.
+//  - A room type carries THREE amounts. `offerRetailRate` is what the
+//    traveller pays; `suggestedSellingPrice` is what the same room costs on
+//    booking.com (LiteAPI names the source itself); `offerInitialPrice` is
+//    the pre-discount price. Showing the wrong one would put a price on
+//    screen that nobody can get.
+//  - `taxesAndFees` carries an `included` flag, and it is genuinely false
+//    for the German city tax. 260.45 EUR is therefore NOT the price of the
+//    night - 280.01 EUR is. That distinction is the whole difference
+//    between an honest total and a lowball.
+//
+// The upstream answer is huge (200 room types per hotel, each with a
+// kilobyte-long booking token), so it is trimmed here rather than in the
+// browser: the page only ever needs the cheapest offer per hotel.
+const LITEAPI_BASE = "https://api.liteapi.travel/v3.0";
+const LITEAPI_MAX_HOTELS = 30;
+
+function liteapiHeaders(key) {
+  return {
+    "X-API-Key": key,
+    Accept: "application/json",
+    "Content-Type": "application/json",
+  };
+}
+
+/** Sum of the taxes the quoted amount does NOT already contain. */
+function notIncludedTaxes(rate) {
+  return ((rate && rate.retailRate && rate.retailRate.taxesAndFees) || [])
+    .filter((t) => t && t.included === false && Number.isFinite(Number(t.amount)))
+    .reduce((sum, t) => sum + Number(t.amount), 0);
+}
+
+function amountOf(node) {
+  const value = node && (Array.isArray(node) ? node[0] : node);
+  const amount = value && Number(value.amount);
+  return Number.isFinite(amount) ? amount : null;
+}
+
+/**
+ * One hotel's cheapest bookable offer, honestly totalled.
+ *
+ * "Cheapest" is decided on price + not-included taxes, never on the quoted
+ * amount alone - otherwise a rate that hides the city tax would win against
+ * one that includes it, which is exactly backwards.
+ */
+function trimHotelRates(entry) {
+  let best = null;
+  for (const room of entry.roomTypes || []) {
+    const price = amountOf(room.offerRetailRate);
+    if (price === null) continue;
+    const rate = (room.rates || [])[0] || {};
+    const extraTax = notIncludedTaxes(rate);
+    const total = Math.round((price + extraTax) * 100) / 100;
+    if (best && total >= best.total) continue;
+    const compareAt = amountOf(room.suggestedSellingPrice);
+    best = {
+      total,
+      price,
+      extraTax: Math.round(extraTax * 100) / 100,
+      currency: (room.offerRetailRate && room.offerRetailRate.currency) || "EUR",
+      roomName: rate.name || null,
+      boardName: rate.boardName || null,
+      // "NRFN" = non refundable. Anything else we leave as unknown rather
+      // than guessing "refundable" - a wrong yes here costs real money.
+      refundable: (rate.cancellationPolicies || {}).refundableTag === "NRFN"
+        ? false : null,
+      // What the same room costs on booking.com, per LiteAPI's own
+      // `source` field. Only kept when it is actually higher - a
+      // "saving" of zero or less is not a saving.
+      compareAt: compareAt !== null && compareAt > total ? compareAt : null,
+      compareSource: (room.suggestedSellingPrice || {}).source || null,
+    };
+  }
+  return best && { hotelId: entry.hotelId, ...best };
+}
+
 // Deutsche Bahn. This is the API bahn.de's own website calls, and it is the
 // only known source that returns actual train *fares* rather than just a
 // timetable (Transitous gives us the timetable already). It is protected by
@@ -610,6 +696,133 @@ async function handleBahnRequest(incoming, request, ctx, allowedOrigin) {
 }
 
 /**
+ * GET /hotels/{list|rates} - hotel prices via LiteAPI.
+ *
+ * Needs the LITEAPI_KEY secret, which is why the browser never talks to
+ * LiteAPI directly. `/hotels/rates` is a GET here but a POST upstream: the
+ * page only ever issues GETs, and the query is short enough for a URL.
+ *
+ * Without the secret this answers 501 and says so, the same way /ai does -
+ * the hotel mode then stays on provider links instead of silently showing
+ * nothing.
+ */
+async function handleHotelsRequest(incoming, request, ctx, env, allowedOrigin) {
+  if (!env.LITEAPI_KEY) {
+    return jsonResponse({
+      error: "Hotel prices are not configured (missing LITEAPI_KEY secret).",
+      unconfigured: true,
+    }, 501, allowedOrigin);
+  }
+  const kind = incoming.pathname.replace(/^\/+|\/+$/g, "").slice("hotels/".length);
+  if (kind !== "list" && kind !== "rates") {
+    return jsonResponse({
+      error: "Unknown hotel endpoint. Use /hotels/list or /hotels/rates.",
+    }, 404, allowedOrigin);
+  }
+
+  const cache = caches.default;
+  const cacheKey = new Request(incoming.toString(), new Request(incoming.toString()));
+  const cached = await cache.match(cacheKey);
+  if (cached) return cached;
+
+  let upstreamUrl;
+  let init = { headers: liteapiHeaders(env.LITEAPI_KEY) };
+
+  if (kind === "list") {
+    const city = incoming.searchParams.get("city");
+    const country = incoming.searchParams.get("country");
+    if (!city || !country) {
+      return jsonResponse({ error: "list needs city and country (ISO-2)." }, 400, allowedOrigin);
+    }
+    const limit = Math.min(Number(incoming.searchParams.get("limit")) || 15,
+                           LITEAPI_MAX_HOTELS);
+    upstreamUrl = `${LITEAPI_BASE}/data/hotels?`
+      + new URLSearchParams({ countryCode: country.toUpperCase(), cityName: city,
+                              limit: String(limit) });
+  } else {
+    const ids = (incoming.searchParams.get("ids") || "")
+      .split(",").map((s) => s.trim()).filter(Boolean).slice(0, LITEAPI_MAX_HOTELS);
+    const checkin = incoming.searchParams.get("checkin");
+    const checkout = incoming.searchParams.get("checkout");
+    if (!ids.length || !checkin || !checkout) {
+      return jsonResponse({
+        error: "rates needs ids (from /hotels/list), checkin and checkout.",
+      }, 400, allowedOrigin);
+    }
+    for (const [name, value] of [["checkin", checkin], ["checkout", checkout]]) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+        return jsonResponse({ error: `${name} must be YYYY-MM-DD.` }, 400, allowedOrigin);
+      }
+    }
+    const adults = Math.max(1, Math.min(Number(incoming.searchParams.get("adults")) || 2, 8));
+    upstreamUrl = `${LITEAPI_BASE}/hotels/rates`;
+    init = {
+      ...init,
+      method: "POST",
+      body: JSON.stringify({
+        hotelIds: ids,
+        occupancies: [{ adults }],
+        currency: (incoming.searchParams.get("currency") || "EUR").toUpperCase(),
+        guestNationality: incoming.searchParams.get("nationality") || "DE",
+        checkin,
+        checkout,
+      }),
+    };
+  }
+
+  let upstream;
+  try {
+    upstream = await fetch(upstreamUrl, init);
+  } catch (err) {
+    return jsonResponse({ error: `LiteAPI unreachable: ${err.message}` }, 502, allowedOrigin);
+  }
+  const text = await upstream.text();
+  if (!upstream.ok) {
+    return jsonResponse({
+      error: `LiteAPI answered ${upstream.status}.`,
+      detail: text.slice(0, 300),
+    }, upstream.status === 401 ? 502 : upstream.status, allowedOrigin);
+  }
+
+  let payload;
+  try {
+    payload = JSON.parse(text);
+  } catch (err) {
+    return jsonResponse({ error: "LiteAPI sent no JSON." }, 502, allowedOrigin);
+  }
+
+  // Shape both answers down to what the page uses. The raw rates response is
+  // megabytes of booking tokens; forwarding it would make the search feel
+  // broken on a phone.
+  let body;
+  if (kind === "list") {
+    body = {
+      hotels: (payload.data || []).map((h) => ({
+        id: h.id, name: h.name, city: h.city, country: h.country,
+        address: h.address || null, stars: h.stars ?? null,
+        latitude: h.latitude ?? null, longitude: h.longitude ?? null,
+        thumbnail: h.thumbnail || null,
+      })),
+    };
+  } else {
+    body = {
+      offers: (payload.data || []).map(trimHotelRates).filter(Boolean),
+    };
+  }
+
+  const response = new Response(JSON.stringify(body), {
+    status: 200,
+    headers: {
+      "Content-Type": "application/json",
+      "Cache-Control": `public, max-age=${CACHE_TTL_SECONDS}`,
+      ...corsHeaders(allowedOrigin),
+    },
+  });
+  ctx.waitUntil(cache.put(cacheKey, response.clone()));
+  return response;
+}
+
+/**
  * GET /flixbus/{cities|search} - FlixBus passthrough. No secret needed, so
  * like /transit/* and /ryanair/* it runs in front of the token check.
  */
@@ -796,6 +1009,9 @@ export default {
     }
     if (path.startsWith("bahn/")) {
       return handleBahnRequest(requestUrl, request, ctx, allowedOrigin);
+    }
+    if (path.startsWith("hotels/")) {
+      return handleHotelsRequest(requestUrl, request, ctx, env, allowedOrigin);
     }
     if (path === "skiplagged") {
       return handleSkiplaggedRequest(requestUrl, request, ctx, allowedOrigin);

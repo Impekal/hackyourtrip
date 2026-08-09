@@ -1,0 +1,84 @@
+name: "Probe round 18 - welche Felder hat ein Hotel-Datensatz?"
+
+# Runde 16 hat aus /data/hotels nur id, name und city ausgegeben. Beim Bau
+# der Worker-Route sind daraus stars, rating, address, latitude, longitude
+# und thumbnail geworden - ANGENOMMEN, nicht gemessen. Das ist derselbe
+# Fehler wie `sollzeit` beim Bahn-Server: Feldnamen gelesen, nie
+# hineingesehen.
+#
+# Hier wird ein vollstaendiger Datensatz roh ausgegeben. Danach steht fest,
+# welche Hotel-Kriterien der App (Sterne, Bewertung, Entfernung, Verpflegung)
+# ueberhaupt beantwortbar sind - und welche ehrlich "unbekannt" bleiben
+# muessen, statt als "nicht vorhanden" durchzugehen.
+#
+# Wird nach der Auswertung geloescht.
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Einen Hotel-Datensatz vollstaendig ausgeben
+        env:
+          LITEAPI_KEY: ${{ secrets.LITEAPI_KEY }}
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.error, urllib.parse, urllib.request
+
+          KEY = os.environ.get("LITEAPI_KEY", "")
+          if not KEY:
+              print("Kein LITEAPI_KEY gesetzt.")
+              raise SystemExit(0)
+
+          BASE = "https://api.liteapi.travel/v3.0"
+
+          def get(url):
+              req = urllib.request.Request(url, headers={
+                  "X-API-Key": KEY, "Accept": "application/json",
+                  "User-Agent": "HackYourTrip-Probe/1.0"})
+              try:
+                  with urllib.request.urlopen(req, timeout=45) as r:
+                      return r.status, json.loads(r.read().decode("utf-8", "replace"))
+              except urllib.error.HTTPError as e:
+                  return e.code, {"_raw": e.read().decode("utf-8", "replace")[:400]}
+
+          status, data = get(f"{BASE}/data/hotels?" + urllib.parse.urlencode(
+              {"countryCode": "DE", "cityName": "Berlin", "limit": 3}))
+          print("HTTP", status)
+          hotels = (data or {}).get("data") or []
+          if not hotels:
+              print(json.dumps(data)[:600])
+              raise SystemExit(0)
+
+          print("\n=== Alle Schluessel eines Hotels ===")
+          print(" ", sorted(hotels[0].keys()))
+
+          def gekuerzt(obj):
+              if isinstance(obj, dict):
+                  return {k: gekuerzt(v) for k, v in obj.items()}
+              if isinstance(obj, list):
+                  return [gekuerzt(v) for v in obj[:3]]
+              if isinstance(obj, str) and len(obj) > 120:
+                  return obj[:100] + f"...(+{len(obj)-100})"
+              return obj
+
+          print("\n=== Erster Datensatz vollstaendig ===")
+          print(json.dumps(gekuerzt(hotels[0]), indent=2, ensure_ascii=False)[:3500])
+
+          # Die App fragt nach genau diesen Kriterien. Welche kann diese
+          # Quelle beantworten - und welche muessen ehrlich offenbleiben?
+          print("\n=== Beantwortbar fuer die Hotel-Kriterien der App? ===")
+          gesucht = ["stars", "rating", "reviewCount", "address", "latitude",
+                     "longitude", "thumbnail", "main_photo", "hotelType",
+                     "chain", "city", "country", "zip", "currency", "facilities",
+                     "amenities", "hotelFacilities"]
+          for feld in gesucht:
+              vorhanden = [h for h in hotels if feld in h and h[feld] not in (None, "", [], {})]
+              beispiel = repr(vorhanden[0][feld])[:70] if vorhanden else "-"
+              print(f"  {feld:18s} {len(vorhanden)}/{len(hotels)} befuellt   {beispiel}")
+
+          print("\n  Was hier fehlt, darf die App NICHT als 'nicht vorhanden'")
+          print("  anzeigen - unbekannt ist nicht dasselbe wie nein.")
+          PY
