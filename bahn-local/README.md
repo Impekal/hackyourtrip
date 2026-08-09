@@ -136,9 +136,14 @@ oben:
 
 ```bash
 nohup python3 ~/bahn-server.py --lan > ~/bahn-server.log 2>&1 &
+sleep 2 && cat ~/bahn-server.log
 ```
 
-Dann kannst du das Terminal schließen; der Server läuft weiter. Was die
+Dann kannst du das Terminal schließen; der Server läuft weiter. Die zweite
+Zeile wartet zwei Sekunden und zeigt dann die Startmeldung – ohne das
+Warten liest man die Datei in dem Moment, in dem Python gerade erst
+hochfährt, und sie ist noch leer. Das sieht dann fälschlich nach einem
+Fehlstart aus. Was die
 Teile bedeuten: `nohup` = „nicht beenden, wenn das Fenster zugeht",
 `&` = „im Hintergrund", der Rest schreibt die Ausgabe in eine Datei, damit
 sie bei Problemen nachlesbar bleibt (`~/bahn-server.log`).
