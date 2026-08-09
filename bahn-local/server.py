@@ -270,6 +270,11 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        # Chromes "Private Network Access": eine oeffentliche https-Seite darf
+        # nur dann auf 127.0.0.1 zugreifen, wenn der lokale Dienst es
+        # ausdruecklich erlaubt. Ohne diesen Header blockt Chrome die Abfrage,
+        # und in der App saehe es aus, als liefe der Server gar nicht.
+        self.send_header("Access-Control-Allow-Private-Network", "true")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
