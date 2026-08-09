@@ -4,7 +4,7 @@
 // guessing: if this doesn't match, the browser is running a cached old
 // app.js and any "the fix didn't work" report is about the old file. Bump
 // together with the ?v= in index.html.
-const BUILD_STAMP = '2026-08-09-15';
+const BUILD_STAMP = '2026-08-09-16';
 document.getElementById('buildStamp').textContent = BUILD_STAMP;
 
 /* =========================================================================
@@ -1272,9 +1272,14 @@ async function findSplitTicketOffers(route, liveOffers, stops) {
       let rest;
       try {
         // Teil 2: was kostet der Rest ab dort, ab der Ankunftszeit?
+        // Die Klasse MUSS dieselbe sein wie in der Vergleichsverbindung.
+        // Ohne sie wurde in der 1. Klasse ein 1.-Klasse-Preis gegen einen
+        // 2.-Klasse-Preis gehalten - der Klassenunterschied waere als
+        // Ersparnis des Spar-Tricks ausgewiesen worden.
         rest = await bahnLocalJson('/fahrplan', new URLSearchParams({
           from: halt.id, to: stops.destination.id,
           date: arriveAtHalt.toISOString().slice(0, 19),
+          class: (route.trainClass === 1 || route.bahncard === '100') ? '1' : '2',
         }));
       } catch (e) { continue; }
 
@@ -1318,6 +1323,11 @@ async function findSplitTicketOffers(route, liveOffers, stops) {
         wifiOnboard: false, powerOutlets: false, legroomCm: null,
         punctualityPct: null, track: '',
         priceSource: 'db-live',
+        // Das Deutschland-Ticket gilt nur in der 2. Klasse. Wer 1. Klasse
+        // gewaehlt hat, faehrt den ersten Teil also einfacher als gewuenscht
+        // - das ist ein Nachteil und gehoert an das Angebot, sonst wirkt der
+        // Trick besser, als er fuer diesen Nutzer ist.
+        splitFirstLegSecondClass: route.trainClass === 1,
         // Macht diesen Eintrag aus - fuer Abzeichen und Erklaerung.
         splitAt: halt.name,
         splitSaving: saving,
@@ -1550,7 +1560,7 @@ async function fetchRealHotelOffers(route) {
         mode: 'hotel', isMock: false, priceKnown: true,
         price: r.total, currency: r.currency,
         bookingSite: hotel.name,
-        url: hotelSearchUrl(hotel, checkin, checkout),
+        url: hotelSearchUrl(hotel, checkin, checkout, route),
         depart: checkin, durationHours: nights * 24, nights,
         bagFee: 0, isLowCost: false,
         // Gemessen (Probe 18): diese Felder liefert die Quelle wirklich.
@@ -1599,11 +1609,19 @@ function mealPlanFromBoard(boardName) {
 
 // Wir verkaufen nichts - der Link geht dorthin, wo man das Zimmer wirklich
 // bucht, mit Namen und Daten vorbelegt.
-function hotelSearchUrl(hotel, checkin, checkout) {
+function hotelSearchUrl(hotel, checkin, checkout, route = {}) {
   const params = new URLSearchParams({
     ss: `${hotel.name}${hotel.city ? `, ${hotel.city}` : ''}`,
     checkin: isoDay(checkin), checkout: isoDay(checkout),
+    // Ohne die Belegung zeigt booking.com den Preis fuer zwei Erwachsene -
+    // ein anderer Preis als der, der hier in der Liste steht. Derselbe
+    // Grundsatz wie bei den Flug-Links: der Link muss dieselbe Reise
+    // meinen wie die Zeile darueber.
+    group_adults: String(route.adults || 1),
+    group_children: String((route.childAges || []).length),
+    no_rooms: '1',
   });
+  for (const alter of route.childAges || []) params.append('age', String(alter));
   return `https://www.booking.com/searchresults.de.html?${params.toString()}`;
 }
 
@@ -3293,6 +3311,9 @@ function offerChips(offer) {
       chips.push(`🎫 bis ${offer.splitAt} mit D-Ticket`);
       chips.push(`spart ${offer.splitSaving.toFixed(2)} ${offer.currency}`);
       if (offer.splitExtraHours > 0) chips.push(`+${offer.splitExtraHours}h`);
+      // Das D-Ticket gilt nur 2. Klasse - bei gewaehlter 1. Klasse ist das
+      // ein echter Abstrich und keine Fussnote.
+      if (offer.splitFirstLegSecondClass) chips.push('erster Teil nur 2. Klasse');
     }
     // Only stated when it is decided. `null` means "not decidable" and gets
     // no chip at all - an absent claim, not a negative one.
