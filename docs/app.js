@@ -4,7 +4,7 @@
 // guessing: if this doesn't match, the browser is running a cached old
 // app.js and any "the fix didn't work" report is about the old file. Bump
 // together with the ?v= in index.html.
-const BUILD_STAMP = '2026-08-09-3';
+const BUILD_STAMP = '2026-08-09-4';
 document.getElementById('buildStamp').textContent = BUILD_STAMP;
 
 /* =========================================================================
@@ -2974,11 +2974,25 @@ async function renderOptionList(route, section, options, flightFallbackReason, b
     <br><br><strong>Warum beim Bus kein Preis?</strong> ${busPriceReason}. Buspreise kommen hier von FlixBus -
     für Fernbusse anderer Anbieter gibt es keine frei zugängliche Preisquelle, deshalb stehen deren Fahrten
     ohne Preis in der Liste.` : '';
-  const timetableNote = timetableCount ? `
-    <p class="timetable-note">🕓 <strong>${timetableCount} echte Verbindungen ohne Preis</strong> - Fahrplandaten von
+  // Fehlen Bahnpreise, weil der lokale Preis-Server nicht erreichbar war,
+  // sagt das keine Zeile der Liste - "nicht gestartet" und "Browser hat
+  // blockiert" sehen identisch aus. Genau diese Stille hat die Fehlersuche
+  // einmal quaelend gemacht, deshalb steht der Grund jetzt da.
+  const trainWithoutPrice = options.some(
+    o => o.hasUnknownPrice && o.offers.some(x => x.mode === 'train'));
+  const bahnLiveHint = (trainWithoutPrice && _bahnLocal.ok === false) ? `
+    <br><br><strong>Bahnpreise fehlen?</strong> Der lokale Bahn-Preis-Server ist nicht erreichbar
+    (<code class="mono">${bahnLocalUrl()}</code>${_bahnLocalLastError ? ` – ${_bahnLocalLastError}` : ''}).
+    Läuft er, zeigt die Bahn hier echte Sparpreise. Zwei häufige Gründe: er ist nicht gestartet, oder
+    diese Seite wurde über <code class="mono">https</code> geöffnet – dann verbietet der Browser den
+    Zugriff auf den eigenen Rechner. Dann die App über
+    <a href="${bahnLocalUrl()}/">${bahnLocalUrl()}/</a> öffnen.` : '';
+
+  const timetableNote = (timetableCount || bahnLiveHint) ? `
+    <p class="timetable-note">${timetableCount ? `🕓 <strong>${timetableCount} echte Verbindungen ohne Preis</strong> - Fahrplandaten von
     <a href="https://transitous.org" target="_blank" rel="noopener">Transitous</a> (offizielle Verkehrsverbund-Feeds,
     kostenlos und ohne Anmeldung). Diese Quelle enthält keine Fahrpreise, deshalb steht hier kein Preis statt eines
-    erfundenen. Zeiten, Linie und Umstiege stimmen - den Preis unten beim Anbieter prüfen.${busReasonHtml}</p>` : '';
+    erfundenen. Zeiten, Linie und Umstiege stimmen - den Preis unten beim Anbieter prüfen.` : ''}${busReasonHtml}${bahnLiveHint}</p>` : '';
 
   searchResultsEl.innerHTML = `
     ${sectionNote}
