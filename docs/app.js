@@ -4,7 +4,7 @@
 // guessing: if this doesn't match, the browser is running a cached old
 // app.js and any "the fix didn't work" report is about the old file. Bump
 // together with the ?v= in index.html.
-const BUILD_STAMP = '2026-08-09-1';
+const BUILD_STAMP = '2026-08-09-2';
 document.getElementById('buildStamp').textContent = BUILD_STAMP;
 
 /* =========================================================================
@@ -792,21 +792,44 @@ function bahnLocalUrl() {
 
 // Einmal pro Seitenaufruf geprüft: ein toter Server darf nicht jede Suche
 // um sein Timeout verzögern. null = noch nicht geprüft.
-let _bahnLocalReachable = null;
+// Ein *negatives* Ergebnis verfaellt nach kurzer Zeit: wer den Server erst
+// nach dem Oeffnen der Seite startet, soll nicht neu laden muessen. Ein
+// positives haelt fuer den Seitenaufruf - da ist nichts mehr zu pruefen.
+const BAHN_LOCAL_RECHECK_MS = 15000;
+let _bahnLocal = { ok: null, at: 0 };
+let _bahnLocalLastError = '';
+
 async function bahnLocalReachable() {
-  if (_bahnLocalReachable !== null) return _bahnLocalReachable;
+  const now = Date.now();
+  if (_bahnLocal.ok === true) return true;
+  if (_bahnLocal.ok === false && now - _bahnLocal.at < BAHN_LOCAL_RECHECK_MS) return false;
   try {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 1500);
     const res = await fetch(bahnLocalUrl() + '/health', { signal: ctrl.signal });
     clearTimeout(timer);
     const body = await res.json().catch(() => ({}));
-    _bahnLocalReachable = res.ok && body.ok === true;
+    _bahnLocal = { ok: res.ok && body.ok === true, at: now };
+    if (!_bahnLocal.ok) _bahnLocalLastError = `HTTP ${res.status}`;
   } catch (e) {
-    _bahnLocalReachable = false; // nicht gestartet, oder Browser blockt http://localhost
+    // Nicht gestartet, oder der Browser hat die Verbindung blockiert. Der
+    // Grund wird festgehalten - in der App sehen beide Faelle gleich aus.
+    _bahnLocal = { ok: false, at: now };
+    _bahnLocalLastError = `${e.name}: ${e.message}`;
   }
-  return _bahnLocalReachable;
+  return _bahnLocal.ok;
 }
+
+// In der Browser-Konsole aufrufbar: zeigt Adresse, Erreichbarkeit und den
+// letzten Fehlergrund, statt dass man raten muss, warum keine Live-Preise
+// erscheinen.
+window.bahnLocalStatus = async () => {
+  _bahnLocal = { ok: null, at: 0 };
+  const erreichbar = await bahnLocalReachable();
+  const info = { url: bahnLocalUrl(), erreichbar, letzterFehler: _bahnLocalLastError };
+  console.log('[HackYourTrip] Lokaler Bahn-Server:', info);
+  return info;
+};
 
 async function bahnLocalJson(path, params) {
   const ctrl = new AbortController();
