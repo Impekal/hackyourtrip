@@ -63,7 +63,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlparse
 
-HOST = "127.0.0.1"
+# Standard: nur der eigene Rechner. Mit `--lan` hört der Server auf allen
+# Schnittstellen, damit Handy und Tablet im selben WLAN ihn erreichen -
+# bewusst nicht der Standard, denn dann kann jedes Gerät im Netz ihn
+# benutzen. Im Heim-WLAN ist das unbedenklich, im Café-WLAN nicht.
+LAN_MODE = "--lan" in sys.argv
+HOST = "0.0.0.0" if LAN_MODE else "127.0.0.1"
 PORT = 8899
 
 # Der Endpunkt, den bahn.de selbst benutzt (dbweb-Profil von db-vendo-client).
@@ -398,16 +403,45 @@ class Handler(BaseHTTPRequestHandler):
             self._send(500, {"error": f"{type(exc).__name__}: {exc}"})
 
 
+def _lan_address() -> str | None:
+    """Die eigene Adresse im Heimnetz – die, die das Handy braucht.
+
+    Ohne echten Verbindungsaufbau: ein UDP-Socket „verbinden" wählt nur die
+    passende Netzwerkkarte aus, es wird kein Paket verschickt.
+    """
+    import socket
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("192.0.2.1", 9))  # reservierte Testadresse, nie erreichbar
+        ip = s.getsockname()[0]
+        s.close()
+        return ip if not ip.startswith("127.") else None
+    except Exception:
+        return None
+
+
 def main():
     server = ThreadingHTTPServer((HOST, PORT), Handler)
-    print("─" * 58)
+    print("─" * 60)
     print(" HackYourTrip – lokaler Bahn-Preis-Server läuft")
     print("")
-    print(f"   ▶  App öffnen:  http://{HOST}:{PORT}/")
-    print("      (genau diese Adresse benutzen – nicht die github.io-Seite,")
-    print("       sonst blockt der Browser die Live-Preise)")
+    print(f"   ▶  Auf diesem Rechner:  http://127.0.0.1:{PORT}/")
+    if LAN_MODE:
+        lan = _lan_address()
+        if lan:
+            print(f"   ▶  Auf Handy/Tablet:    http://{lan}:{PORT}/")
+            print("      (Gerät muss im selben WLAN sein)")
+        else:
+            print("   ⚠️  Keine Heimnetz-Adresse gefunden – ist WLAN aktiv?")
+    else:
+        print("")
+        print("   Für Handy/Tablet im selben WLAN neu starten mit:")
+        print("      python3 bahn-server.py --lan")
     print("")
-    print(f"   Test:     http://{HOST}:{PORT}/health")
+    print("      Diese Adressen benutzen – nicht die github.io-Seite,")
+    print("      sonst blockt der Browser die Live-Preise.")
+    print("")
+    print(f"   Test:     http://127.0.0.1:{PORT}/health")
     print("   Stoppen:  Strg+C")
     print("─" * 58)
     try:

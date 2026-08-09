@@ -4,7 +4,7 @@
 // guessing: if this doesn't match, the browser is running a cached old
 // app.js and any "the fix didn't work" report is about the old file. Bump
 // together with the ?v= in index.html.
-const BUILD_STAMP = '2026-08-09-4';
+const BUILD_STAMP = '2026-08-09-5';
 document.getElementById('buildStamp').textContent = BUILD_STAMP;
 
 /* =========================================================================
@@ -785,13 +785,34 @@ async function fetchNearbyStations(name, radiusKm, limit = 2) {
  * später ein Pi oder Tunnel ohne Code-Änderung eingehängt werden kann.
  * ===================================================================== */
 const BAHN_LOCAL_DEFAULT = 'http://127.0.0.1:8899';
-function bahnLocalUrl() {
-  try { return (localStorage.getItem('bahnLocalUrl') || BAHN_LOCAL_DEFAULT).replace(/\/+$/, ''); }
-  catch (e) { return BAHN_LOCAL_DEFAULT; }
+
+/**
+ * Wo der lokale Bahn-Server zu erreichen ist - der Reihe nach probiert.
+ *
+ * Die eigene Herkunft steht zuerst, und darauf kommt es an: wird die Seite
+ * vom Server ausgeliefert, ist er genau dort. Auf dem Handy heisst das die
+ * Heimnetz-Adresse des Rechners (z.B. http://192.168.1.42:8899) -
+ * `127.0.0.1` waere dort das Handy selbst und damit ins Leere gezielt.
+ * Kommt die Seite von https (github.io), bleibt nur der Versuch ueber die
+ * Loopback-Adresse.
+ */
+function bahnLocalCandidates() {
+  let override = null;
+  try { override = localStorage.getItem('bahnLocalUrl'); } catch (e) { /* egal */ }
+  if (override) return [override.replace(/\/+$/, '')];
+  const list = [];
+  if (location.protocol === 'http:' && location.origin) list.push(location.origin);
+  if (!list.includes(BAHN_LOCAL_DEFAULT)) list.push(BAHN_LOCAL_DEFAULT);
+  return list;
 }
 
-// Einmal pro Seitenaufruf geprüft: ein toter Server darf nicht jede Suche
-// um sein Timeout verzögern. null = noch nicht geprüft.
+// Welche der Adressen tatsaechlich geantwortet hat. Vorher ist es nur eine
+// Vermutung, deshalb steht bis dahin die erste Kandidatin da.
+let _bahnLocalFound = null;
+function bahnLocalUrl() {
+  return _bahnLocalFound || bahnLocalCandidates()[0];
+}
+
 // Ein *negatives* Ergebnis verfaellt nach kurzer Zeit: wer den Server erst
 // nach dem Oeffnen der Seite startet, soll nicht neu laden muessen. Ein
 // positives haelt fuer den Seitenaufruf - da ist nichts mehr zu pruefen.
@@ -803,21 +824,31 @@ async function bahnLocalReachable() {
   const now = Date.now();
   if (_bahnLocal.ok === true) return true;
   if (_bahnLocal.ok === false && now - _bahnLocal.at < BAHN_LOCAL_RECHECK_MS) return false;
-  try {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 1500);
-    const res = await fetch(bahnLocalUrl() + '/health', { signal: ctrl.signal });
-    clearTimeout(timer);
-    const body = await res.json().catch(() => ({}));
-    _bahnLocal = { ok: res.ok && body.ok === true, at: now };
-    if (!_bahnLocal.ok) _bahnLocalLastError = `HTTP ${res.status}`;
-  } catch (e) {
-    // Nicht gestartet, oder der Browser hat die Verbindung blockiert. Der
-    // Grund wird festgehalten - in der App sehen beide Faelle gleich aus.
-    _bahnLocal = { ok: false, at: now };
-    _bahnLocalLastError = `${e.name}: ${e.message}`;
+
+  const reasons = [];
+  for (const base of bahnLocalCandidates()) {
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 1500);
+      const res = await fetch(base + '/health', { signal: ctrl.signal });
+      clearTimeout(timer);
+      const body = await res.json().catch(() => ({}));
+      if (res.ok && body.ok === true) {
+        _bahnLocalFound = base;
+        _bahnLocal = { ok: true, at: now };
+        _bahnLocalLastError = '';
+        return true;
+      }
+      reasons.push(`${base}: HTTP ${res.status}`);
+    } catch (e) {
+      // Nicht gestartet, oder der Browser hat die Verbindung blockiert. Der
+      // Grund wird festgehalten - in der App sehen beide Faelle gleich aus.
+      reasons.push(`${base}: ${e.name}`);
+    }
   }
-  return _bahnLocal.ok;
+  _bahnLocal = { ok: false, at: now };
+  _bahnLocalLastError = reasons.join(' · ');
+  return false;
 }
 
 // In der Browser-Konsole aufrufbar: zeigt Adresse, Erreichbarkeit und den
@@ -825,8 +856,14 @@ async function bahnLocalReachable() {
 // erscheinen.
 window.bahnLocalStatus = async () => {
   _bahnLocal = { ok: null, at: 0 };
+  _bahnLocalFound = null;
   const erreichbar = await bahnLocalReachable();
-  const info = { url: bahnLocalUrl(), erreichbar, letzterFehler: _bahnLocalLastError };
+  const info = {
+    geprueft: bahnLocalCandidates(),
+    gefunden: _bahnLocalFound,
+    erreichbar,
+    letzterFehler: _bahnLocalLastError,
+  };
   console.log('[HackYourTrip] Lokaler Bahn-Server:', info);
   return info;
 };

@@ -61,6 +61,31 @@ curl -sS "http://127.0.0.1:8899/fahrplan?from=$(curl -sS 'http://127.0.0.1:8899/
 
 Erscheinen Zeilen mit `"price": 39.99` o.ä., läuft alles.
 
+## Auf dem Handy nutzen (gleiches WLAN)
+
+`127.0.0.1` ist auf dem Handy **das Handy selbst** – dort läuft kein Server.
+Damit das Handy den Rechner erreicht, muss der Server im Heimnetz hören:
+
+```bash
+python3 bahn-server.py --lan
+```
+
+Er zeigt dann zwei Adressen an:
+
+```
+   ▶  Auf diesem Rechner:  http://127.0.0.1:8899/
+   ▶  Auf Handy/Tablet:    http://192.168.1.42:8899/
+```
+
+Die zweite Adresse auf dem Handy im Browser öffnen (Handy und Rechner im
+selben WLAN). Die App merkt selbst, dass der Server dort steht.
+
+**Was `--lan` bedeutet:** Ohne die Angabe hört der Server nur auf dem eigenen
+Rechner – das ist der sichere Standard. Mit `--lan` kann ihn jedes Gerät im
+selben Netz benutzen. Im Heim-WLAN ist das unbedenklich (er kann nur
+Fahrpläne und Preise abfragen), im Café- oder Hotel-WLAN würde ich es
+lassen.
+
 ## Später: rund um die Uhr (für Preisalarme)
 
 Dieser Server liefert Preise, solange dein Rechner an ist. Für nächtliche
