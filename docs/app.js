@@ -4,7 +4,7 @@
 // guessing: if this doesn't match, the browser is running a cached old
 // app.js and any "the fix didn't work" report is about the old file. Bump
 // together with the ?v= in index.html.
-const BUILD_STAMP = '2026-08-09-5';
+const BUILD_STAMP = '2026-08-09-6';
 document.getElementById('buildStamp').textContent = BUILD_STAMP;
 
 /* =========================================================================
@@ -878,13 +878,42 @@ async function bahnLocalJson(path, params) {
   } finally { clearTimeout(timer); }
 }
 
+/**
+ * Stationssuche bei der Bahn - mehrere Schreibweisen der Reihe nach.
+ *
+ * In den Flug-Kombis (Flug oder Bahn, Hin/Rueck gemischt) steht in den
+ * Feldern ein IATA-Code wie "BER", denn dort ist die Ergaenzung
+ * flughafenbasiert. Fuer die Bahn ist das kein Ortsname - ohne Uebersetzung
+ * findet sie nichts, und die Verbindung landet ohne Preis in der Liste,
+ * obwohl der Server laeuft. Deshalb dieselbe Reihenfolge wie beim Bus.
+ */
+function bahnStopQueries(name) {
+  const queries = [];
+  const push = (q) => {
+    q = (q || '').trim();
+    if (q && !queries.includes(q)) queries.push(q);
+  };
+  // "BER" -> "Berlin": ein roher Code trifft bei der Bahn leicht daneben.
+  push(AIRPORT_CITY_NAMES[(name || '').toUpperCase()]);
+  push(name);
+  // "Münster(Westf) Hbf" -> "Münster Hbf"
+  push((name || '').replace(/\s*\([^)]*\)\s*/g, ' '));
+  return queries;
+}
+
 async function bahnLocalResolveStop(name) {
-  const list = await bahnLocalJson('/orte', new URLSearchParams({ q: name }));
-  if (!Array.isArray(list) || !list.length) return null;
-  const needle = (name || '').trim().toLowerCase();
-  const exact = list.find(o => (o.name || '').trim().toLowerCase() === needle);
-  const stop = exact || list[0];
-  return stop && stop.id ? stop : null;
+  for (const query of bahnStopQueries(name)) {
+    let list;
+    try {
+      list = await bahnLocalJson('/orte', new URLSearchParams({ q: query }));
+    } catch (e) { continue; }
+    if (!Array.isArray(list) || !list.length) continue;
+    const needle = query.trim().toLowerCase();
+    const exact = list.find(o => (o.name || '').trim().toLowerCase() === needle);
+    const stop = exact || list[0];
+    if (stop && stop.id) return stop;
+  }
+  return null;
 }
 
 /* --- Deutschland-Ticket auf dem Live-Pfad -------------------------------
@@ -3015,15 +3044,31 @@ async function renderOptionList(route, section, options, flightFallbackReason, b
   // sagt das keine Zeile der Liste - "nicht gestartet" und "Browser hat
   // blockiert" sehen identisch aus. Genau diese Stille hat die Fehlersuche
   // einmal quaelend gemacht, deshalb steht der Grund jetzt da.
+  // Ein preisloser Zug hat zwei ganz verschiedene Ursachen, und die Antwort
+  // "warum" ist jeweils eine andere: Server nicht erreichbar, oder Server
+  // laeuft und die DB kennt diese Verbindung nicht. Beides sah bisher gleich
+  // aus - in den Kombis besonders, weil dort die Bahn oft aus dem Fahrplan
+  // kommt, obwohl der Server laeuft.
   const trainWithoutPrice = options.some(
-    o => o.hasUnknownPrice && o.offers.some(x => x.mode === 'train'));
-  const bahnLiveHint = (trainWithoutPrice && _bahnLocal.ok === false) ? `
+    o => o.hasUnknownPrice && o.offers.some(x => x.mode === 'train' && x.priceKnown === false));
+  let bahnLiveHint = '';
+  if (trainWithoutPrice && _bahnLocal.ok === false) {
+    bahnLiveHint = `
     <br><br><strong>Bahnpreise fehlen?</strong> Der lokale Bahn-Preis-Server ist nicht erreichbar
     (<code class="mono">${bahnLocalUrl()}</code>${_bahnLocalLastError ? ` – ${_bahnLocalLastError}` : ''}).
     Läuft er, zeigt die Bahn hier echte Sparpreise. Zwei häufige Gründe: er ist nicht gestartet, oder
     diese Seite wurde über <code class="mono">https</code> geöffnet – dann verbietet der Browser den
     Zugriff auf den eigenen Rechner. Dann die App über
-    <a href="${bahnLocalUrl()}/">${bahnLocalUrl()}/</a> öffnen.` : '';
+    <a href="${bahnLocalUrl()}/">${bahnLocalUrl()}/</a> öffnen; fürs Handy den Server mit
+    <code class="mono">--lan</code> starten und dessen Heimnetz-Adresse benutzen.`;
+  } else if (trainWithoutPrice && _bahnLocal.ok === true) {
+    bahnLiveHint = `
+    <br><br><strong>Warum bei diesen Zügen kein Preis?</strong> Der Bahn-Preis-Server läuft
+    (<code class="mono">${bahnLocalUrl()}</code>), aber für diese Verbindung nennt die DB keinen Preis –
+    meist, weil sie den Start- oder Zielort nicht als Bahnstation kennt (in den Flug-Kombis stehen dort
+    Flughafen-Codes) oder für den Tag noch kein Angebot vorliegt. Die Zeiten stammen dann aus dem
+    Fahrplan und stimmen; den Preis beim Anbieter unten prüfen.`;
+  }
 
   const timetableNote = (timetableCount || bahnLiveHint) ? `
     <p class="timetable-note">${timetableCount ? `🕓 <strong>${timetableCount} echte Verbindungen ohne Preis</strong> - Fahrplandaten von
