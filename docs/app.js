@@ -4,7 +4,7 @@
 // guessing: if this doesn't match, the browser is running a cached old
 // app.js and any "the fix didn't work" report is about the old file. Bump
 // together with the ?v= in index.html.
-const BUILD_STAMP = '2026-08-09-10';
+const BUILD_STAMP = '2026-08-09-11';
 document.getElementById('buildStamp').textContent = BUILD_STAMP;
 
 /* =========================================================================
@@ -1085,8 +1085,10 @@ function bahnConnectionToOffer(conn, route, stops = {}) {
  * Anfragen pro Minute, und jeder Kandidat kostet zwei.
  * ===================================================================== */
 const SPLIT_MAX_CANDIDATES = 4;
-// Darunter lohnt der zusaetzliche Umstieg den Aufwand nicht.
-const SPLIT_MIN_SAVING_EUR = 3;
+// Grobfilter, bevor die Mehrzeit ueberhaupt bekannt ist - darunter braucht
+// man gar nicht weiterzurechnen. Die eigentliche Huerde ist danach
+// `savingIsWorthIt`, dieselbe Regel wie fuer jeden anderen Spar-Vorschlag.
+const SPLIT_MIN_SAVING_EUR = 5;
 // Realistische Umsteigezeit am Teilungsbahnhof.
 const SPLIT_MIN_TRANSFER_MIN = 8;
 // Mehr Fahrzeit als das macht aus dem Spartipp eine Zumutung.
@@ -1173,6 +1175,11 @@ async function findSplitTicketOffers(route, liveOffers, stops) {
       const totalHours = round2(hoursBetween(depart, arrive));
       const extraHours = round2(totalHours - (baseline.durationHours || totalHours));
       if (!(totalHours > 0) || extraHours > SPLIT_MAX_EXTRA_HOURS) continue;
+      // Geteilt wird nur, wenn sich das Teilen auch lohnt. Der Trick kostet
+      // einen zusaetzlichen Umstieg und oft Mehrzeit - beides wird nach
+      // denselben Regeln bewertet wie jeder andere Kompromiss, statt hier
+      // eine eigene, laxere Schwelle zu fuehren.
+      if (!savingIsWorthIt(saving, { hours: Math.max(extraHours, 0), transfers: 1 })) continue;
 
       found.push({
         mode: 'train',
@@ -2563,14 +2570,20 @@ function sortCandidates(candidates, sortKey) {
  * ertraenkt man den Nutzer in Vorschlaegen, die er ohnehin ablehnt.
  * ===================================================================== */
 const SAVING_RULES = {
-  // Mindestersparnis je zusaetzlicher Stunde Reise-/Wartezeit, und ein
-  // Sockelbetrag, unter dem sich nichts lohnt.
-  perExtraHour: 5,
+  // Mindestersparnis je zusaetzlicher Stunde Reise-/Wartezeit. Massstab ist
+  // der Mindestlohn: eine Stunde Lebenszeit ist keine 5 EUR wert, und ein
+  // Vorschlag, der weniger einbringt, ist keiner.
+  perExtraHour: 15,
+  // Sockelbetrag fuer Vorschlaege, die gar nichts kosten - guenstiger und
+  // gleich schnell. Hier gibt es nichts abzuwaegen, nur mitzunehmen.
   floor: 5,
-  // Ein anderer Reisetag ist eine echte Umstellung, kein Detail.
-  otherDay: 15,
-  // Jeder zusaetzliche Umstieg kostet Nerven und Verspaetungsrisiko.
-  perExtraTransfer: 8,
+  // Ein anderer Reisetag ist eine echte Umstellung, kein Detail: Urlaub
+  // umbuchen, Termine schieben. Das muss deutlich mehr bringen als eine
+  // Stunde spaeter loszufahren.
+  otherDay: 40,
+  // Jeder zusaetzliche Umstieg kostet Nerven und Verspaetungsrisiko -
+  // laestig, aber weniger als eine ganze Stunde.
+  perExtraTransfer: 10,
 };
 
 const MODE_LABEL = { flight: 'Flug', train: 'Bahn', bus: 'Bus' };

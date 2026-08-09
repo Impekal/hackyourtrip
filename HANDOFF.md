@@ -917,6 +917,33 @@ darf und ein Portal nicht:
 - **Deal-Feeds** beantworten die Frage, die keine Preis-API kann: *wo ist
   gerade etwas absurd billig*.
 
+## Spar-Berater: die Schwellen und warum sie so hoch sind
+
+`SAVING_RULES` in `docs/app.js` entscheidet, ob ein Kompromiss ueberhaupt
+vorgeschlagen wird. Die Zahlen sind kein Bauchgefuehl, sondern eine Ansage
+des Nutzers: **eine zusaetzliche Reisestunde ist Mindestlohn wert.**
+
+| Last | noetige Ersparnis |
+| --- | --- |
+| je zusaetzlicher Stunde | 15 EUR |
+| je zusaetzlichem Umstieg | 10 EUR |
+| anderer Reisetag | 40 EUR |
+| gar keine Last (guenstiger *und* gleich schnell) | 5 EUR |
+
+Die Regeln werden mit `Math.max` kombiniert, nicht addiert - es zaehlt die
+groesste Zumutung, nicht ihre Summe. Wer das aendern will, sollte vorher
+`ui_savings.py` lesen: dort steht zu jeder Kategorie ein Paar aus einem Fall,
+der kommen muss, und einem, der schweigen muss. Genau dieses Paar macht die
+Schwelle ueberhaupt pruefbar.
+
+Wichtig: **auch der Spar-Trick (Fahrkarte teilen) faellt unter dieselbe
+Regel.** Er hatte anfangs eine eigene, laxere Schwelle (3 EUR, egal wie viel
+Mehrzeit) - das war inkonsistent und haette 4-EUR-Vorschlaege fuer drei
+Stunden Umweg erzeugt. `findSplitTicketOffers` ruft jetzt `savingIsWorthIt`
+mit `transfers: 1` auf, weil das Teilen immer einen Umstieg kostet.
+`SPLIT_MIN_SAVING_EUR` ist nur noch ein billiger Vorfilter, bevor die
+Mehrzeit ueberhaupt bekannt ist.
+
 ## Roadmap-Ideen (nicht in Arbeit, nur notiert)
 
 - Bahn/Bus-**Preise** (Fahrpläne laufen seit 06.08.2026 echt über
