@@ -4,7 +4,7 @@
 // guessing: if this doesn't match, the browser is running a cached old
 // app.js and any "the fix didn't work" report is about the old file. Bump
 // together with the ?v= in index.html.
-const BUILD_STAMP = '2026-08-09-9';
+const BUILD_STAMP = '2026-08-09-10';
 document.getElementById('buildStamp').textContent = BUILD_STAMP;
 
 /* =========================================================================
@@ -2548,6 +2548,134 @@ function sortCandidates(candidates, sortKey) {
 
 // Per-option hints. Runs on the handful of rows actually shown, so it is
 // redone after each re-sort instead of for hundreds of candidates upfront.
+/* =========================================================================
+ * Spar-Berater: Kompromisse finden und beziffern.
+ *
+ * Der Spar-Trick ist kein Bahn-Sonderfall, sondern ein Prinzip: fast jede
+ * Ersparnis kostet etwas anderes - Zeit, einen Umstieg, einen anderen Tag,
+ * eine andere Gattung. Statt nur den billigsten Treffer zu zeigen, wird hier
+ * benannt, *was* man wofuer eintauscht: "1h spaeter spart 100 EUR" ist eine
+ * Entscheidung, "es gibt auch 100 EUR guenstiger" ist bloss eine Zahl.
+ *
+ * Die Schwelle waechst mit der Last. Eine Stunde spaeter loszufahren ist
+ * eine Kleinigkeit, ein anderer Reisetag nicht - deshalb muss der andere Tag
+ * deutlich mehr sparen, um ueberhaupt vorgeschlagen zu werden. Sonst
+ * ertraenkt man den Nutzer in Vorschlaegen, die er ohnehin ablehnt.
+ * ===================================================================== */
+const SAVING_RULES = {
+  // Mindestersparnis je zusaetzlicher Stunde Reise-/Wartezeit, und ein
+  // Sockelbetrag, unter dem sich nichts lohnt.
+  perExtraHour: 5,
+  floor: 5,
+  // Ein anderer Reisetag ist eine echte Umstellung, kein Detail.
+  otherDay: 15,
+  // Jeder zusaetzliche Umstieg kostet Nerven und Verspaetungsrisiko.
+  perExtraTransfer: 8,
+};
+
+const MODE_LABEL = { flight: 'Flug', train: 'Bahn', bus: 'Bus' };
+
+// Lohnt sich der Tausch? `hours` = Mehrzeit, `transfers` = Mehr-Umstiege,
+// `otherDay` = anderer Reisetag.
+function savingIsWorthIt(saving, { hours = 0, transfers = 0, otherDay = false }) {
+  let needed = SAVING_RULES.floor;
+  if (hours > 0) needed = Math.max(needed, hours * SAVING_RULES.perExtraHour);
+  if (transfers > 0) needed = Math.max(needed, transfers * SAVING_RULES.perExtraTransfer);
+  if (otherDay) needed = Math.max(needed, SAVING_RULES.otherDay);
+  return saving >= needed;
+}
+
+function cheapest(list) {
+  return list.reduce((a, b) => (b.price < a.price ? b : a));
+}
+
+/**
+ * Spar-Vorschlaege fuer eine Option, aus den bereits geladenen Angeboten -
+ * ohne zusaetzliche Abfragen. Jeder Vorschlag nennt Ersparnis *und* Preis.
+ */
+function savingsTips(candidate, route, pools) {
+  const primary = candidate.offers[0];
+  if (!primary || primary.priceKnown === false) return [];
+  const tips = [];
+  const cur = primary.currency;
+  const day = isoDay(primary.depart);
+
+  // Nur Angebote, die auch die eigenen Vorgaben erfuellen - sonst schlaegt
+  // die App eine Zeit vor, die der Nutzer selbst ausgeschlossen hat.
+  const usable = (list) => (list || []).filter(
+    o => o.priceKnown !== false && o.price < primary.price
+         && meetsTransportPrefs(o, route.transportPrefs));
+
+  const samePool = usable((pools && pools[primary.mode]) || []);
+
+  // --- 1. Andere Uhrzeit am selben Tag --------------------------------
+  const sameDay = samePool.filter(o => isoDay(o.depart) === day);
+  if (sameDay.length) {
+    const best = cheapest(sameDay);
+    const saving = round2(primary.price - best.price);
+    const shift = round1(Math.abs(best.depart - primary.depart) / 3600000);
+    const later = best.depart > primary.depart;
+    // Eine andere Abfahrtszeit am selben Tag ist die kleinste Umstellung -
+    // die Wartezeit zaehlt hier trotzdem als Last.
+    if (savingIsWorthIt(saving, { hours: shift })) {
+      tips.push(`🕐 ${shift}h ${later ? 'später' : 'früher'} (${fmtHM(best.depart)} statt ${
+        fmtHM(primary.depart)}) spart ${saving} ${cur} – dann ${best.price.toFixed(2)} ${cur}.`);
+    }
+  }
+
+  // --- 2. Anderer Reisetag im gewaehlten Zeitraum ----------------------
+  const otherDays = samePool.filter(o => isoDay(o.depart) !== day);
+  if (otherDays.length) {
+    const best = cheapest(otherDays);
+    const saving = round2(primary.price - best.price);
+    if (savingIsWorthIt(saving, { otherDay: true })) {
+      tips.push(`📅 Am ${fmtDay(best.depart)} statt ${fmtDay(primary.depart)} spart ${
+        saving} ${cur} – dann ${best.price.toFixed(2)} ${cur}.`);
+    }
+  }
+
+  // --- 3. Andere Gattung ----------------------------------------------
+  // Der Klassiker: der Flug kostet 180, die Bahn 60 und braucht drei
+  // Stunden laenger. Das ist eine Abwaegung, keine Selbstverstaendlichkeit -
+  // also wird beides genannt.
+  for (const [mode, list] of Object.entries(pools || {})) {
+    if (mode === primary.mode || !MODE_LABEL[mode]) continue;
+    const sameOrNearby = usable(list).filter(o => isoDay(o.depart) === day);
+    if (!sameOrNearby.length) continue;
+    const best = cheapest(sameOrNearby);
+    const saving = round2(primary.price - best.price);
+    const extraHours = (best.durationHours != null && primary.durationHours != null)
+      ? round1(best.durationHours - primary.durationHours) : 0;
+    if (savingIsWorthIt(saving, { hours: Math.max(extraHours, 0) })) {
+      const timePart = extraHours > 0 ? `, dauert ${extraHours}h länger`
+        : (extraHours < 0 ? `, sogar ${Math.abs(extraHours)}h schneller` : '');
+      tips.push(`🔄 Mit ${MODE_LABEL[mode]} statt ${MODE_LABEL[primary.mode]} ${
+        best.price.toFixed(2)} ${cur} – spart ${saving} ${cur}${timePart}.`);
+    }
+  }
+
+  // --- 4. Ein Umstieg mehr, dafuer guenstiger --------------------------
+  const withMoreStops = samePool.filter(
+    o => isoDay(o.depart) === day && o.stops > primary.stops);
+  if (withMoreStops.length) {
+    const best = cheapest(withMoreStops);
+    const saving = round2(primary.price - best.price);
+    const extraStops = best.stops - primary.stops;
+    const extraHours = (best.durationHours != null && primary.durationHours != null)
+      ? Math.max(round1(best.durationHours - primary.durationHours), 0) : 0;
+    if (savingIsWorthIt(saving, { transfers: extraStops, hours: extraHours })) {
+      tips.push(`🔁 Mit ${extraStops} Umstieg${extraStops > 1 ? 'en' : ''} mehr${
+        extraHours > 0 ? ` und ${extraHours}h länger` : ''} nur ${
+        best.price.toFixed(2)} ${cur} – spart ${saving} ${cur}.`);
+    }
+  }
+
+  // Mehr als drei Vorschlaege liest niemand; die groesste Ersparnis zuerst
+  // waere schoener, aber die Reihenfolge oben ist bereits die nach
+  // steigender Zumutung - und die ist fuer die Entscheidung nuetzlicher.
+  return tips.slice(0, 3);
+}
+
 async function addRecommendations(route, options, pools) {
   const rates = await getRatesPerEur();
   for (const c of options) {
@@ -2567,19 +2695,7 @@ async function addRecommendations(route, options, pools) {
     }
 
     if (['flight', 'train', 'bus'].includes(primary.mode)) {
-      // Only compare against offers that also satisfy the route's own
-      // transport constraints (esp. the depart-time window) - otherwise
-      // this could suggest a time the user already said doesn't work.
-      const eligiblePool = samePool.filter(o => o.priceKnown !== false && meetsTransportPrefs(o, route.transportPrefs));
-      const sameDayLater = eligiblePool.filter(o =>
-        isoDay(o.depart) === isoDay(primary.depart) && o.depart > primary.depart && o.price < primary.price
-      );
-      if (sameDayLater.length) {
-        const best = sameDayLater.reduce((a, b) => (b.price < a.price ? b : a));
-        const hoursLater = round1((best.depart - primary.depart) / 3600000);
-        const savings = round2(primary.price - best.price);
-        c.recommendations.push(`🕐 ${hoursLater}h später (${fmtHM(best.depart)} statt ${fmtHM(primary.depart)}) spart ${savings} ${primary.currency}.`);
-      }
+      c.recommendations.push(...savingsTips(c, route, pools));
     }
 
     if (primary.bagFee > 0) {
