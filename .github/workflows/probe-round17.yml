@@ -1,0 +1,114 @@
+name: "Probe round 17 - welches Preisfeld ist der Preis?"
+
+# Runde 16 hat bewiesen: der Sandbox-Key liefert echte, variierende Raten.
+# Offen ist die Frage danach - LiteAPI liefert MEHRERE Betraege pro Rate
+# (Netto-Einkauf, Retail, empfohlener Verkaufspreis, mit/ohne Steuern). Wer
+# den falschen anzeigt, zeigt einen Preis, den der Nutzer nirgends bekommt.
+#
+# Runde 16 hat den Betrag mit einem ODER gelesen ("offerRetailRate ODER
+# suggestedSellingPrice") - es steht also nicht einmal fest, welches der
+# beiden Felder geantwortet hat. Genau diese Art Rateschluss hat beim
+# Bahn-Server (sollzeit) Stunden gekostet: Feldnamen gelesen, aber nie
+# hineingesehen.
+#
+# Deshalb hier: EINE Rate, EIN Hotel, alle Betraege nebeneinander, roh und
+# vollstaendig ausgegeben. Danach ist das Feldformat Fakt, nicht Annahme.
+#
+# Wird nach der Auswertung geloescht.
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Preisfelder einer einzelnen Rate auslesen
+        env:
+          LITEAPI_KEY: ${{ secrets.LITEAPI_KEY }}
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.error, urllib.request
+          from datetime import date, timedelta
+
+          KEY = os.environ.get("LITEAPI_KEY", "")
+          if not KEY:
+              print("Kein LITEAPI_KEY gesetzt.")
+              raise SystemExit(0)
+
+          BASE = "https://api.liteapi.travel/v3.0"
+
+          def call(url, method="GET", body=None):
+              headers = {"Accept": "application/json", "X-API-Key": KEY,
+                         "User-Agent": "HackYourTrip-Probe/1.0"}
+              data = None
+              if body is not None:
+                  data = json.dumps(body).encode()
+                  headers["Content-Type"] = "application/json"
+              req = urllib.request.Request(url, data=data, headers=headers, method=method)
+              try:
+                  with urllib.request.urlopen(req, timeout=45) as r:
+                      return r.status, json.loads(r.read().decode("utf-8", "replace"))
+              except urllib.error.HTTPError as e:
+                  return e.code, {"_raw": e.read().decode("utf-8", "replace")[:400]}
+
+          start = date.today() + timedelta(days=30)
+          status, data = call(f"{BASE}/hotels/rates", "POST", {
+              "hotelIds": ["lp394f5"],          # Melia Berlin, aus Runde 16
+              "occupancies": [{"adults": 2}],
+              "currency": "EUR",
+              "guestNationality": "DE",
+              "checkin": start.isoformat(),
+              "checkout": (start + timedelta(days=1)).isoformat(),
+          })
+          print("HTTP", status, "| Anreise", start, "| 1 Nacht, 2 Erwachsene")
+          eintraege = (data or {}).get("data") or []
+          if not eintraege:
+              print(json.dumps(data)[:600])
+              raise SystemExit(0)
+
+          zimmer = (eintraege[0].get("roomTypes") or [])
+          print("Zimmertypen in der Antwort:", len(zimmer))
+          if not zimmer:
+              raise SystemExit(0)
+
+          erstes = zimmer[0]
+          print("\n=== Schluessel eines Zimmertyps ===")
+          print(" ", sorted(erstes.keys()))
+
+          # Die langen Buchungs-Token verdecken sonst alles Lesbare.
+          def gekuerzt(obj, tiefe=0):
+              if isinstance(obj, dict):
+                  return {k: gekuerzt(v, tiefe + 1) for k, v in obj.items()
+                          if k not in ("offerId", "rateId", "mappedRoomId")}
+              if isinstance(obj, list):
+                  return [gekuerzt(v, tiefe + 1) for v in obj[:2]]
+              if isinstance(obj, str) and len(obj) > 80:
+                  return obj[:60] + f"...(+{len(obj)-60} Zeichen)"
+              return obj
+
+          print("\n=== Ein Zimmertyp vollstaendig (Token gekuerzt) ===")
+          print(json.dumps(gekuerzt(erstes), indent=2, ensure_ascii=False)[:4000])
+
+          # --- Die eigentliche Frage: welcher Betrag ist welcher? -----------
+          print("\n=== Alle Betraege dieses Zimmertyps nebeneinander ===")
+          def betraege(obj, pfad=""):
+              if isinstance(obj, dict):
+                  for k, v in obj.items():
+                      if k in ("offerId", "rateId"):
+                          continue
+                      yield from betraege(v, f"{pfad}.{k}" if pfad else k)
+              elif isinstance(obj, list):
+                  for i, v in enumerate(obj[:3]):
+                      yield from betraege(v, f"{pfad}[{i}]")
+              elif isinstance(obj, (int, float)) and not isinstance(obj, bool):
+                  if 0 < float(obj) < 100000:
+                      yield pfad, float(obj)
+
+          for pfad, wert in betraege(erstes):
+              print(f"  {pfad:55s} = {wert}")
+
+          print("\n  Erwartet: ein Netto-/Einkaufsbetrag, ein Retail-Betrag und")
+          print("  ggf. ein empfohlener Verkaufspreis. Angezeigt werden darf nur")
+          print("  der, den der Reisende tatsaechlich zahlt.")
+          PY
