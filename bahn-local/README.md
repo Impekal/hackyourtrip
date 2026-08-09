@@ -110,6 +110,54 @@ selben Netz benutzen. Im Heim-WLAN ist das unbedenklich (er kann nur
 Fahrpläne und Preise abfragen), im Café- oder Hotel-WLAN würde ich es
 lassen.
 
+## Wofür brauche ich den Server überhaupt noch?
+
+Nur für **Bahnpreise**. Alles andere läuft über den Cloudflare-Worker und
+funktioniert überall, auch wenn der Laptop aus ist:
+
+| | Braucht den lokalen Server? |
+|---|---|
+| Bahnpreise (DB-Sparpreise) | **ja** – nur eine Wohn-IP kommt an der DB vorbei |
+| Flüge, Bus, **Hotels**, Deals, KI-Empfehlung | nein |
+| Fahrpläne (Bahn/Bus ohne Preis) | nein |
+
+Heißt praktisch: Für „mal eben Flüge und Hotels vergleichen" reicht die
+github.io-Seite auf dem Handy. Der Laptop muss nur an, wenn du **Bahnpreise**
+sehen willst.
+
+## Kann ich das Terminal-Fenster schließen?
+
+**So wie gestartet: nein.** Der Server läuft im Vordergrund dieses Fensters –
+schließt du es, ist er weg. Das Fenster darf aber in den Hintergrund, und du
+kannst am Rechner normal weiterarbeiten.
+
+**Wenn er ohne offenes Fenster laufen soll**, einmal so starten statt wie
+oben:
+
+```bash
+nohup python3 ~/bahn-server.py --lan > ~/bahn-server.log 2>&1 &
+```
+
+Dann kannst du das Terminal schließen; der Server läuft weiter. Was die
+Teile bedeuten: `nohup` = „nicht beenden, wenn das Fenster zugeht",
+`&` = „im Hintergrund", der Rest schreibt die Ausgabe in eine Datei, damit
+sie bei Problemen nachlesbar bleibt (`~/bahn-server.log`).
+
+Stoppen geht dann nicht mehr mit `Strg`+`C`, sondern mit:
+
+```bash
+pkill -f bahn-server.py
+```
+
+**Zwei Dinge bleiben trotzdem:**
+
+- **Der Laptop darf nicht schlafen.** Im Ruhezustand antwortet der Server
+  nicht – für das Handy sieht das aus, als wäre er aus. Am Mac hilft
+  `caffeinate -s` in einem zweiten Terminal, oder in den Systemeinstellungen
+  den Ruhezustand bei Netzbetrieb abschalten.
+- **Nach einem Neustart des Rechners ist er weg** und muss neu gestartet
+  werden.
+
 ## Später: rund um die Uhr (für Preisalarme)
 
 Dieser Server liefert Preise, solange dein Rechner an ist. Für nächtliche
