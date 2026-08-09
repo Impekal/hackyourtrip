@@ -4,7 +4,7 @@
 // guessing: if this doesn't match, the browser is running a cached old
 // app.js and any "the fix didn't work" report is about the old file. Bump
 // together with the ?v= in index.html.
-const BUILD_STAMP = '2026-08-09-2';
+const BUILD_STAMP = '2026-08-09-3';
 document.getElementById('buildStamp').textContent = BUILD_STAMP;
 
 /* =========================================================================
@@ -841,27 +841,74 @@ async function bahnLocalJson(path, params) {
   } finally { clearTimeout(timer); }
 }
 
-async function bahnLocalResolveId(name) {
+async function bahnLocalResolveStop(name) {
   const list = await bahnLocalJson('/orte', new URLSearchParams({ q: name }));
   if (!Array.isArray(list) || !list.length) return null;
   const needle = (name || '').trim().toLowerCase();
   const exact = list.find(o => (o.name || '').trim().toLowerCase() === needle);
-  return (exact || list[0]).id || null;
+  const stop = exact || list[0];
+  return stop && stop.id ? stop : null;
+}
+
+/* --- Deutschland-Ticket auf dem Live-Pfad -------------------------------
+ * Auf dem Fahrplan-Pfad (Transitous) heissen die Gattungen REGIONAL_RAIL &
+ * Co.; die DB benennt dieselben Dinge anders. Deshalb hier eine eigene
+ * Zuordnung - mit derselben Dreiwertigkeit: abgedeckt / nicht abgedeckt /
+ * nicht entscheidbar. Alles Unbekannte landet bewusst beim dritten Fall.
+ * --------------------------------------------------------------------- */
+const D_TICKET_DB_PRODUCTS = ['REGIONAL', 'SBAHN', 'UBAHN', 'TRAM', 'BUS'];
+// Definitiv nicht abgedeckt. ANRUFPFLICHTIG (Anrufsammeltaxi) steht in
+// keiner der beiden Listen: dort gelten je nach Verbund eigene Regeln, also
+// bleibt es unentscheidbar statt geraten.
+const D_TICKET_DB_EXCLUDED = ['ICE', 'EC_IC', 'IR', 'SCHIFF'];
+
+/**
+ * Deutsche Station? Zwei unabhaengige Merkmale muessen zusammenpassen: der
+ * UIC-Laenderschluessel `U=80` in der Orts-ID und die mit 80 beginnende
+ * EVA-Nummer. Fehlt oder widerspricht eines, lautet die Antwort "nein" -
+ * und es gibt keine D-Ticket-Aussage. Die Richtung des Irrtums ist bewusst
+ * gewaehlt: lieber ein fehlender Hinweis als ein falsches "0 EUR".
+ */
+function isGermanDbStop(stop) {
+  if (!stop) return false;
+  const byCountry = /(^|@)U=80(@|$)/.test(stop.id || '');
+  const byEva = /^80\d+$/.test(String(stop.extId || ''));
+  return byCountry && byEva;
+}
+
+function dbTicketCoverage(legs, fromStop, toStop) {
+  if (!isGermanDbStop(fromStop) || !isGermanDbStop(toStop)) return null;
+  const products = (legs || []).map(l => l && l.product).filter(Boolean);
+  if (!products.length) return null;
+  if (products.some(p => D_TICKET_DB_EXCLUDED.includes(p))) return false;
+  return products.every(p => D_TICKET_DB_PRODUCTS.includes(p)) ? true : null;
 }
 
 // One trimmed DB connection -> an Offer in this app's shape. A price the DB
 // did not name stays priceKnown:false - never a fabricated 0.
-function bahnConnectionToOffer(conn, route) {
+function bahnConnectionToOffer(conn, route, stops = {}) {
   if (!conn || !conn.depart) return null;
   const depart = new Date(conn.depart);
   if (isNaN(depart)) return null;
-  const priceKnown = typeof conn.price === 'number';
+  const dbPrice = typeof conn.price === 'number' ? conn.price : null;
+  const covered = dbTicketCoverage(conn.legs, stops.origin, stops.destination);
+  // Hier zahlt sich der Live-Preis doppelt aus: bei einer abgedeckten
+  // Verbindung wissen wir jetzt nicht nur, dass sie mit dem D-Ticket nichts
+  // kostet, sondern auch, was sie ohne kosten wuerde - also die tatsaechliche
+  // Ersparnis, in Euro.
+  const freeWithDTicket = covered === true && route.deutschlandticket === true;
+  const priceKnown = freeWithDTicket || dbPrice !== null;
   const lineLabel = (conn.legs || []).map(l => l.line).filter(Boolean).join(' → ');
   return {
     mode: 'train',
     isMock: false,
     priceKnown,
-    price: priceKnown ? conn.price : 0,
+    price: freeWithDTicket ? 0 : (dbPrice !== null ? dbPrice : 0),
+    dTicketCovered: covered,
+    // Der Normalpreis bleibt erhalten, auch wenn er wegen des Tickets nicht
+    // gezahlt wird - sonst liesse sich die Ersparnis nicht mehr beziffern.
+    priceWithoutDTicket: covered === true ? dbPrice : null,
+    priceNote: freeWithDTicket ? 'im Deutschland-Ticket enthalten' : '',
     currency: conn.currency || route.currency,
     // A real, bookable fare from bahn.de - the deep link goes to the booking.
     bookingSite: 'bahn.de',
@@ -886,14 +933,15 @@ function bahnConnectionToOffer(conn, route) {
 
 async function fetchLocalBahnOffers(route) {
   if (!(await bahnLocalReachable())) return null;
-  let fromId, toId;
+  let fromStop, toStop;
   try {
-    [fromId, toId] = await Promise.all([
-      bahnLocalResolveId(route.origin),
-      bahnLocalResolveId(route.destination),
+    [fromStop, toStop] = await Promise.all([
+      bahnLocalResolveStop(route.origin),
+      bahnLocalResolveStop(route.destination),
     ]);
   } catch (e) { return null; }
-  if (!fromId || !toId) return null;
+  if (!fromStop || !toStop) return null;
+  const fromId = fromStop.id, toId = toStop.id;
 
   const offers = [];
   const seen = new Set();
@@ -906,7 +954,7 @@ async function fetchLocalBahnOffers(route) {
       }));
     } catch (e) { continue; }
     for (const conn of (data && data.connections) || []) {
-      const offer = bahnConnectionToOffer(conn, route);
+      const offer = bahnConnectionToOffer(conn, route, { origin: fromStop, destination: toStop });
       if (!offer) continue;
       if (isoDay(offer.depart) !== isoDay(day)) continue; // rolled past midnight
       const key = offer.depart.toISOString() + '|' + offer.lineLabel;
@@ -2317,9 +2365,13 @@ function offerChips(offer) {
     // Only stated when it is decided. `null` means "not decidable" and gets
     // no chip at all - an absent claim, not a negative one.
     if (offer.dTicketCovered === true) {
-      chips.push(offer.priceKnown
-        ? '🎫 im Deutschland-Ticket enthalten'
-        : '🎫 mit Deutschland-Ticket 0 €');
+      // Mit Live-Preis laesst sich die Ersparnis beziffern statt nur die
+      // Abdeckung zu behaupten - genau das macht den Hinweis brauchbar.
+      const saving = typeof offer.priceWithoutDTicket === 'number'
+        ? ` (spart ${offer.priceWithoutDTicket.toFixed(2)} ${offer.currency})` : '';
+      chips.push(offer.priceNote
+        ? `🎫 im Deutschland-Ticket enthalten${saving}`
+        : `🎫 mit Deutschland-Ticket 0 €${saving}`);
     }
     chips.push(...baggageChips(offer));
     if (offer.punctualityPct != null) chips.push(`${offer.punctualityPct}% pünktlich`);

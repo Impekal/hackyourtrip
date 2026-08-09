@@ -834,10 +834,28 @@ spaeter, ohne Code-Aenderung). Auch der mixed_return-Zugschenkel laeuft jetzt
 ueber `groundOffersFor`, bekommt also live-Preise.
 Tests: `ui_bahn_live.py` (9 checks, beide Faelle - Server an *und* aus).
 
+**Runde 16 (09.08.2026) - D-Ticket und Live-Preis zusammengefuehrt.**
+Jetzt gilt die D-Ticket-Logik auch fuer live bepreiste Verbindungen - und
+wird dort sogar *besser*: weil der Normalpreis bekannt ist, steht nicht mehr
+nur "abgedeckt" da, sondern die Ersparnis in Euro
+("🎫 mit Deutschland-Ticket 0 € (spart 29,90 EUR)").
+
+Eigene Zuordnung noetig, weil die DB ihre Gattungen anders benennt als
+Transitous: `REGIONAL/SBAHN/UBAHN/TRAM/BUS` abgedeckt,
+`ICE/EC_IC/IR/SCHIFF` nicht, alles andere (u.a. `ANRUFPFLICHTIG`, wo je
+Verbund eigene Regeln gelten) **unentscheidbar** - siehe
+`dbTicketCoverage()` in app.js, dieselbe Dreiwertigkeit wie im
+Fahrplan-Pfad.
+
+Deutschland-Erkennung ueber **zwei** Merkmale, die beide stimmen muessen:
+UIC-Laenderschluessel `U=80` in der Orts-ID *und* eine mit 80 beginnende
+EVA-Nummer (beides aus der Live-Antwort abgelesen). Fehlt oder widerspricht
+eines, gibt es keine Aussage. Die Richtung des Irrtums ist bewusst gewaehlt:
+lieber ein fehlender Hinweis als ein falsches "0 EUR". Tests dazu in
+`ui_dticket_live.py` (23 checks), inklusive der teuren Irrtuemer - ICE wird
+nicht kostenlos, Auslandsfahrt wird nicht kostenlos.
+
 **Offen / Verfeinerungen (nicht dringend):**
-- D-Ticket-Abdeckung wird im Live-Pfad noch nicht gesetzt (nur im
-  Transitous-Pfad). Wenn Live-Preise da sind, fehlt der 0-EUR-Hinweis fuers
-  D-Ticket. Zusammenfuehren waere die naechste Ausbaustufe.
 - Bestpreissuche (`/angebote/tagesbestpreis`) ist im Server noch nicht als
   Route; `/fahrplan` liefert bereits `angebotsPreis` pro Verbindung, das deckt
   den Kernbedarf.
