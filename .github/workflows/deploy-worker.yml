@@ -37,6 +37,7 @@ jobs:
             ${{ secrets.GEMINI_API_KEY != '' && 'GEMINI_API_KEY' || '' }}
             ${{ secrets.GROQ_API_KEY != '' && 'GROQ_API_KEY' || '' }}
             ${{ secrets.MISTRAL_API_KEY != '' && 'MISTRAL_API_KEY' || '' }}
+            ${{ secrets.LITEAPI_KEY != '' && 'LITEAPI_KEY' || '' }}
             ${{ vars.AI_MODEL != '' && 'AI_MODEL' || '' }}
         env:
           TRAVELPAYOUTS_TOKEN: ${{ secrets.TRAVELPAYOUTS_TOKEN }}
@@ -47,6 +48,10 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
+          # Hotelpreise (LiteAPI). Ohne diesen Schluessel bleibt der
+          # Hotel-Modus wie bisher bei Anbieterlinks - es gibt sonst keine
+          # freie Quelle fuer Hotelpreise.
+          LITEAPI_KEY: ${{ secrets.LITEAPI_KEY }}
           # Optional override if a provider retires the default model name.
           AI_MODEL: ${{ vars.AI_MODEL }}
 
