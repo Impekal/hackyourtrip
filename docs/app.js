@@ -4,7 +4,7 @@
 // guessing: if this doesn't match, the browser is running a cached old
 // app.js and any "the fix didn't work" report is about the old file. Bump
 // together with the ?v= in index.html.
-const BUILD_STAMP = '2026-08-09-7';
+const BUILD_STAMP = '2026-08-09-8';
 document.getElementById('buildStamp').textContent = BUILD_STAMP;
 
 /* =========================================================================
@@ -1115,8 +1115,27 @@ async function groundOffersFor(route, mode) {
     return (await fetchRealTransitOffers(route, 'train')) || [];
   }
   const priced = mode === 'bus' ? await fetchFlixbusOffers(route) : [];
-  const timetable = await fetchRealTransitOffers(route, mode);
-  return [...priced, ...(timetable || [])];
+  let timetable = (await fetchRealTransitOffers(route, mode)) || [];
+
+  // Der Fahrplan kennt FlixBus-Fahrten auch - aber ohne Preis. Haben wir
+  // fuer FlixBus bereits echte Preise, sind diese Doppelgaenger nur
+  // Rauschen: derselbe Anbieter stand zweimal in der Liste, einmal mit und
+  // einmal ohne Preis, und die preislosen verdraengten die brauchbaren.
+  // Fahrten *anderer* Fernbus-Anbieter bleiben - dort ist der Fahrplan die
+  // einzige Quelle, die es gibt.
+  if (mode === 'bus' && priced.length) {
+    timetable = timetable.filter(o => !isFlixbusOperated(o));
+  }
+  return [...priced, ...timetable];
+}
+
+// Erkennt eine Fahrplan-Fahrt, die FlixBus selbst faehrt: am Betreibernamen
+// aus dem Feed ("FlixBus-eu", "Flixbus DACH") oder an der Linie
+// ("FlixBus N160"). Bewusst nur diese eine Marke - alles andere ist ein
+// anderer Anbieter und muss stehen bleiben.
+function isFlixbusOperated(offer) {
+  const haystack = `${offer.bookingSite || ''} ${offer.lineLabel || ''}`.toLowerCase();
+  return haystack.includes('flixbus') || haystack.includes('flix bus');
 }
 
 async function fetchGroundOffersWithNeighbours(route, mode) {
