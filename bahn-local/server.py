@@ -163,13 +163,20 @@ def _first(d: dict, *keys):
 def _leg_time(leg: dict, *keys):
     """Eine Zeitangabe aus einem Abschnitt lesen.
 
-    Das Feld ist mal ein ISO-String, mal ein Objekt mit einem Zeit-Unterfeld –
-    beide Formen werden auf den String reduziert.
+    Gemessen an einer echten Antwort sieht das so aus:
+
+        "abfahrt": {"sollzeit": "2026-09-15T08:36:00"}
+
+    Der Zeitpunkt steckt also in einem Objekt, und der Schlüssel heißt
+    `sollzeit` – nicht `zeit`. `ezZeit` ist die Echtzeit-Prognose, wo
+    vorhanden; bei einer Suche Wochen im Voraus gibt es sie nicht, deshalb
+    ist die Sollzeit der verlässliche Anker. Die übrigen Namen bleiben als
+    Auffangnetz stehen, falls die DB eine Variante liefert.
     """
     value = _first(leg, *keys)
     if isinstance(value, dict):
-        return _first(value, "zeit", "zeitpunkt", "abfahrtsZeitpunkt",
-                      "ankunftsZeitpunkt")
+        return _first(value, "sollzeit", "ezZeit", "zeit", "zeitpunkt",
+                      "abfahrtsZeitpunkt", "ankunftsZeitpunkt")
     return value
 
 
@@ -255,7 +262,20 @@ def get_fahrplan(from_id: str, to_id: str, when: str, klasse: str) -> object:
     }
     data = _curl("POST", f"{BAHN_BASE}/angebote/fahrplan", body)
     conns = (data or {}).get("verbindungen") or []
-    result = {"connections": [_trim_connection(c) for c in conns]}
+    trimmed = [_trim_connection(c) for c in conns]
+
+    # Ein Angebot ohne Abfahrtszeit wird von der App verworfen - der Preis
+    # ist dann da, aber unbrauchbar, und in der Oberfläche sieht es aus wie
+    # "keine Live-Preise". Genau das ist einmal passiert, weil der
+    # Zeit-Schlüssel geraten statt gelesen war. Deshalb wird es hier laut:
+    # lieber eine Warnung im Terminal als stilles Verschwinden.
+    if conns and not any(c["depart"] for c in trimmed):
+        sample = (conns[0].get("verbindungsAbschnitte") or [{}])[0]
+        print("  ⚠️  Keine Abfahrtszeit lesbar - die App wird diese Angebote "
+              "verwerfen. Abschnitt-Felder:", sorted(sample.keys())[:12],
+              file=sys.stderr)
+
+    result = {"connections": trimmed}
     _cache[key] = (time.time(), result)
     return result
 

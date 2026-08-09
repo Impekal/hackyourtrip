@@ -23,11 +23,15 @@ REAL_SHAPE = {
             "verbindungsDauerInSeconds": 14940,
             "angebotsPreis": {"betrag": 39.99, "waehrung": "EUR", "mwst": []},
             "angebotsPreisKlasse": "KLASSE_2",
+            # Echte Form aus einer Live-Antwort: die Zeit steckt in einem
+            # Objekt unter "sollzeit" - nicht als blanker String, und nicht
+            # unter "zeit". Genau diese Annahme war einmal falsch geraten,
+            # mit dem Ergebnis, dass jedes Angebot verworfen wurde.
             "verbindungsAbschnitte": [{
                 "abfahrtsOrt": "Berlin Hbf",
                 "ankunftsOrt": "München Hbf",
-                "abfahrt": "2026-09-15T08:00:00",
-                "ankunft": "2026-09-15T12:09:00",
+                "abfahrt": {"sollzeit": "2026-09-15T08:00:00"},
+                "ankunft": {"sollzeit": "2026-09-15T12:09:00"},
                 "verkehrsmittel": {"produktGattung": "ICE", "name": "ICE 1005",
                                     "richtung": "München Hbf"},
             }],
@@ -40,10 +44,12 @@ REAL_SHAPE = {
             "angebotsPreis": {},
             "verbindungsAbschnitte": [
                 {"abfahrtsOrt": "Berlin Hbf", "ankunftsOrt": "Leipzig Hbf",
-                 "abfahrt": "2026-09-15T09:00:00", "ankunft": "2026-09-15T10:15:00",
+                 "abfahrt": {"sollzeit": "2026-09-15T09:00:00"},
+                 "ankunft": {"sollzeit": "2026-09-15T10:15:00"},
                  "verkehrsmittel": {"produktGattung": "ICE", "name": "ICE 1701"}},
                 {"abfahrtsOrt": "Leipzig Hbf", "ankunftsOrt": "München Hbf",
-                 "abfahrt": "2026-09-15T10:30:00", "ankunft": "2026-09-15T14:40:00",
+                 "abfahrt": {"sollzeit": "2026-09-15T10:30:00"},
+                 "ankunft": {"sollzeit": "2026-09-15T14:40:00"},
                  "verkehrsmittel": {"produktGattung": "ICE", "name": "ICE 1005"}},
             ],
         },
@@ -84,17 +90,34 @@ check("mehrere Abschnitte -> Abfahrt zuerst, Ankunft zuletzt",
       and second["arrive"] == "2026-09-15T14:40:00", str(second))
 
 
-# --- Zeitfeld als Objekt statt String (Robustheit) -------------------------
+# Der Fehler, der die Live-Preise unsichtbar machte: fehlt die Zeit, wirft
+# die App das ganze Angebot weg - der Preis war da, aber unbrauchbar.
+check("Abfahrtszeit ist gesetzt, nicht None", first["depart"] is not None, str(first))
+check("Ankunftszeit ist gesetzt, nicht None", first["arrive"] is not None, str(first))
+
+ez = server._trim_connection({
+    "umstiegsAnzahl": 0,
+    "verbindungsAbschnitte": [{
+        "abfahrtsOrt": "A", "ankunftsOrt": "B",
+        "abfahrt": {"sollzeit": "2026-09-15T08:00:00", "ezZeit": "2026-09-15T08:06:00"},
+        "ankunft": {"sollzeit": "2026-09-15T09:00:00"},
+        "verkehrsmittel": {"name": "RE 2"},
+    }],
+})
+check("Sollzeit wird bevorzugt (bei Zukunftssuchen gibt es keine Echtzeit)",
+      ez["depart"] == "2026-09-15T08:00:00", str(ez))
+
+# --- Zeitfeld als blanker String (Robustheit) ------------------------------
 obj_time = server._trim_connection({
     "umstiegsAnzahl": 0,
     "verbindungsAbschnitte": [{
         "abfahrtsOrt": "A", "ankunftsOrt": "B",
-        "abfahrt": {"zeit": "2026-09-15T07:00:00"},
+        "abfahrt": "2026-09-15T07:00:00",
         "ankunft": {"zeitpunkt": "2026-09-15T08:00:00"},
         "verkehrsmittel": {"name": "RE 1"},
     }],
 })
-check("Zeit als Objekt wird ebenso gelesen",
+check("blanker String und andere Objekt-Schluessel gehen ebenso",
       obj_time["depart"] == "2026-09-15T07:00:00"
       and obj_time["arrive"] == "2026-09-15T08:00:00", str(obj_time))
 
