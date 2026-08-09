@@ -777,8 +777,40 @@ bewusstes Umgehen zu lösen. **Nicht erneut aufnehmen**, solange sich an der
 Sperrpraxis nichts ändert; die Route bleibt im Worker, damit ein künftiger
 Test eine Zeile statt einer Neuentwicklung ist.
 
-Weiterhin offen bleibt der **Preis** für Bahn-Fernverkehr. Falls die DB je
-einen offiziellen Zugang öffnet, wäre das die Stelle.
+**Runde 14 (09.08.2026) - der Durchbruch: Heim-IP kommt durch.**
+Der Server-Weg ist tot (Cloudflare, GitHub, Ionos-VPS alle 403 OPS_BLOCKED -
+die Sperre haengt an der Rechenzentrums-IP, nicht an der Anfrage). Aber vom
+**MacBook des Nutzers im Heim-WLAN** liefert `int.bahn.de/web/api/angebote/fahrplan`
+auf ein leeres `{}` ein **HTTP 422** (Inhalt unvollstaendig) statt 403 -
+also *angenommen und verarbeitet*. Wohn-IPs stehen nicht auf der Sperrliste.
+
+Damit ist der Weg zu echten DB-Live-Preisen: **db-vendo-client lokal beim
+Nutzer laufen lassen**, die App holt die Bahnpreise von dort. Aus dem
+Quelltext des Projekts (nicht geraten) verifiziert:
+
+- Image: `ghcr.io/public-transport/db-vendo-client`, Port 3000
+- `docker run -e DB_PROFILE=dbnav -e USER_AGENT="..." -p 3000:3000 <image>`
+- Profil `dbnav` unterstuetzt Preise, `bestprice=true` (Tagesbestpreis,
+  nach Preis sortiert) und Tickets
+- serviert ueber hafas-rest-api → Routen `/locations`, `/journeys`;
+  **CORS ist standardmaessig an**, der Browser darf `http://127.0.0.1:3000`
+  direkt lesen, kein Tunnel noetig
+- Antwort ist FPTF: `journeys[].price = {amount, currency}` (per Journey),
+  plus Legs mit Zeiten/Linien
+- Projekt-README **empfiehlt Caching** (HTTP-Proxy-Cache oder
+  cached-hafas-client) - wichtig, weil dbnav ~60 Requests/min hat
+
+**Architektur, die gebaut wird (interaktiv, MacBook):** der Browser probt
+beim Bahn-Suchen `http://127.0.0.1:3000`; erreichbar → echte Preise +
+Bestpreis, `price_known=true`; nicht erreichbar (Handy, Laptop aus) →
+unveraendert Transitous-Fahrplan + D-Ticket-Logik + Deep-Link. Nie ein
+erfundener Preis, nie ein Bruch ohne die lokale Quelle. Fuer naechtliche
+Alarme spaeter ein immer-an-Geraet (Pi) mit derselben Konfiguration.
+
+Der letzte offene Punkt vor dem Parser-Bau: eine echte Preis-Antwort von
+der Maschine des Nutzers sehen, um das Feld-Mapping final zu bestaetigen
+statt gegen die (stabile, aber ungeprueft-am-echten-Fall) FPTF-Form zu
+bauen.
 
 ## Deutschland-Ticket: der einzige echte Bahnpreis, den wir bekommen
 
