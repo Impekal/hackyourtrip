@@ -205,6 +205,57 @@ jobs:
                     preis.get("betrag"), preis.get("waehrung"))
           PY
 
+          # Hotels: die einzige lebende Quelle fuer echte Hotelraten. Geprueft
+          # wird die ganze Kette (Liste -> Raten), denn ein stiller Ausfall
+          # liesse den Modus auf Anbieterlinks zurueckfallen, ohne dass es
+          # jemand merkt. 501 heisst nur "kein LITEAPI_KEY gesetzt".
+          echo "=== /hotels/list + /hotels/rates ==="
+          python3 - "$BASE" <<'PY'
+          import json, sys, urllib.error, urllib.parse, urllib.request
+          from datetime import date, timedelta
+
+          base = sys.argv[1]
+
+          def get(path):
+              req = urllib.request.Request(f"{base}{path}",
+                                           headers={"User-Agent": "HackYourTrip-SmokeTest/1.0"})
+              try:
+                  with urllib.request.urlopen(req, timeout=45) as r:
+                      return r.status, json.load(r)
+              except urllib.error.HTTPError as e:
+                  return e.code, json.loads(e.read().decode("utf-8", "replace") or "{}")
+
+          status, data = get("/hotels/list?" + urllib.parse.urlencode(
+              {"city": "Berlin", "country": "DE", "limit": 5}))
+          print("Hotelliste:", status)
+          if status == 501:
+              print("  -> kein LITEAPI_KEY gesetzt, Hotelpreise bleiben aus. Kein Fehler.")
+              raise SystemExit(0)
+          hotels = (data or {}).get("hotels") or []
+          print("  Hotels:", len(hotels))
+          assert hotels, f"keine Hotels: {str(data)[:200]}"
+          print("  erstes:", hotels[0]["name"], "|", hotels[0].get("stars"), "Sterne")
+
+          start = date.today() + timedelta(days=30)
+          status, data = get("/hotels/rates?" + urllib.parse.urlencode({
+              "ids": ",".join(h["id"] for h in hotels[:3]),
+              "checkin": start.isoformat(),
+              "checkout": (start + timedelta(days=1)).isoformat(),
+              "adults": 1, "currency": "EUR"}))
+          print("Raten:", status)
+          offers = (data or {}).get("offers") or []
+          print("  Angebote:", len(offers))
+          assert offers, f"keine Raten: {str(data)[:200]}"
+          for o in offers:
+              # Der Gesamtpreis MUSS die nicht enthaltene Steuer enthalten -
+              # daran haengt, ob hier ein Preis oder ein Lockpreis steht.
+              assert abs(o["total"] - (o["price"] + o["extraTax"])) < 0.01, o
+              vergleich = (f"  | {o['compareSource']}: {o['compareAt']}"
+                           if o.get("compareAt") else "")
+              print(f"   {o['hotelId']}: {o['total']} {o['currency']}"
+                    f" (davon {o['extraTax']} Steuer vor Ort){vergleich}")
+          PY
+
           # Print the body, not just the status: 501 means "no AI key set"
           # (fine, the feature is optional) but 502 carries the provider's
           # actual reason - which is the only thing that makes it fixable.
