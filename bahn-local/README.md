@@ -51,6 +51,11 @@ Fahrplan und den Deutschland-Ticket-Preis – nie einen erfundenen Preis.
 
 Zum Stoppen im Terminal `Strg`+`C` drücken.
 
+**Server aktualisieren:** die App selbst frischt sich von allein auf – nur
+`bahn-server.py` nicht, denn die Datei liegt bei dir. Wenn ich am Server
+etwas ändere: `Strg`+`C`, dann dieselben drei Zeilen von oben noch einmal.
+Der `curl`-Befehl überschreibt die alte Datei.
+
 ## Kurztest, ob er wirklich Preise bekommt
 
 Bei laufendem Server ein zweites Terminal öffnen und eingeben:
@@ -152,9 +157,10 @@ und in der Oberfläche sieht das genauso aus, als liefe der Server gar nicht.
 
 Kommt die Seite dagegen von diesem Server, sind Seite und Preisabfrage
 dieselbe Herkunft: kein Mixed Content, kein CORS, keine Sonderregel. Die
-beiden App-Dateien holt der Server beim ersten Aufruf von GitHub und legt sie
-daneben in `app/` ab (beim nächsten Start ist es sofort da). Zum Aktualisieren
-den Ordner `app/` löschen.
+beiden App-Dateien holt der Server von GitHub und legt sie daneben in `app/`
+ab. Sie werden automatisch aufgefrischt (spätestens alle 15 Minuten), damit
+nicht wochenlang eine alte Fassung stehenbleibt – ist gerade kein Internet
+da, bleibt einfach die vorhandene Fassung in Betrieb.
 
 Die github.io-Seite bleibt für alles andere nutzbar (Flug, Bus, Hotel,
 Fahrplan) – nur die Bahn-Live-Preise brauchen den Aufruf über `127.0.0.1`.

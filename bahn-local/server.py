@@ -309,22 +309,25 @@ def get_fahrplan(from_id: str, to_id: str, when: str, klasse: str,
 
 # --- Die App selbst ausliefern ---------------------------------------------
 # Damit Seite und Preisabfrage dieselbe Herkunft haben (siehe Modul-Doku).
-# Die Dateien liegen neben diesem Skript; fehlen sie, werden sie einmalig
-# von GitHub geholt.
+# Die Dateien liegen neben diesem Skript und werden von GitHub geholt.
+#
+# Sie werden bewusst nachgeladen, nicht nur einmalig: die App wird
+# weiterentwickelt, und eine einmal heruntergeladene app.js bliebe sonst
+# ewig stehen. Der Nutzer saehe eine alte Fassung, ohne dass irgendetwas
+# kaputt aussieht - der aergerlichste Fehlerfall ueberhaupt. Ohne Internet
+# wird die vorhandene Fassung weiterbenutzt; ein Update ist nichts, wofuer
+# die App ausfallen darf.
 APP_FILES = {
     "/": ("index.html", "text/html; charset=utf-8"),
     "/index.html": ("index.html", "text/html; charset=utf-8"),
     "/app.js": ("app.js", "application/javascript; charset=utf-8"),
 }
 APP_SOURCE = "https://raw.githubusercontent.com/kalivolut/hackyourtrip/main/docs/"
+APP_MAX_AGE_S = 900
 _app_dir = Path(__file__).resolve().parent / "app"
 
 
-def _app_file(name: str) -> bytes | None:
-    """Datei aus dem lokalen App-Ordner, notfalls einmalig herunterladen."""
-    path = _app_dir / name
-    if path.exists():
-        return path.read_bytes()
+def _download_app_file(name: str, path: Path) -> bytes | None:
     try:
         _app_dir.mkdir(parents=True, exist_ok=True)
         proc = subprocess.run(
@@ -332,11 +335,39 @@ def _app_file(name: str) -> bytes | None:
             capture_output=True, timeout=40)
         if proc.returncode != 0 or not proc.stdout:
             return None
+        changed = not path.exists() or path.read_bytes() != proc.stdout
         path.write_bytes(proc.stdout)
-        print(f"  App-Datei geladen: {name} ({len(proc.stdout)} Bytes)")
+        if changed:
+            print(f"  App-Datei aktualisiert: {name} ({len(proc.stdout)} Bytes)")
         return proc.stdout
     except Exception:
         return None
+
+
+def _app_file(name: str) -> bytes | None:
+    """Datei aus dem lokalen App-Ordner, regelmaessig frisch von GitHub."""
+    path = _app_dir / name
+    if path.exists():
+        try:
+            fresh = (time.time() - path.stat().st_mtime) < APP_MAX_AGE_S
+        except OSError:
+            fresh = False
+        if fresh:
+            return path.read_bytes()
+        # Abgelaufen: neu holen, aber die alte Fassung nicht wegwerfen,
+        # falls gerade kein Netz da ist.
+        data = _download_app_file(name, path)
+        if data is None:
+            # Ohne Netz laeuft curl in jeden Timeout - das darf nicht bei
+            # jedem Seitenaufruf passieren. Der Zeitstempel bedeutet hier
+            # "zuletzt nachgesehen", nicht "zuletzt geaendert".
+            try:
+                path.touch()
+            except OSError:
+                pass
+            return path.read_bytes()
+        return data
+    return _download_app_file(name, path)
 
 
 def _widen_date(raw: str) -> str | None:

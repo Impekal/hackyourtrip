@@ -5,9 +5,13 @@ gehoert: dass die echte DB-Antwortstruktur (nachgebaut aus dem Live-Fund
 Berlin->Muenchen, HTTP 201) korrekt auf die schlanke Form eingedampft wird,
 und dass ein 403 als "blocked" durchkommt statt als kaputt.
 
-Lauf:  python3 test_server.py
+Lauf:  python3 check_server.py
 """
+import os
+import pathlib
 import sys
+import tempfile
+import time
 
 import server
 
@@ -173,6 +177,47 @@ try:
     check("403 wird als Fehler durchgereicht", False, "keine Exception")
 except server.BahnError as exc:
     check("403 bleibt als 403 erkennbar", exc.status == 403)
+
+
+# --- Die App darf nicht auf einer alten Fassung stehenbleiben -------------
+# Ohne Nachladen bliebe eine einmal heruntergeladene app.js ewig liegen: die
+# App wuerde weiter funktionieren, nur eben in der Fassung von vor Wochen.
+# Genau deshalb wird hier geprueft, wann nachgeladen wird - und wann nicht.
+with tempfile.TemporaryDirectory() as tmp:
+    server._app_dir = pathlib.Path(tmp)
+    calls = []
+
+    def fake_download(name, path):
+        calls.append(name)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"neu")
+        return b"neu"
+
+    server._download_app_file = fake_download
+
+    check("fehlende Datei wird geholt", server._app_file("app.js") == b"neu")
+    check("dabei genau ein Download", calls == ["app.js"], str(calls))
+
+    # Frisch heruntergeladen: kein zweiter Download.
+    check("frische Datei kommt von der Platte", server._app_file("app.js") == b"neu")
+    check("und loest keinen Download aus", calls == ["app.js"], str(calls))
+
+    # Zeitstempel zurueckdrehen -> als veraltet behandeln.
+    old = server._app_dir / "app.js"
+    stale = time.time() - server.APP_MAX_AGE_S - 60
+    os.utime(old, (stale, stale))
+    check("veraltete Datei wird nachgeladen", server._app_file("app.js") == b"neu")
+    check("dabei ein zweiter Download", calls == ["app.js", "app.js"], str(calls))
+
+    # Ohne Netz: die vorhandene Fassung bleibt, statt die Seite zu killen.
+    old.write_bytes(b"alt")
+    os.utime(old, (stale, stale))
+    server._download_app_file = lambda name, path: None
+    check("ohne Netz wird die alte Fassung ausgeliefert",
+          server._app_file("app.js") == b"alt")
+    check("und der Zeitstempel wird zurueckgesetzt, damit nicht jeder "
+          "Aufruf in den Timeout laeuft",
+          time.time() - old.stat().st_mtime < 5)
 
 
 print(f"\n{sum(results)}/{len(results)} checks bestanden")
