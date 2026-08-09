@@ -139,14 +139,16 @@ nohup python3 ~/bahn-server.py --lan > ~/bahn-server.log 2>&1 &
 sleep 2 && cat ~/bahn-server.log
 ```
 
-Dann kannst du das Terminal schließen; der Server läuft weiter. Die zweite
-Zeile wartet zwei Sekunden und zeigt dann die Startmeldung – ohne das
-Warten liest man die Datei in dem Moment, in dem Python gerade erst
-hochfährt, und sie ist noch leer. Das sieht dann fälschlich nach einem
-Fehlstart aus. Was die
-Teile bedeuten: `nohup` = „nicht beenden, wenn das Fenster zugeht",
+Dann kannst du das Terminal schließen; der Server läuft weiter.
+
+Was die Teile bedeuten: `nohup` = „nicht beenden, wenn das Fenster zugeht",
 `&` = „im Hintergrund", der Rest schreibt die Ausgabe in eine Datei, damit
 sie bei Problemen nachlesbar bleibt (`~/bahn-server.log`).
+
+Die zweite Zeile wartet zwei Sekunden und zeigt dann die Startmeldung. Das
+Warten gehört dazu: Liest man die Datei sofort, ist Python gerade erst am
+Hochfahren und sie ist noch leer – das sieht aus wie ein Fehlstart, obwohl
+alles läuft.
 
 Stoppen geht dann nicht mehr mit `Strg`+`C`, sondern mit:
 
@@ -162,6 +164,81 @@ pkill -f bahn-server.py
   den Ruhezustand bei Netzbetrieb abschalten.
 - **Nach einem Neustart des Rechners ist er weg** und muss neu gestartet
   werden.
+
+## Einmal einrichten, nie wieder anfassen (macOS)
+
+Das Angenehmste: Der Server startet bei jeder Anmeldung von selbst, läuft im
+Hintergrund und startet sich sogar neu, falls er abstürzt. Kein Terminal,
+kein Befehl, nichts zu merken. macOS hat dafür `launchd`; man hinterlegt
+einmal eine kleine Datei.
+
+**Einmalig einrichten** – dieser Block darf am Stück eingefügt werden:
+
+```bash
+curl -sS -o ~/bahn-server.py https://raw.githubusercontent.com/kalivolut/hackyourtrip/main/bahn-local/server.py
+
+mkdir -p ~/Library/LaunchAgents
+cat > ~/Library/LaunchAgents/de.hackyourtrip.bahnserver.plist <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>de.hackyourtrip.bahnserver</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>$(which python3)</string>
+    <string>$HOME/bahn-server.py</string>
+    <string>--lan</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>30</integer>
+  <key>StandardOutPath</key><string>$HOME/bahn-server.log</string>
+  <key>StandardErrorPath</key><string>$HOME/bahn-server.log</string>
+</dict>
+</plist>
+PLIST
+
+pkill -f bahn-server.py 2>/dev/null
+launchctl unload ~/Library/LaunchAgents/de.hackyourtrip.bahnserver.plist 2>/dev/null
+launchctl load ~/Library/LaunchAgents/de.hackyourtrip.bahnserver.plist
+sleep 2 && cat ~/bahn-server.log
+```
+
+Am Ende muss der Startkasten mit den beiden Adressen erscheinen. Danach:
+**Terminal schließen, fertig.** Ab jetzt läuft er immer mit.
+
+**Was die Datei bewirkt:** `RunAtLoad` = bei der Anmeldung starten,
+`KeepAlive` = neu starten, falls er abstürzt, `ThrottleInterval` = zwischen
+zwei Startversuchen 30 Sekunden warten (sonst würde ein dauerhafter Fehler
+in einer Endlosschleife enden). Die Ausgabe landet weiter in
+`~/bahn-server.log`.
+
+**Läuft er gerade?**
+
+```bash
+curl -sS http://127.0.0.1:8899/health
+```
+
+**Server aktualisieren**, wenn ich etwas daran geändert habe:
+
+```bash
+curl -sS -o ~/bahn-server.py https://raw.githubusercontent.com/kalivolut/hackyourtrip/main/bahn-local/server.py
+launchctl kickstart -k gui/$(id -u)/de.hackyourtrip.bahnserver
+```
+
+**Wieder abschalten:**
+
+```bash
+launchctl unload ~/Library/LaunchAgents/de.hackyourtrip.bahnserver.plist
+rm ~/Library/LaunchAgents/de.hackyourtrip.bahnserver.plist
+```
+
+**Zwei Ehrlichkeiten dazu:** Der Agent startet bei der **Anmeldung** – nach
+einem Neustart also, sobald du angemeldet bist. Und im **Ruhezustand**
+antwortet er nicht; das ist keine Einstellungssache, sondern schläft der
+ganze Rechner. Wer das Handy auch bei zugeklapptem Deckel bedienen will,
+kommt um ein Dauergerät (Raspberry Pi, NAS) nicht herum.
 
 ## Später: rund um die Uhr (für Preisalarme)
 
