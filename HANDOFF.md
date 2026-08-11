@@ -962,6 +962,26 @@ Offen geblieben (kein Blocker): `/data/facilities` könnte die
 `facilityIds` in Namen auflösen und damit WLAN/Parkplatz/Pool beantwortbar
 machen. Nicht gemessen, deshalb nicht gebaut.
 
+## VPS-Frage: beantwortet und vorbereitet (09.08.2026)
+
+„Alles auf den VPS, inklusive DB-Preise?" - **direkt: nein, gemessen.**
+Derselbe curl, der von der Wohn-IP 201 bekommt, bekommt vom Ionos-VPS
+`403 OPS_BLOCKED` (Nutzer-Experiment, Runde 13). Die Sperre haengt an der
+IP-Herkunft.
+
+Was geht: **VPS als https-Front, Heimrechner/Pi als Ausgang** ueber
+WireGuard/Tailscale-Tunnel - nur die /bahn-Anfragen laufen durch den Tunnel
+und verlassen das Internet ueber die Wohn-IP. Kauft Bahn-Preise von
+ueberall (auch Handy unterwegs), eine https-Adresse ohne Mixed-Content und
+Bahn-Preisalarme rund um die Uhr. Loest nicht: das Heimgeraet muss an sein.
+
+Die App ist seit Build 2026-08-09-17 darauf vorbereitet:
+`bahnLocalCandidates()` akzeptiert die eigene Herkunft auch ueber https
+(nur github.io ist ausgenommen; die /health-Probe prueft ohnehin), und
+`normaliseLocalUrl()` klebt an https-Adressen kein `:8899` mehr an.
+Architektur-Skizze in bahn-local/README.md. Residential-Proxy-Dienste
+(fremde Wohn-IPs mieten) sind benannt und bewusst verworfen.
+
 ## Deutschland-Ticket: der einzige echte Bahnpreis, den wir bekommen
 
 Die DB gibt keine Tarife heraus (siehe Messtabelle oben). Für eine grosse

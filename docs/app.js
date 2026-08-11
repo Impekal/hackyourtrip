@@ -4,7 +4,7 @@
 // guessing: if this doesn't match, the browser is running a cached old
 // app.js and any "the fix didn't work" report is about the old file. Bump
 // together with the ?v= in index.html.
-const BUILD_STAMP = '2026-08-09-16';
+const BUILD_STAMP = '2026-08-09-17';
 document.getElementById('buildStamp').textContent = BUILD_STAMP;
 
 /* =========================================================================
@@ -814,7 +814,13 @@ function bahnLocalCandidates() {
   try { override = localStorage.getItem('bahnLocalUrl'); } catch (e) { /* egal */ }
   if (override) return [override.replace(/\/+$/, '')];
   const list = [];
-  if (location.protocol === 'http:' && location.origin) list.push(location.origin);
+  // Kommt die Seite vom Preis-Server selbst, ist die eigene Herkunft die
+  // richtige Adresse - egal ob http (Heimnetz) oder https (VPS mit
+  // Zertifikat, der zum Heimnetz tunnelt). Nur die veroeffentlichte
+  // github.io-Seite ist sicher KEIN Preis-Server; alle anderen Kandidaten
+  // prueft ohnehin die /health-Probe, bevor ihnen geglaubt wird.
+  const fremd = /(^|\.)github\.io$/i.test(location.hostname);
+  if (location.origin && !fremd && location.protocol !== 'file:') list.push(location.origin);
   if (!list.includes(BAHN_LOCAL_DEFAULT)) list.push(BAHN_LOCAL_DEFAULT);
   return list;
 }
@@ -896,8 +902,12 @@ function normaliseLocalUrl(raw) {
   let url = (raw || '').trim().replace(/\/+$/, '');
   if (!url) return '';
   if (!/^https?:\/\//i.test(url)) url = 'http://' + url;
-  // Ohne Portangabe waere es Port 80 - der Server hoert auf 8899.
-  if (!/:\d+$/.test(url.replace(/^https?:\/\//i, ''))) url += ':8899';
+  // Ohne Portangabe waere es Port 80 - der Server hoert auf 8899. Aber nur
+  // bei http anhaengen: eine https-Adresse ist ein Server mit Zertifikat
+  // (VPS, der zum Heimnetz tunnelt), und der lauscht auf dem Standardport.
+  // ":8899" an eine https-Adresse zu kleben hiesse, eine korrekt getippte
+  // Adresse kaputtzukorrigieren.
+  if (/^http:/i.test(url) && !/:\d+$/.test(url.replace(/^https?:\/\//i, ''))) url += ':8899';
   try { new URL(url); } catch (e) { return ''; }
   return url;
 }

@@ -249,6 +249,50 @@ Heimnetz. Derselbe `server.py` läuft dort unverändert; in der App dann unter
 (z.B. `http://raspberrypi.local:8899`). Sag Bescheid, wenn du so weit bist –
 das ist ein kleiner Zusatzschritt, kein Umbau.
 
+## „Warum nicht einfach alles auf den VPS?"
+
+Weil die DB Rechenzentrums-IPs sperrt, und das ist **gemessen, nicht
+vermutet**: derselbe `curl`-Aufruf, der von der heimischen Leitung `HTTP
+201` mit echten Sparpreisen bekommt, bekommt vom Ionos-VPS `403
+OPS_BLOCKED` (eigener Test, 08.08.2026 – siehe HANDOFF). Cloudflare und
+GitHub-Runner ebenso. Kein Server-Anbieter ändert daran etwas; die Sperre
+hängt an der IP-Herkunft, nicht am Programm.
+
+**Was stattdessen geht: der VPS als Gesicht, das Zuhause als Ausgang.**
+
+```
+Handy/Laptop ──https──▶ VPS (App + Zertifikat)
+                          │  nur /bahn-Anfragen
+                          ▼  WireGuard/Tailscale-Tunnel
+                        Heimrechner/Pi (server.py)
+                          │  curl über die Wohn-IP
+                          ▼
+                        int.bahn.de  → 201, echte Preise
+```
+
+Der VPS liefert die App über `https` aus und reicht Bahn-Anfragen durch
+den Tunnel an den Rechner zuhause weiter; nur dessen Wohn-IP spricht mit
+der DB. Alles andere (Flüge, Hotels, Bus, Deals, KI) läuft ohnehin über
+den Cloudflare-Worker.
+
+Was das kauft: **Bahn-Live-Preise von überall** – auch unterwegs auf dem
+Handy, was heute nicht geht –, eine einzige `https`-Adresse ohne
+Mixed-Content-Sonderfälle, und Bahn-Preisalarme rund um die Uhr. Die App
+ist darauf vorbereitet: eine selbst ausgelieferte `https`-Seite erkennt
+sich als eigener Preis-Server, und die Adresseingabe lässt `https`-URLs
+unangetastet.
+
+Was es **nicht** löst: der Rechner zuhause muss weiter an sein – der
+Tunnel verlegt nur den Zugang, nicht den Ausgang. Deshalb passt hier der
+Pi (~2 €/Jahr Strom) besser als der Laptop.
+
+Und die Abkürzung, die es nicht wert ist: kommerzielle
+„Residential-Proxy"-Dienste vermieten fremde Wohn-IPs. Das wäre gekaufte
+Umgehung der Bot-Sperre mit fremden Anschlüssen – rechtlich wie ethisch
+trüb, laufende Kosten, und gegen die Grundregel dieses Projekts, die
+DB-Sperre nicht auszutricksen, sondern schlicht von dort zu fragen, wo
+man wirklich wohnt.
+
 ## Fehlersuche
 
 | Symptom | Ursache / Lösung |
