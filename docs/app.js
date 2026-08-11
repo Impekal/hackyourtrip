@@ -4,7 +4,7 @@
 // guessing: if this doesn't match, the browser is running a cached old
 // app.js and any "the fix didn't work" report is about the old file. Bump
 // together with the ?v= in index.html.
-const BUILD_STAMP = '2026-08-09-18';
+const BUILD_STAMP = '2026-08-09-19';
 document.getElementById('buildStamp').textContent = BUILD_STAMP;
 
 /* =========================================================================
@@ -3909,8 +3909,10 @@ function renderActiveSection() {
 
 async function renderOptionList(route, section, options, flightFallbackReason, busPriceReason, hotelFallbackReason) {
   await addRecommendations(route, options, section.pools, section.returnPools);
-  // The AI recommendation reasons about what is actually on screen.
-  lastSearch = { route, options };
+  // Die KI-Empfehlung bekommt mehr als die sichtbare Liste: die Pools sind
+  // das Rohmaterial fuer Spar-Hebel (anderer Tag, andere Gattung, Richtungen
+  // mischen), die man der Rangliste gerade NICHT ansieht.
+  lastSearch = { route, options, pools: section.pools, returnPools: section.returnPools };
   const label = route.origin ? `${route.origin} → ${route.destination}` : route.destination;
   const mockCount = options.filter(isMockOption).length;
   const timetableCount = options.filter(o => o.hasUnknownPrice).length;
@@ -4284,46 +4286,97 @@ const aiBox = document.getElementById('aiBox');
 const aiButton = document.getElementById('aiButton');
 const aiResultEl = document.getElementById('aiResult');
 
-function buildAiPrompt(route, options) {
+/**
+ * Guenstigster Preis je Gattung und Tag - das Rohmaterial fuer jeden
+ * Spar-Hebel ("Di statt Mo", "Bahn statt Flug", "hin Flug, zurueck Bus").
+ * Ohne diese Karte kann die KI nur die sichtbare Rangliste nacherzaehlen -
+ * genau die Sorte Antwort, die niemandem etwas sagt, was er nicht sieht.
+ */
+function aiPriceMap(pools, richtung = '') {
+  const lines = [];
+  for (const [mode, list] of Object.entries(pools || {})) {
+    const priced = (list || []).filter(o => o.priceKnown !== false && o.price > 0 && o.depart);
+    if (!priced.length) continue;
+    const byDay = {};
+    for (const o of priced) {
+      const day = isoDay(o.depart);
+      if (!byDay[day] || o.price < byDay[day].price) byDay[day] = o;
+    }
+    const days = Object.keys(byDay).sort().slice(0, 9)
+      .map(d => `${d} ab ${byDay[d].price.toFixed(2)} (${fmtHM(byDay[d].depart)} Uhr)`)
+      .join('; ');
+    const name = MODE_LABEL[mode] || (mode === 'hotel' ? 'Hotel' : mode);
+    lines.push(`- ${name}${richtung}: ${days}`);
+  }
+  return lines;
+}
+
+function buildAiPrompt(route, options, pools, returnPools) {
   const criteria = [
     `Strecke: ${route.origin || '-'} nach ${route.destination}`,
     `Modus: ${route.mode}`,
     `Reisedatum: ${isoDay(route.departFrom)}${route.roundTrip && route.returnDate ? `, zurück ${isoDay(route.returnDate)}` : ' (nur Hinreise)'}`,
     `Flexibilität: ${route.flexBefore} Tage davor, ${route.flexAfter} Tage danach`,
+    `Reisende: ${route.adults || 1} Erwachsene${route.children ? `, ${route.children} Kinder` : ''}${route.infants ? `, ${route.infants} Kleinkinder` : ''}`,
     route.budget != null ? `Budget: ${route.budget} ${route.currency}` : 'Budget: kein Limit',
     route.maxDuration != null
       ? `Max. Reisezeit${route.maxDurationReturn != null ? ' hin' : ''}: ${route.maxDuration}h`
       : 'Max. Reisezeit: kein Limit',
     route.maxDurationReturn != null ? `Max. Reisezeit zurück: ${route.maxDurationReturn}h` : null,
-    `Sortierung: ${route.priority}`,
-    route.dealsOnly ? 'Nur Deals/Aktionen' : 'Alle Angebote',
+    route.deutschlandticket ? 'Deutschland-Ticket vorhanden (Nahverkehr 2. Klasse kostet damit 0 EUR)' : null,
+    route.bahncard ? `BahnCard ${route.bahncard}` : null,
+    route.trainClass === 1 ? 'Bahn: 1. Klasse' : null,
+    route.cabinClass && route.cabinClass !== 'economy' ? `Flug: ${route.cabinClass}` : null,
     route.transportPrefs.directOnly ? 'Nur Direktverbindungen' : null,
     route.transportPrefs.preferredDepartTime
       ? `Bevorzugte Abfahrt: ${route.transportPrefs.preferredDepartTime} (±${route.transportPrefs.departTimeFlexMinutes} Min.)`
       : null,
   ].filter(Boolean).join('\n');
 
-  const offers = options.slice(0, 15).map((o, i) => {
+  // Die Rangliste bleibt drin - aber kurz, als Kontext. Sie ist nicht mehr
+  // der Gegenstand der Aufgabe.
+  const offers = options.slice(0, 8).map((o, i) => {
     const p = o.offers[0];
-    return `${i + 1}. ${o.price.toFixed(2)} ${route.currency} | ${o.mode} | ab ${fmtShort(p.depart)}`
+    return `${i + 1}. ${o.hasUnknownPrice ? 'Preis unbekannt' : `${o.price.toFixed(2)} ${route.currency}`}`
+      + ` | ${o.mode} | ab ${fmtShort(p.depart)}`
       + `${p.returnDepart ? ` | zurück ${fmtShort(p.returnDepart)}` : ''}`
       + ` | ${o.durationHours > 0 ? o.durationHours + 'h' : 'Dauer unbekannt'}`
-      + ` | ${p.stops === 0 ? 'direkt' : p.stops + 'x Umstieg'}`
-      + ` | ${o.offers.map(x => x.bookingSite).join(' + ')}`
-      + `${o.isBelowMedian ? ' | DEAL' : ''}`;
+      + ` | ${p.stops === 0 ? 'direkt' : (p.stops || 0) + 'x Umstieg'}`
+      + `${p.splitAt ? ` | Spar-Trick: bis ${p.splitAt} mit D-Ticket` : ''}`;
   }).join('\n');
 
-  return `Du bist ein nüchterner Reise-Berater. Unten stehen die Kriterien einer Suche und die dazu gefundenen Angebote.
+  // Preiskarte: guenstigster Preis je Gattung und Tag - hieraus lassen sich
+  // Hebel RECHNEN statt raten. Bei Hin+Zurueck die Rueckrichtung getrennt,
+  // damit "hin Gattung A, zurueck Gattung B" belegbar wird.
+  const map = [
+    ...aiPriceMap(pools),
+    ...(returnPools ? aiPriceMap(returnPools, ' (Rückrichtung, Einzelfahrt)') : []),
+  ].join('\n') || '- (keine Preisdaten über die Liste hinaus)';
+
+  // Was der deterministische Spar-Berater schon gefunden hat, bekommt die
+  // KI mit - sie soll darauf aufbauen, nicht dahinter zurueckfallen.
+  const bekannt = [...new Set(options.flatMap(o => o.recommendations || []))]
+    .filter(t => !t.startsWith('💱') && !t.startsWith('❔')).slice(0, 6).join('\n');
+
+  return `Du bist ein nüchterner Spar-Berater für Reisen. Unten: die Suchkriterien, die ersten Angebote der Rangliste, eine Preiskarte (günstigster Preis je Gattung und Tag) und bereits erkannte Spar-Hinweise.
 
 Kriterien:
 ${criteria}
 
-Gefundene Angebote:
+Rangliste (sieht der Nutzer bereits selbst):
 ${offers}
 
-Aufgabe: Empfiehl auf Deutsch 2-3 dieser Angebote und begründe kurz, warum sie zu den Kriterien passen (Preis, Dauer, Umstiege, Datum). Nenne jeweils die Nummer aus der Liste. Weise auf echte Nachteile hin, falls es welche gibt. Wenn ein Kompromiss lohnt (z.B. ein Tag später deutlich günstiger), sag das.
+Preiskarte:
+${map}
 
-Wichtig: Bewerte ausschließlich die oben gelisteten Angebote. Erfinde keine Flüge, Preise oder Airlines. Maximal 200 Wörter, keine Einleitung.`;
+Bereits erkannte Spar-Hinweise:
+${bekannt || '- keine'}
+
+Aufgabe: Der Nutzer sieht die Rangliste selbst - wiederhole sie NICHT und küre keinen Sieger. Finde stattdessen die Spar-Hebel, die man der Liste nicht ansieht. Prüfe anhand der Preiskarte konkret: (1) anderer Reisetag, (2) andere Gattung am selben Tag, (3) bei Hin+Zurück: Richtungen mischen - hin mit der einen, zurück mit der anderen Gattung, die Einzelpreise der Rückrichtung stehen in der Preiskarte, (4) Deutschland-Ticket/Spar-Trick, falls vorhanden. Nenne 2-4 Hebel, jeden mit den beiden Zahlen, aus denen er sich ergibt (Beispiel: "Di 21,49 statt Mo 49,99 spart 28,50"). Baue auf den bereits erkannten Hinweisen auf, statt sie zu wiederholen - ergänze, was dort fehlt.
+
+Maßstab: 1 Stunde Mehrzeit ist erst ab 15 ${route.currency} Ersparnis zumutbar, ein anderer Reisetag erst ab 40 ${route.currency}. Was darunter liegt, verschweige. Gibt es keinen lohnenden Hebel, schreibe genau das - "kein Hebel gefunden" ist eine ehrliche und erwünschte Antwort.
+
+Wichtig: Rechne ausschließlich mit den Zahlen oben. Erfinde keine Preise, Verbindungen oder Anbieter. Maximal 180 Wörter, keine Einleitung.`;
 }
 
 async function requestAiRecommendation() {
@@ -4335,7 +4388,8 @@ async function requestAiRecommendation() {
     const resp = await fetch(`${PROXY_URL.replace(/\/$/, '')}/ai`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt: buildAiPrompt(lastSearch.route, lastSearch.options) }),
+      body: JSON.stringify({ prompt: buildAiPrompt(lastSearch.route, lastSearch.options,
+                                                   lastSearch.pools, lastSearch.returnPools) }),
     });
     const payload = await resp.json().catch(() => null);
     if (resp.status === 501) {
