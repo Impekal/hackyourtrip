@@ -457,6 +457,21 @@ class Handler(BaseHTTPRequestHandler):
             self._send(500, {"error": f"{type(exc).__name__}: {exc}"})
 
 
+def _mdns_name() -> str | None:
+    """„MacBook-noname.local" - der Name, der Router-Neustarts uebersteht.
+
+    mDNS loesen Macs, iPhones und die meisten Androids im Heimnetz von
+    selbst auf. Kein Versprechen (manche Router filtern es), deshalb wird
+    er ZUSAETZLICH zur IP genannt, nie statt ihrer.
+    """
+    import socket
+    try:
+        name = socket.gethostname().split(".")[0].strip()
+        return f"{name}.local" if name else None
+    except Exception:
+        return None
+
+
 def _lan_address() -> str | None:
     """Die eigene Adresse im Heimnetz – die, die das Handy braucht.
 
@@ -525,6 +540,12 @@ def main():
         if lan:
             print(f"   ▶  Auf Handy/Tablet:    http://{lan}:{PORT}/")
             print("      (Gerät muss im selben WLAN sein)")
+            # Die 192.168er-Adresse kann sich nach einem Router-Neustart
+            # aendern; der mDNS-Name des Rechners bleibt. Beide nennen -
+            # welchen das eigene WLAN aufloest, probiert man einmal aus.
+            mdns = _mdns_name()
+            if mdns:
+                print(f"   ▶  Oder (bleibt gleich): http://{mdns}:{PORT}/")
         else:
             print("   ⚠️  Keine Heimnetz-Adresse gefunden – ist WLAN aktiv?")
     else:

@@ -4,7 +4,7 @@
 // guessing: if this doesn't match, the browser is running a cached old
 // app.js and any "the fix didn't work" report is about the old file. Bump
 // together with the ?v= in index.html.
-const BUILD_STAMP = '2026-08-09-17';
+const BUILD_STAMP = '2026-08-09-18';
 document.getElementById('buildStamp').textContent = BUILD_STAMP;
 
 /* =========================================================================
@@ -4022,14 +4022,28 @@ async function renderOptionList(route, section, options, flightFallbackReason, b
     o => o.hasUnknownPrice && o.offers.some(x => x.mode === 'train' && x.priceKnown === false));
   let bahnLiveHint = '';
   if (trainWithoutPrice && _bahnLocal.ok === false) {
-    bahnLiveHint = `
+    // Zwei verschiedene Lagen, zwei verschiedene Ratschlaege. Auf der
+    // https-Seite ist der Weg der gelbe Streifen oben - der Browser
+    // verbietet hier jede direkte Anfrage an den Heimserver, nur Wechseln
+    // ist erlaubt. Eine 127.0.0.1-Adresse anzuzeigen waere dort obendrein
+    // irrefuehrend: auf dem Handy zeigt sie auf das Handy selbst.
+    bahnLiveHint = location.protocol === 'https:' ? `
+    <br><br><strong>Bahnpreise fehlen?</strong> Über diese <code class="mono">https</code>-Seite
+    darf der Browser deinen Bahn-Preis-Server nicht direkt fragen. So kommst du zu Live-Preisen:
+    <strong>1.</strong> Laptop zuhause an, Server läuft.
+    <strong>2.</strong> Dieses Gerät ins <strong>selbe WLAN</strong> wie den Laptop.
+    <strong>3.</strong> Oben im gelben Streifen die Heimnetz-Adresse des Servers eintragen
+    (steht in seiner Startmeldung bzw. in <code class="mono">~/bahn-server.log</code>,
+    z.&nbsp;B. <code class="mono">http://192.168.0.81:8899</code>) und auf
+    <strong>Wechseln</strong> tippen. Unterwegs gibt es keine Bahnpreise –
+    alles andere hier läuft trotzdem.` : `
     <br><br><strong>Bahnpreise fehlen?</strong> Der lokale Bahn-Preis-Server ist nicht erreichbar
     (<code class="mono">${bahnLocalUrl()}</code>${_bahnLocalLastError ? ` – ${_bahnLocalLastError}` : ''}).
-    Läuft er, zeigt die Bahn hier echte Sparpreise. Zwei häufige Gründe: er ist nicht gestartet, oder
-    diese Seite wurde über <code class="mono">https</code> geöffnet – dann verbietet der Browser den
-    Zugriff auf den eigenen Rechner. Dann die App über
-    <a href="${bahnLocalUrl()}/">${bahnLocalUrl()}/</a> öffnen; fürs Handy den Server mit
-    <code class="mono">--lan</code> starten und dessen Heimnetz-Adresse benutzen.`;
+    Läuft er? Auf dem Laptop <code class="mono">http://127.0.0.1:8899/health</code> öffnen –
+    erscheint <code class="mono">{"ok": true}</code>, läuft er; wenn nicht, neu starten
+    (Anleitung: bahn-local/README). Vom Handy aus zusätzlich: Laptop an, <strong>gleiches
+    WLAN</strong>, und diese Seite über die Heimnetz-Adresse aus der Startmeldung des Servers
+    öffnen (auch nachzulesen in <code class="mono">~/bahn-server.log</code>).`;
   } else if (trainWithoutPrice && _bahnLocal.ok === true) {
     bahnLiveHint = `
     <br><br><strong>Warum bei diesen Zügen kein Preis?</strong> Der Bahn-Preis-Server läuft

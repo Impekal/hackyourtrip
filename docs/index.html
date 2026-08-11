@@ -305,8 +305,9 @@
        Klick zur lokalen Adresse. -->
   <div class="localbar" id="localBar" hidden>
     <div class="localbar-text">
-      <strong>🚆 Live-Bahnpreise</strong> gibt es nur über deinen lokalen Server –
-      diese Seite läuft über <code class="mono">https</code> und darf ihn nicht direkt fragen.
+      <strong>🚆 Live-Bahnpreise</strong> gibt es nur über deinen Bahn-Preis-Server zuhause –
+      diese Seite läuft über <code class="mono">https</code> und darf ihn nicht direkt fragen,
+      wohl aber zu ihm wechseln.
     </div>
     <div class="localbar-row">
       <input type="text" id="localBarUrl" inputmode="url" spellcheck="false"
@@ -317,8 +318,17 @@
       <input type="checkbox" id="localBarAuto"> künftig automatisch dorthin wechseln
     </label>
     <p class="localbar-hint">
-      Die Adresse zeigt dir der Server beim Start an (<code class="mono">python3 bahn-server.py --lan</code>).
-      Sie wird nur in diesem Browser gespeichert.
+      Wenn keine Live-Bahnpreise kommen, in dieser Reihenfolge prüfen:
+      <strong>1.</strong> Läuft der Laptop zuhause und darauf der Bahn-Preis-Server?
+      (Auf dem Laptop <code class="mono">http://127.0.0.1:8899/health</code> öffnen –
+      es muss <code class="mono">{"ok": true}</code> erscheinen.)
+      <strong>2.</strong> Ist dieses Gerät im <strong>selben WLAN</strong> wie der Laptop?
+      Unterwegs gibt es keine Bahnpreise – alles andere läuft trotzdem.
+      <strong>3.</strong> Welche Adresse gehört ins Feld? Die Heimnetz-Adresse aus der
+      Startmeldung des Servers, z.&nbsp;B. <code class="mono">http://192.168.0.81:8899</code> –
+      nachzulesen in <code class="mono">~/bahn-server.log</code>. Meist geht auch der
+      Rechnername: <code class="mono">http://&lt;rechnername&gt;.local:8899</code>.
+      Die Adresse wird nur in diesem Browser gespeichert.
     </p>
   </div>
 
@@ -773,6 +783,6 @@
 <!-- The ?v= is deliberate: GitHub Pages lets browsers cache app.js, so a
      fix could ship and the visitor would keep running the old file. Bump
      this whenever app.js changes in a way users need to see. -->
-<script src="./app.js?v=2026-08-09-17"></script>
+<script src="./app.js?v=2026-08-09-18"></script>
 </body>
 </html>
