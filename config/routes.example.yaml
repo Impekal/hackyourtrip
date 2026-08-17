@@ -66,6 +66,8 @@ routes:
       min_punctuality_pct: null
       preferred_depart_time: null   # "HH:MM", z.B. "09:00" - null = egal, jede Uhrzeit ok
       depart_time_flex_minutes: 0   # Zeitfenster +/- um preferred_depart_time (nur falls gesetzt)
+      earliest_depart_time: null    # "HH:MM": Abfahrten davor fliegen raus -
+                                    # ausser sie liegen noch im Zeitfenster oben
     low_cost: any            # any | only (nur Low-Cost) | exclude (keine Low-Cost)
     deals_only: false         # true = nur Deals/Aktionen zeigen, false = alle Angebote
     # Nur bei round_trip: eigenes Limit für den Rückweg. null = wie ohne

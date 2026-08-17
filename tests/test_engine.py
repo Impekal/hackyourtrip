@@ -420,6 +420,35 @@ def test_preferred_depart_time_window_wraps_around_midnight(tmp_path):
     assert len(result) == 1  # 23:45 is only 30min from 00:15 across midnight
 
 
+def test_earliest_depart_time_drops_offers_before_the_floor(tmp_path):
+    offers = [
+        Offer(mode=Mode.FLIGHT, provider="p", booking_site="A", price=50, currency="EUR",
+              depart_time="2026-09-10T06:30:00", arrive_time="2026-09-10T08:30:00", duration_hours=2),
+        Offer(mode=Mode.FLIGHT, provider="p", booking_site="B", price=100, currency="EUR",
+              depart_time="2026-09-10T10:00:00", arrive_time="2026-09-10T12:00:00", duration_hours=2),
+    ]
+    engine = make_engine({Mode.FLIGHT: FakeProvider(Mode.FLIGHT, offers)}, tmp_path)
+    route = make_route(transport=TransportPref(earliest_depart_time="08:00"))
+    result = engine.search(route)
+    assert len(result) == 1
+    assert result[0].total_price == 100  # the cheaper 06:30 leaves too early
+
+
+def test_earliest_depart_time_is_overridden_by_the_preferred_window(tmp_path):
+    # Ausdruecklicher Wunsch: liegt eine fruehere Abfahrt noch im
+    # Zeitfenster um die bevorzugte Uhrzeit, bleibt sie erlaubt.
+    offers = [
+        Offer(mode=Mode.FLIGHT, provider="p", booking_site="A", price=50, currency="EUR",
+              depart_time="2026-09-10T07:40:00", arrive_time="2026-09-10T09:40:00", duration_hours=2),
+    ]
+    engine = make_engine({Mode.FLIGHT: FakeProvider(Mode.FLIGHT, offers)}, tmp_path)
+    route = make_route(transport=TransportPref(
+        earliest_depart_time="08:00",
+        preferred_depart_time="08:00", depart_time_flex_minutes=30))
+    result = engine.search(route)
+    assert len(result) == 1  # 07:40 is before 08:00 but inside 08:00 +/- 30min
+
+
 def test_later_departure_hint_never_suggests_a_time_outside_the_window(tmp_path):
     offers = [
         Offer(mode=Mode.FLIGHT, provider="p", booking_site="A", price=100, currency="EUR",

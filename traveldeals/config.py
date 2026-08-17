@@ -118,6 +118,7 @@ def _parse_route(raw: dict) -> RoutePreference:
             min_punctuality_pct=transport_raw.get("min_punctuality_pct"),
             preferred_depart_time=transport_raw.get("preferred_depart_time"),
             depart_time_flex_minutes=int(transport_raw.get("depart_time_flex_minutes", 0)),
+            earliest_depart_time=transport_raw.get("earliest_depart_time"),
         ),
         # Backwards compatible: an old low_cost_airlines_ok: false still
         # means "exclude", so existing routes.yaml files keep working.

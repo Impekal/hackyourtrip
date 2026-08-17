@@ -142,6 +142,10 @@ class TransportPref:
     # +/- 90 minutes is fine" - None means no time-of-day preference at all.
     preferred_depart_time: Optional[str] = None  # "HH:MM"
     depart_time_flex_minutes: int = 0
+    # Hard floor for the time of day ("Abfahrt ab"): offers departing
+    # earlier are dropped - unless they still fall inside the preferred
+    # window above, which deliberately overrides the floor.
+    earliest_depart_time: Optional[str] = None  # "HH:MM"
 
 
 @dataclass

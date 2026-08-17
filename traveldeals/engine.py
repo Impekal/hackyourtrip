@@ -206,6 +206,19 @@ def _meets_transport_constraints(offer: Offer, pref: TransportPref) -> bool:
         preferred_minutes = _minutes_since_midnight(pref.preferred_depart_time)
         if _circular_minutes_diff(offer_minutes, preferred_minutes) > pref.depart_time_flex_minutes:
             return False
+    if pref.earliest_depart_time is not None:
+        # "Abfahrt ab": too-early offers are out - unless they still sit in
+        # the preferred-time window, which deliberately overrides the floor.
+        offer_minutes = _minutes_since_midnight(offer.depart_time[11:16])
+        if offer_minutes < _minutes_since_midnight(pref.earliest_depart_time):
+            in_window = (
+                pref.preferred_depart_time is not None
+                and _circular_minutes_diff(
+                    offer_minutes,
+                    _minutes_since_midnight(pref.preferred_depart_time))
+                <= pref.depart_time_flex_minutes)
+            if not in_window:
+                return False
     return True
 
 

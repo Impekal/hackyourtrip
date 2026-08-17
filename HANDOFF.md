@@ -405,6 +405,28 @@ landen typischerweise im Scratchpad, nicht im Repo.
 
 ## Aktueller Stand / offene Aufgaben
 
+Nachtrag 17.08.2026 (Build 2026-08-09-20):
+
+- **Ganztags-Bahnsuche**: Eine DB-`/fahrplan`-Anfrage ist eine "Seite"
+  (~6-10 Verbindungen ab dem Anfragezeitpunkt). Ein blankes Datum wurde
+  früher auf `T08:00:00` geweitet → genau eine Seite, daher die echte
+  Beschwerde "nur 6 Angebote auf einen ganzen Tag und die teuersten".
+  Jetzt fächert `bahn-local/server.py` (`get_fahrplan_ganztag`,
+  `DAY_ANCHORS`) den Tag über 6 Ankerzeiten auf, legt Dubletten zusammen
+  (bei Preisunterschied gewinnt der günstigere - DB-Kontingente), filtert
+  Folgetags-Verbindungen und sortiert nach Abfahrt. Volle Zeitstempel
+  (Split-Ticket-Reststrecke) bleiben bewusst EINE Anfrage. Jeder Anker
+  läuft durch den bestehenden Cache. **Achtung: der Nutzer muss
+  `~/bahn-server.py` einmal neu herunterladen** - die Server-Datei
+  aktualisiert sich nicht selbst (nur die App-Dateien tun das).
+- **"Abfahrt ab (frühestens)"** (`#earliestDepartTime`, neben der
+  bevorzugten Uhrzeit): Angebote mit früherer Abfahrt fliegen aus
+  Empfehlung UND Spar-Tipps (beides läuft über `meetsTransportPrefs`).
+  Ausdrückliche Ausnahme laut Nutzer: liegt die Abfahrt noch im
+  ±-Zeitfenster um die bevorzugte Uhrzeit, bleibt sie erlaubt. Gespiegelt
+  in Python (`TransportPref.earliest_depart_time`, engine, config,
+  `routes.example.yaml`).
+
 Stand 2026-08-05, alle fünf User-Feedback-Punkte aus dieser Session sind
 abgeschlossen und einzeln committed+gepusht:
 

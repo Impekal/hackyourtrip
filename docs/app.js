@@ -4,7 +4,7 @@
 // guessing: if this doesn't match, the browser is running a cached old
 // app.js and any "the fix didn't work" report is about the old file. Bump
 // together with the ?v= in index.html.
-const BUILD_STAMP = '2026-08-09-19';
+const BUILD_STAMP = '2026-08-09-20';
 document.getElementById('buildStamp').textContent = BUILD_STAMP;
 
 /* =========================================================================
@@ -2477,6 +2477,18 @@ function meetsTransportPrefs(o, p) {
     const diff = circularMinutesDiff(offerTimeOfDay(o), minutesSinceMidnight(p.preferredDepartTime));
     if (diff > (p.departTimeFlexMinutes || 0)) return false;
   }
+  if (p.earliestDepartTime) {
+    // "Abfahrt ab": Angebote davor fliegen raus - es sei denn, sie liegen
+    // noch im ±-Fenster um die bevorzugte Uhrzeit (ausdrücklicher Wunsch:
+    // das Zeitfenster darf die harte Untergrenze überstimmen).
+    const zuFrueh = offerTimeOfDay(o) < minutesSinceMidnight(p.earliestDepartTime);
+    if (zuFrueh) {
+      const imFenster = p.preferredDepartTime
+        && circularMinutesDiff(offerTimeOfDay(o), minutesSinceMidnight(p.preferredDepartTime))
+           <= (p.departTimeFlexMinutes || 0);
+      if (!imFenster) return false;
+    }
+  }
   return true;
 }
 
@@ -3711,6 +3723,7 @@ function readRouteFromForm() {
       requireWifiOnboard: document.getElementById('requireWifiOnboard').checked,
       requirePowerOutlets: document.getElementById('requirePowerOutlets').checked,
       minPunctuality: numOrNull('minPunctuality'),
+      earliestDepartTime: document.getElementById('earliestDepartTime').value || null,
       preferredDepartTime: document.getElementById('preferredDepartTime').value || null,
       departTimeFlexMinutes: Number(document.getElementById('departTimeFlexHours').value || 0) * 60
                            + Number(document.getElementById('departTimeFlexMinutes').value || 0),
@@ -4262,6 +4275,7 @@ ${HOTEL_AMENITY_REQUIREMENTS.map(([prefFlag, , yamlKey]) => `      ${yamlKey}: $
       require_wifi_onboard: ${tp.requireWifiOnboard}
       require_power_outlets: ${tp.requirePowerOutlets}
       min_punctuality_pct: ${tp.minPunctuality ?? 'null'}
+      earliest_depart_time: ${tp.earliestDepartTime ? `"${tp.earliestDepartTime}"` : 'null'}
       preferred_depart_time: ${tp.preferredDepartTime ? `"${tp.preferredDepartTime}"` : 'null'}
       depart_time_flex_minutes: ${tp.departTimeFlexMinutes || 0}
     low_cost: ${route.lowCost}
@@ -4328,6 +4342,9 @@ function buildAiPrompt(route, options, pools, returnPools) {
     route.trainClass === 1 ? 'Bahn: 1. Klasse' : null,
     route.cabinClass && route.cabinClass !== 'economy' ? `Flug: ${route.cabinClass}` : null,
     route.transportPrefs.directOnly ? 'Nur Direktverbindungen' : null,
+    route.transportPrefs.earliestDepartTime
+      ? `Abfahrt frühestens ${route.transportPrefs.earliestDepartTime} Uhr`
+      : null,
     route.transportPrefs.preferredDepartTime
       ? `Bevorzugte Abfahrt: ${route.transportPrefs.preferredDepartTime} (±${route.transportPrefs.departTimeFlexMinutes} Min.)`
       : null,
