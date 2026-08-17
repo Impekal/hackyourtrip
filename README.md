@@ -4,6 +4,11 @@ Bot/Webapp, der Flug-, Bahn-, Bus- und Hotel-Angebote vergleicht, dich per
 Telegram/E-Mail auf Preisverfall und mögliche Fehlerpreise hinweist und dir
 auf einem Dashboard die besten aktuellen Optionen pro Strecke zeigt.
 
+> **© Impekal — alle Rechte vorbehalten.** Dieses Repository ist zum
+> Ansehen veröffentlicht, aber **ohne Lizenz**: Es wird keine Erlaubnis
+> zur Nutzung, Vervielfältigung, Veränderung oder Weiterverbreitung des
+> Codes erteilt.
+
 > ## ⚠️ Wichtig: Was ist echt, was ist Beispiel?
 >
 > | Modus | Datenquelle |
