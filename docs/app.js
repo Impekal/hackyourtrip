@@ -4,8 +4,83 @@
 // guessing: if this doesn't match, the browser is running a cached old
 // app.js and any "the fix didn't work" report is about the old file. Bump
 // together with the ?v= in index.html.
-const BUILD_STAMP = '2026-08-09-21';
+const BUILD_STAMP = '2026-08-09-22';
 document.getElementById('buildStamp').textContent = BUILD_STAMP;
+
+/* =========================================================================
+ * Zwei Fassungen aus einer Codebasis: Privat und Store.
+ *
+ * Die App ist als private Nutzung gewachsen und fragt Quellen ab, die
+ * dafuer in Ordnung sind, fuer ein veroeffentlichtes Produkt aber nicht:
+ * inoffizielle Endpunkte (bahn.de, Ryanair-direkt, FlixBus-intern), eine
+ * fremde Website (Skiplagged), erfundene Beispieldaten. Die Strategie
+ * verlangt ausschliesslich offiziell erlaubte Quellen - ohne dass die
+ * private Fassung ihre Faehigkeiten verliert.
+ *
+ * Deshalb traegt jede Quelle eine Einstufung, und ein Schalter entscheidet,
+ * welche Fassung laeuft. Grundlage der Einstufungen: docs/provider-matrix.md.
+ * Wichtig: 'ungeklaert' laeuft im Store-Modus NICHT. Eine funktionierende
+ * API ist kein Beleg dafuer, dass ihre Nutzung erlaubt ist - genau diese
+ * Verwechslung soll die Einstufung verhindern.
+ * ===================================================================== */
+const SOURCE_POLICY = {
+  travelpayouts: { label: 'Travelpayouts', status: 'erlaubt',
+                   why: 'offizielles Partnerprogramm' },
+  liteapi:       { label: 'LiteAPI (Hotels)', status: 'erlaubt',
+                   why: 'offizieller Anbieter; Produktionszugang noch offen' },
+  ki:            { label: 'KI-Empfehlung', status: 'erlaubt',
+                   why: 'eigene Schluessel, keine fremden Reisedaten' },
+  transitous:    { label: 'Transitous (Fahrplaene)', status: 'ungeklaert',
+                   why: 'Nutzungsbedingungen und Attribution ungeprueft' },
+  dealFeeds:     { label: 'Deal-Feeds', status: 'ungeklaert',
+                   why: 'fremde redaktionelle Inhalte' },
+  ryanair:       { label: 'Ryanair (direkt)', status: 'nurPrivat',
+                   why: 'interner Endpunkt ohne oeffentliches Programm' },
+  skiplagged:    { label: 'Skiplagged', status: 'nurPrivat',
+                   why: 'fremde Website als Datenquelle' },
+  flixbus:       { label: 'FlixBus (direkt)', status: 'nurPrivat',
+                   why: 'interner Endpunkt ohne oeffentliches Programm' },
+  bahnLocal:     { label: 'DB-Live-Preise (lokaler Server)', status: 'nurPrivat',
+                   why: 'inoffizielle Schnittstelle - Strategie schliesst das aus' },
+  mock:          { label: 'Beispieldaten', status: 'nurPrivat',
+                   why: 'erfundene Preise gehoeren in kein verkauftes Produkt' },
+};
+
+// Der Store-Modus wird ausdruecklich eingeschaltet (?modus=store, gemerkt im
+// Browser). Standard bleibt der Privat-Modus: die Fassung, die der Nutzer
+// heute zuhause benutzt, darf sich durch diesen Umbau nicht veraendern.
+const MODE_KEY = 'hytCommercialMode';
+function commercialMode() {
+  try {
+    const param = new URLSearchParams(location.search).get('modus');
+    if (param === 'store' || param === 'privat') {
+      localStorage.setItem(MODE_KEY, param);
+      return param;
+    }
+    return localStorage.getItem(MODE_KEY) === 'store' ? 'store' : 'privat';
+  } catch (e) {
+    return 'privat';
+  }
+}
+
+/** Darf diese Quelle in der aktuellen Fassung abgefragt werden? */
+function sourceAllowed(id) {
+  const policy = SOURCE_POLICY[id];
+  if (!policy) return false;          // unbekannte Quelle: im Zweifel nein
+  if (commercialMode() !== 'store') return true;
+  return policy.status === 'erlaubt';
+}
+
+// Einmal beim Start auswerten. Sonst wird ?modus=store nur dann gemerkt,
+// wenn zufaellig irgendetwas die Funktion aufruft - und der Modus waere
+// beim naechsten Aufruf ohne Parameter wieder weg.
+commercialMode();
+
+/** Was im Store-Modus fehlt - fuer den ehrlichen Hinweis in der Oberflaeche. */
+function blockedSources() {
+  if (commercialMode() !== 'store') return [];
+  return Object.values(SOURCE_POLICY).filter(p => p.status !== 'erlaubt');
+}
 
 /* =========================================================================
  * Main tabs (Suche / Meine Alerts)
@@ -753,6 +828,7 @@ function nearbyAirports(code, radiusKm, limit = 2) {
 // through Transitous, which returns the real stop with real coordinates, and
 // the distance is measured from those.
 async function fetchNearbyStations(name, radiusKm, limit = 2) {
+  if (!sourceAllowed('transitous')) return [];
   if (!radiusKm || !PROXY_URL) return [];
   const origin = await transitResolveStop(name);
   if (!origin || origin.lat == null) return [];
@@ -1602,6 +1678,7 @@ async function findSplitTicketOffers(route, liveOffers, stops) {
 }
 
 async function fetchLocalBahnOffers(route) {
+  if (!sourceAllowed('bahnLocal')) return null;
   if (!(await bahnLocalReachable())) return null;
   let fromStop, toStop;
   try {
@@ -1782,6 +1859,7 @@ async function resolveHotelCity(term) {
 }
 
 async function fetchRealHotelOffers(route) {
+  if (!sourceAllowed('liteapi')) return null;
   if (!PROXY_URL) return null;
   lastHotelError = '';
   const place = await resolveHotelCity(route.destination);
@@ -1955,7 +2033,9 @@ async function fetchRealFlightOffers(route) {
     offers.push(offer);
   };
 
-  for (const month of monthsCovering(route).slice(0, REAL_FLIGHT_MAX_MONTHS)) {
+  for (const month of (sourceAllowed('travelpayouts')
+                        ? monthsCovering(route).slice(0, REAL_FLIGHT_MAX_MONTHS)
+                        : [])) {
     const base = {
       origin: route.origin, destination: route.destination,
       currency: route.currency.toLowerCase(), limit: '1000', sorting: 'price',
@@ -2090,6 +2170,7 @@ function ryanairFareToOffer(fare, route, roundTrip) {
 }
 
 async function fetchRyanairOffers(route) {
+  if (!sourceAllowed('ryanair')) return [];
   if (!PROXY_URL) return [];
   const days = dayCandidates(route);
   if (!days.length) return [];
@@ -2163,6 +2244,7 @@ function skiplaggedEntryToOffer(entry, flights, airlines, route, day, rates) {
 }
 
 async function fetchSkiplaggedOffers(route) {
+  if (!sourceAllowed('skiplagged')) return [];
   if (!PROXY_URL) return [];
   const rates = await getRatesPerEur();
   const offers = [];
@@ -2314,6 +2396,10 @@ let lastFlixbusNote = '';
 
 async function fetchFlixbusOffers(route) {
   lastFlixbusNote = '';
+  if (!sourceAllowed('flixbus')) {
+    lastFlixbusNote = 'Quelle im Store-Modus nicht freigegeben';
+    return [];
+  }
   if (!PROXY_URL) {
     lastFlixbusNote = 'Kein Proxy konfiguriert';
     return [];
@@ -2477,6 +2563,7 @@ function transitLegLabel(leg) {
 // The geocoder mixes stations (type STOP) with POIs (type PLACE) - the top
 // hit for "München Hbf" was a sauna next to the station. Only STOPs route.
 async function transitResolveStop(text) {
+  if (!sourceAllowed('transitous')) return null;
   // Ein Flughafencode ist fuer einen Fahrplandienst kein Ort. Ohne diese
   // Uebersetzung fand der Geocoder zu "BER" nichts Brauchbares - und die
   // Kombi "Flug + Bahn" blieb ohne Bahnbein, obwohl es die Strecke gibt.
@@ -2548,6 +2635,7 @@ function transitItineraryToOffer(itinerary, mode, route, tz, stops = {}) {
 }
 
 async function fetchRealTransitOffers(route, mode) {
+  if (!sourceAllowed('transitous')) return null;
   if (!PROXY_URL) return null;
   const [origin, destination] = await Promise.all([
     transitResolveStop(route.origin),
@@ -2921,7 +3009,9 @@ async function runSearch(route) {
   // three fabricated ones instead, so "keine echten Preise" arrived wrapped
   // in three prices that looked like an answer. Nothing beats an empty list
   // plus the reason.
-  const allowMock = Boolean(route.showMockData);
+  // Im Store-Modus nicht einmal per Schalter: erfundene Preise gehoeren in
+  // kein verkauftes Produkt.
+  const allowMock = Boolean(route.showMockData) && sourceAllowed('mock');
   const mockFor = { flight: mockFlightOffers, train: mockTrainOffers, bus: mockBusOffers, hotel: mockHotelOffers };
   const fallback = (variant, mode) => (allowMock ? mockFor[mode](variant) : []);
 
@@ -3777,6 +3867,9 @@ async function fetchLivePlaces(term, { includeAirports, cityAsName = false }) {
 // stop later on. RAIL_STATIONS stays as the offline fallback (and for when
 // the proxy isn't configured at all).
 async function fetchTransitStops(term, { includeAddresses = false } = {}) {
+  // Auch die Adress-Vervollstaendigung ist eine Nutzung dieser Quelle - im
+  // Store-Modus bleibt die eingebaute Stationsliste als Ersatz.
+  if (!sourceAllowed('transitous')) return filterRailStations(term);
   if (term.trim().length < 2 || !PROXY_URL) return filterRailStations(term);
   const payload = await fetchProxyJson('transit/geocode', new URLSearchParams({ text: term, language: 'de' }));
   const hits = (Array.isArray(payload) ? payload : []).filter(h => h && h.name);
@@ -4198,6 +4291,15 @@ async function renderOptionList(route, section, options, flightFallbackReason, b
   const shown = found > options.length ? `${options.length} von ${found}` : `${options.length}`;
   searchMetaEl.textContent = `${sectionLabel}${shown} Angebote für ${label} (${parts.join(', ')}${dealsLabel})`;
   const sectionNote = section.note ? `<p class="section-note">${section.note}</p>` : '';
+  // Store-Modus: was fehlt, muss dastehen. Eine kuerzere (oder leere)
+  // Ergebnisliste ohne Erklaerung sieht aus wie ein Fehler - sie ist aber
+  // eine bewusste Rechte-Entscheidung. Gerade im Leer-Fall ist das die
+  // wichtigste Information ueberhaupt.
+  const gesperrt = blockedSources();
+  const storeNote = gesperrt.length ? `
+    <p class="timetable-note">🏬 <strong>Store-Modus:</strong> Es werden nur Quellen abgefragt,
+    deren Nutzung freigegeben ist. Nicht dabei: ${gesperrt.map(p => p.label).join(', ')}.
+    Die Einstufungen stehen in <code class="mono">docs/provider-matrix.md</code>.</p>` : '';
 
   if (!options.length) {
     // With example data off (the default) this is the normal outcome for a
@@ -4220,9 +4322,13 @@ async function renderOptionList(route, section, options, flightFallbackReason, b
                   : 'Keine Angebote in diesem Budget/Zeitrahmen/Filter gefunden - Filter lockern und erneut suchen.')));
     searchResultsEl.innerHTML = `
       ${sectionNote}
+      ${storeNote}
       <p class="empty">${why}</p>
-      <p class="empty">Es werden nur echte Daten angezeigt. Über <strong>Datenquelle → „Auch Beispieldaten"</strong>
-      lassen sich erfundene Preise einblenden, um die Sortier- und Filterlogik zu testen - buchbar ist davon nichts.</p>
+      ${sourceAllowed('mock')
+        ? `<p class="empty">Es werden nur echte Daten angezeigt. Über <strong>Datenquelle → „Auch Beispieldaten"</strong>
+           lassen sich erfundene Preise einblenden, um die Sortier- und Filterlogik zu testen - buchbar ist davon nichts.</p>`
+        : `<p class="empty">Es werden ausschließlich echte Preise aus freigegebenen Quellen angezeigt -
+           erfundene Beispieldaten gibt es in dieser Fassung nicht.</p>`}
       ${renderProviderLinks(route)}
       <div id="dealsPanel"></div>
     `;
@@ -4325,6 +4431,7 @@ async function renderOptionList(route, section, options, flightFallbackReason, b
 
   searchResultsEl.innerHTML = `
     ${sectionNote}
+    ${storeNote}
     ${partyNote}
     ${warning}
     ${timetableNote}
@@ -4449,6 +4556,7 @@ function dealMentions(post, places) {
 }
 
 async function fetchRelevantDeals(route) {
+  if (!sourceAllowed('dealFeeds')) return [];
   if (!PROXY_URL) return [];
   const payload = await fetchProxyJson('deals', new URLSearchParams());
   const posts = (payload && payload.posts) || [];
@@ -4647,6 +4755,11 @@ Wichtig: Rechne ausschließlich mit den Zahlen oben. Erfinde keine Preise, Verbi
 
 async function requestAiRecommendation() {
   if (!lastSearch || !lastSearch.options.length) return;
+  if (!sourceAllowed('ki')) {
+    aiResultEl.hidden = false;
+    aiResultEl.textContent = 'Die KI-Empfehlung ist in dieser Fassung nicht freigegeben.';
+    return;
+  }
   aiButton.disabled = true;
   aiResultEl.hidden = false;
   aiResultEl.textContent = 'Gemini denkt nach…';

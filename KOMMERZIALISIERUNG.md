@@ -83,12 +83,21 @@ abgeleitet werden.
 
 ### Phase 0 – Fundament (bestimmt alles andere)
 
-1. **Provider Contract Matrix anlegen** – Datei mit den acht Fragen pro
-   Quelle, technische Einordnung eingetragen, Lizenzfragen offen
-   markiert. *(baubar, sofort)*
-2. **Quellen-Einstufung im Code + Store-Modus-Schalter** – jede Quelle
-   bekommt `commercialStatus`; Store-Modus lässt nur erlaubte zu,
-   Privat-Modus bleibt unverändert. *(baubar, sofort)*
+1. ~~**Provider Contract Matrix anlegen**~~ ✅ erledigt →
+   `docs/provider-matrix.md`. Technische Einordnung eingetragen
+   (gemessen), Lizenzfragen ausdrücklich als **ungeprüft** markiert.
+2. ~~**Quellen-Einstufung im Code + Store-Modus-Schalter**~~ ✅ erledigt
+   (Build 2026-08-09-22). `SOURCE_POLICY` + `sourceAllowed()` in
+   `docs/app.js`; Umschalten mit `?modus=store` bzw. `?modus=privat`,
+   die Wahl bleibt im Browser gemerkt. Privat-Modus unverändert.
+
+   **Beim Testen zwei echte Fehler gefunden und behoben:** (a) Transitous
+   wurde im Store-Modus über die *Adress-Vervollständigung* weiter
+   abgefragt – eine Sperre an der Angebotssuche allein genügt nicht,
+   jede Nutzung derselben Quelle zählt; (b) `?modus=store` wurde nicht
+   gemerkt, weil die Auswertung nur zufällig lief – jetzt einmal beim
+   Start. Gemessen wird an den tatsächlich rausgehenden HTTP-Anfragen,
+   nicht an der Absicht im Code (Test `ui_storemode.py`, 19/19).
 3. **Affiliate-Marker in allen Buchungslinks** – Travelpayouts-Marker
    sauber durchreichen, Klick-Tracking prüfen. *(baubar, sobald du die
    Partner-ID hast)*
