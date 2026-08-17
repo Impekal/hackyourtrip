@@ -4,7 +4,7 @@
 // guessing: if this doesn't match, the browser is running a cached old
 // app.js and any "the fix didn't work" report is about the old file. Bump
 // together with the ?v= in index.html.
-const BUILD_STAMP = '2026-08-09-20';
+const BUILD_STAMP = '2026-08-09-21';
 document.getElementById('buildStamp').textContent = BUILD_STAMP;
 
 /* =========================================================================
@@ -912,11 +912,259 @@ function normaliseLocalUrl(raw) {
   return url;
 }
 
+// Die veroeffentlichte Fassung dieser App - Ziel des Einrichtungslinks, den
+// die lokal ausgelieferte Seite als QR-Code anbietet. Bei einem Umzug des
+// Hostings (Cloudflare Pages) muss diese Adresse mitziehen.
+const PUBLIC_APP_URL = 'https://impekal.github.io/hackyourtrip/';
+
+/** Nur Ziele im eigenen Netz: Heimnetz-Bereiche, localhost, .local-Namen.
+ * Der ?local=-Einrichtungslink akzeptiert ausschliesslich solche Adressen -
+ * ein untergeschobener Link kann damit hoechstens auf ein Geraet im eigenen
+ * Netz zeigen, nie auf eine fremde Seite im Internet. */
+function isPrivateHost(host) {
+  const h = (host || '').toLowerCase().replace(/^\[|\]$/g, '');
+  if (h === 'localhost' || h === '::1') return true;
+  if (/\.local$/.test(h)) return true;
+  if (/^127\./.test(h) || /^10\./.test(h) || /^192\.168\./.test(h)) return true;
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(h)) return true;
+  return false;
+}
+
+/* --- QR-Code: Byte-Modus, Fehlerkorrektur L, Maske 0 ---------------------
+ * Eigenbau ohne Bibliothek, weil die App bewusst aus genau zwei Dateien
+ * besteht (der lokale Server liefert nur index.html und app.js aus).
+ * Bit fuer Bit gegen die Python-Referenz `qrcode` verifiziert (Scratch-
+ * Test qr_check.py). Versionen 1-5 mit je einem Reed-Solomon-Block reichen
+ * fuer den Einrichtungslink (bis 106 Zeichen). */
+const QR_DATA_CODEWORDS = [0, 19, 34, 55, 80, 108];
+const QR_EC_CODEWORDS = [0, 7, 10, 15, 20, 26];
+const QR_ALIGN_POS = [0, 0, 18, 22, 26, 30];
+const QR_GF_EXP = new Uint8Array(512);
+const QR_GF_LOG = new Uint8Array(256);
+(() => {
+  let x = 1;
+  for (let i = 0; i < 255; i++) {
+    QR_GF_EXP[i] = x; QR_GF_LOG[x] = i;
+    x <<= 1; if (x & 0x100) x ^= 0x11d;
+  }
+  for (let i = 255; i < 512; i++) QR_GF_EXP[i] = QR_GF_EXP[i - 255];
+})();
+const qrGfMul = (a, b) => (a && b ? QR_GF_EXP[QR_GF_LOG[a] + QR_GF_LOG[b]] : 0);
+
+/** Reed-Solomon-Pruefwoerter (Generatorpolynom ueber GF(256), 0x11d). */
+function qrEcWords(data, ecCount) {
+  let gen = [1];
+  for (let i = 0; i < ecCount; i++) {
+    const next = new Array(gen.length + 1).fill(0);
+    for (let j = 0; j < gen.length; j++) {
+      next[j] ^= gen[j];
+      next[j + 1] ^= qrGfMul(gen[j], QR_GF_EXP[i]);
+    }
+    gen = next;
+  }
+  const rest = data.concat(new Array(ecCount).fill(0));
+  for (let i = 0; i < data.length; i++) {
+    const f = rest[i];
+    if (!f) continue;
+    for (let j = 0; j < gen.length; j++) rest[i + j] ^= qrGfMul(gen[j], f);
+  }
+  return rest.slice(data.length);
+}
+
+/** Die fertige Modul-Matrix (0/1) - oder null, wenn der Text nicht passt. */
+function qrModules(text) {
+  const bytes = Array.from(new TextEncoder().encode(text));
+  let version = 0;
+  for (let v = 1; v <= 5; v++) {
+    if (bytes.length + 2 <= QR_DATA_CODEWORDS[v]) { version = v; break; }
+  }
+  if (!version) return null;
+  const dataCap = QR_DATA_CODEWORDS[version];
+
+  const bits = [];
+  const push = (val, n) => { for (let i = n - 1; i >= 0; i--) bits.push((val >> i) & 1); };
+  push(4, 4);                 // Modus: Byte
+  push(bytes.length, 8);
+  for (const b of bytes) push(b, 8);
+  push(0, Math.min(4, dataCap * 8 - bits.length));  // Terminator
+  while (bits.length % 8) bits.push(0);
+  const words = [];
+  for (let i = 0; i < bits.length; i += 8) {
+    let w = 0;
+    for (let j = 0; j < 8; j++) w = (w << 1) | bits[i + j];
+    words.push(w);
+  }
+  for (let k = 0; words.length < dataCap; k++) words.push(k % 2 ? 0x11 : 0xec);
+  const all = words.concat(qrEcWords(words, QR_EC_CODEWORDS[version]));
+
+  const size = 17 + 4 * version;
+  const m = Array.from({ length: size }, () => new Array(size).fill(0));
+  const used = Array.from({ length: size }, () => new Array(size).fill(false));
+  const set = (r, c, v) => { m[r][c] = v ? 1 : 0; used[r][c] = true; };
+
+  const finder = (r0, c0) => {
+    for (let r = -1; r <= 7; r++) for (let c = -1; c <= 7; c++) {
+      const rr = r0 + r, cc = c0 + c;
+      if (rr < 0 || rr >= size || cc < 0 || cc >= size) continue;
+      const dark = r >= 0 && r <= 6 && c >= 0 && c <= 6
+        && (r === 0 || r === 6 || c === 0 || c === 6 || (r >= 2 && r <= 4 && c >= 2 && c <= 4));
+      set(rr, cc, dark);
+    }
+  };
+  finder(0, 0); finder(0, size - 7); finder(size - 7, 0);
+
+  if (QR_ALIGN_POS[version]) {
+    const p = QR_ALIGN_POS[version];
+    for (let r = -2; r <= 2; r++) for (let c = -2; c <= 2; c++) {
+      set(p + r, p + c, Math.max(Math.abs(r), Math.abs(c)) !== 1);
+    }
+  }
+  for (let i = 8; i < size - 8; i++) {
+    if (!used[6][i]) set(6, i, i % 2 === 0);
+    if (!used[i][6]) set(i, 6, i % 2 === 0);
+  }
+  set(4 * version + 9, 8, 1);  // das immer dunkle Modul
+
+  // Formatinfo (Fehlerkorrektur L = 01, Maske 0), BCH-gesichert und mit
+  // dem Standard-XOR maskiert.
+  const fdata = (0b01 << 3) | 0;
+  let rem = fdata << 10;
+  for (let i = 14; i >= 10; i--) if ((rem >> i) & 1) rem ^= 0x537 << (i - 10);
+  const fmt = ((fdata << 10) | (rem & 0x3ff)) ^ 0x5412;
+  for (let i = 0; i < 15; i++) {
+    const bit = (fmt >> i) & 1;
+    if (i < 6) set(i, 8, bit);
+    else if (i < 8) set(i + 1, 8, bit);
+    else set(size - 15 + i, 8, bit);
+    if (i < 8) set(8, size - 1 - i, bit);
+    else if (i < 9) set(8, 15 - i, bit);
+    else set(8, 14 - i, bit);
+  }
+
+  // Datenbits im Zickzack von rechts unten nach oben, Spalte 6 wird
+  // uebersprungen; Maske 0 invertiert bei gerader Zeilen+Spalten-Summe.
+  let inc = -1, row = size - 1, bitIndex = 0, byteIndex = 0;
+  for (let col = size - 1; col > 0; col -= 2) {
+    if (col === 6) col--;
+    for (;;) {
+      for (let c = 0; c < 2; c++) {
+        const cc = col - c;
+        if (!used[row][cc]) {
+          let dark = byteIndex < all.length && ((all[byteIndex] >>> (7 - bitIndex)) & 1) === 1;
+          if ((row + cc) % 2 === 0) dark = !dark;
+          m[row][cc] = dark ? 1 : 0;
+          bitIndex++;
+          if (bitIndex === 8) { bitIndex = 0; byteIndex++; }
+        }
+      }
+      row += inc;
+      if (row < 0 || row === size) { row -= inc; inc = -inc; break; }
+    }
+  }
+  return m;
+}
+
+function drawQr(canvas, text) {
+  const m = qrModules(text);
+  if (!m) { canvas.hidden = true; return false; }
+  // Die Ruhezone (4 Module weiss) gehoert zum Code: ohne sie scheitert die
+  // Kamera auf dunklem Seitenhintergrund.
+  const n = m.length, quiet = 4, scale = 5;
+  const px = (n + 2 * quiet) * scale;
+  canvas.width = px; canvas.height = px;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, px, px);
+  ctx.fillStyle = '#000';
+  for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) {
+    if (m[r][c]) ctx.fillRect((quiet + c) * scale, (quiet + r) * scale, scale, scale);
+  }
+  return true;
+}
+
+function copyText(text) {
+  // navigator.clipboard gibt es nur in sicheren Kontexten - die lokale
+  // http-Seite ist keiner. Der alte Weg ueber ein unsichtbares Textfeld
+  // funktioniert dort weiterhin.
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(text);
+    return;
+  }
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.select();
+  try { document.execCommand('copy'); } catch (e) { /* dann von Hand markieren */ }
+  ta.remove();
+}
+
+/** Die Einrichtungs-Karte auf der lokal ausgelieferten Seite.
+ *
+ * Der Server kennt seine Heimnetz-Adresse (/info) - hier wird daraus ein
+ * Link auf die veroeffentlichte Seite mit ?local=<Adresse> gebaut, als
+ * QR-Code fuers Handy und als Klick-Link fuer diesen Rechner. Einmal
+ * geoeffnet, speichert die veroeffentlichte Seite die Adresse und wechselt
+ * ab dann automatisch - niemand tippt eine IP. */
+async function setUpDeviceLink() {
+  const card = document.getElementById('deviceCard');
+  if (!card) return;
+  if (location.protocol === 'https:' || !isPrivateHost(location.hostname)) return;
+  let info = null;
+  try {
+    const res = await fetch('/info');
+    if (res.ok) info = await res.json();
+  } catch (e) { return; }
+  // Nur wenn wirklich unser Server antwortet (nicht irgendein Webserver,
+  // der zufaellig /info kennt).
+  if (!info || info.service !== 'hackyourtrip-bahn') return;
+
+  const lanReady = Boolean(info.lanMode && info.lanUrl);
+  const base = lanReady ? info.lanUrl : location.origin;
+  const setupUrl = `${PUBLIC_APP_URL}?local=${encodeURIComponent(base)}`;
+  document.getElementById('deviceSelfLink').href =
+    `${PUBLIC_APP_URL}?local=${encodeURIComponent(location.origin)}`;
+  document.getElementById('deviceLinkText').textContent = setupUrl;
+  document.getElementById('deviceLanHint').hidden = lanReady;
+  if (info.mdnsUrl) {
+    const mdns = document.getElementById('deviceMdns');
+    mdns.textContent = 'Falls sich die Heimnetz-Adresse mal ändert (Router-Neustart): '
+      + `der Rechnername ${info.mdnsUrl} bleibt gleich und funktioniert genauso.`;
+    mdns.hidden = false;
+  }
+  drawQr(document.getElementById('deviceQr'), setupUrl);
+  document.getElementById('deviceCopy').addEventListener('click', () => copyText(setupUrl));
+  card.hidden = false;
+}
+
 function setUpLocalSwitch() {
   const bar = document.getElementById('localBar');
   if (!bar) return;
   // Auf der lokal ausgelieferten Seite gibt es nichts zu wechseln.
   if (location.protocol !== 'https:') return;
+
+  // Einrichtung per QR/Link: die lokal ausgelieferte Seite verlinkt hierher
+  // mit ?local=<Adresse>. Einmal geoeffnet wird die Adresse gespeichert und
+  // sofort gewechselt - niemand tippt eine IP. Angenommen werden nur
+  // private Ziele (siehe isPrivateHost); schlaegt der Sprung fehl, greift
+  // derselbe Schleifen-Schutz wie beim automatischen Wechsel.
+  const params = new URLSearchParams(location.search);
+  if (params.has('local')) {
+    const linked = normaliseLocalUrl(params.get('local'));
+    params.delete('local');
+    const rest = params.toString();
+    history.replaceState(null, '',
+      location.pathname + (rest ? `?${rest}` : '') + location.hash);
+    let zielHost = '';
+    try { zielHost = new URL(linked).hostname; } catch (e) { /* linked ist leer */ }
+    if (linked && isPrivateHost(zielHost)) {
+      lsSet(LOCAL_BAR_URL_KEY, linked);
+      lsSet(LOCAL_BAR_AUTO_KEY, AUTO_ON);
+      lsSet(LOCAL_BAR_BOUNCE_KEY, String(Date.now()));
+      location.href = linked + '/';
+      return;
+    }
+  }
 
   const input = document.getElementById('localBarUrl');
   const auto = document.getElementById('localBarAuto');
@@ -973,6 +1221,7 @@ function setUpLocalSwitch() {
 }
 
 setUpLocalSwitch();
+setUpDeviceLink();
 setUpChildAges();
 
 // In der Browser-Konsole aufrufbar: zeigt Adresse, Erreichbarkeit und den

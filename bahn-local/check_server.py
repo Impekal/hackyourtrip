@@ -305,6 +305,31 @@ with tempfile.TemporaryDirectory() as tmp:
           time.time() - old.stat().st_mtime < 5)
 
 
+# --- /info: die Adress-Auskunft fuer die Einrichtungs-Karte ---------------
+# Die App baut daraus QR-Code und Einrichtungslink. Ohne --lan darf keine
+# Heimnetz-Adresse versprochen werden - der Server hoert dann nur lokal.
+import json as _json
+import threading
+import urllib.request
+
+_info_srv = server.ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+_info_thread = threading.Thread(target=_info_srv.serve_forever, daemon=True)
+_info_thread.start()
+_info_port = _info_srv.server_address[1]
+try:
+    with urllib.request.urlopen(f"http://127.0.0.1:{_info_port}/info", timeout=5) as resp:
+        info = _json.load(resp)
+    check("/info weist sich als unser Dienst aus",
+          info.get("service") == "hackyourtrip-bahn", str(info))
+    check("/info ohne --lan: lanMode false, keine Adresse versprochen",
+          info.get("lanMode") is False and info.get("lanUrl") is None, str(info))
+    with urllib.request.urlopen(f"http://127.0.0.1:{_info_port}/health", timeout=5) as resp:
+        health = _json.load(resp)
+    check("/health bleibt unveraendert", health.get("ok") is True, str(health))
+finally:
+    _info_srv.shutdown()
+
+
 # --- Ein belegter Port muss sich erklaeren ---------------------------------
 # Mit `nohup ... &` gestartet sieht man im Terminal nur "exit 1"; ein
 # Traceback verschwindet unsichtbar in der Logdatei. Genau dann braucht die

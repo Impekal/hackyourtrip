@@ -426,8 +426,10 @@ wieder privat werden, Webapp läuft unter eigener Domain. Plan:
 2. `APP_SOURCE` in `bahn-local/server.py` von der GitHub-raw-URL auf die
    veröffentlichte Cloudflare-Seite umstellen (bei privatem Repo liefert
    raw 404 - das war am 17.08. schon einmal der stille Ausfall des
-   App-Selbst-Updates). Danach muss der Nutzer `~/bahn-server.py` einmal
-   neu herunterladen (Server-Datei aktualisiert sich nicht selbst).
+   App-Selbst-Updates). Ebenso `PUBLIC_APP_URL` in `docs/app.js` (Ziel
+   des QR-/Einrichtungslinks der Geräte-Karte). Danach muss der Nutzer
+   `~/bahn-server.py` einmal neu herunterladen (Server-Datei aktualisiert
+   sich nicht selbst).
 3. README-Download-Anleitungen anpassen (raw-URLs funktionieren bei
    privatem Repo nicht; Alternative: Download über die Repo-Webseite oder
    von der Cloudflare-Seite ausliefern).
@@ -437,6 +439,29 @@ wieder privat werden, Webapp läuft unter eigener Domain. Plan:
    github.io-Adresse stirbt, Lesezeichen auf die neue Domain umziehen.
 5. Eigene Domain in Cloudflare Pages anbinden (Domain muss der Nutzer
    kaufen, z.B. bei Cloudflare Registrar zum Selbstkostenpreis).
+
+Nachtrag 17.08.2026, zweiter Teil (Build 2026-08-09-21) - **Einrichtung
+ohne IP-Tippen** (Nutzerwunsch: "Das sollte automatisch sein"):
+
+- Die https-Seite darf das Heimnetz nicht scannen (Browser-Sperre),
+  also dreht die Loesung den Spiess um: der lokale Server kennt seine
+  Adresse selbst. Neuer Endpunkt `GET /info` (lanMode/lanUrl/mdnsUrl);
+  die lokal ausgelieferte Seite zeigt daraus die aufklappbare Karte
+  `#deviceCard` ("📱 Auf Handy & Tablet einrichten") mit **QR-Code**,
+  Klick-Link fuer den eigenen Rechner und Kopier-Knopf.
+- Der QR/Link zeigt auf `PUBLIC_APP_URL + '?local=<Adresse>'`. Die
+  veroeffentlichte Seite versteht `?local=`: Adresse speichern, Automatik
+  an, sofort wechseln. **Nur private Ziele** (isPrivateHost: 127.x, 10.x,
+  192.168.x, 172.16-31.x, localhost, *.local) - ein untergeschobener Link
+  kann hoechstens ins eigene Netz zeigen. Fehlgeschlagene Spruenge landen
+  im bestehenden Schleifen-Schutz (paused).
+- QR-Encoder eigenhaendig in app.js (Byte-Modus, EC L, Maske 0,
+  Versionen 1-5, einzelner RS-Block), weil die App bewusst aus genau
+  zwei Dateien besteht. **Bit fuer Bit gegen die Python-Referenz
+  `qrcode` verifiziert** (Scratch-Test qr_check.py, 8/8) - nicht nach
+  Gefuehl implementiert.
+- Der Nutzer muss `~/bahn-server.py` einmal neu herunterladen (fuer
+  /info; dieselbe Aktion holt auch die Ganztags-Bahnsuche von Build -20).
 
 Nachtrag 17.08.2026 (Build 2026-08-09-20):
 

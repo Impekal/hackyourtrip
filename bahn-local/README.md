@@ -104,6 +104,15 @@ Er zeigt dann zwei Adressen an:
 Die zweite Adresse auf dem Handy im Browser öffnen (Handy und Rechner im
 selben WLAN). Die App merkt selbst, dass der Server dort steht.
 
+**Ohne Abtippen:** Auf dem Rechner `http://127.0.0.1:8899/` öffnen und die
+Karte **„📱 Auf Handy & Tablet einrichten"** aufklappen. Dort gibt es einen
+**QR-Code** (mit der Handy-Kamera scannen, Seite einmal öffnen – fertig)
+und einen Klick-Link für den Rechner selbst. Beides richtet den
+automatischen Wechsel von der veröffentlichten Seite zum lokalen Server
+ein; die Adresse kommt vom Server selbst (`/info`), niemand tippt eine IP.
+Angenommen werden dabei nur Adressen im eigenen Heimnetz – ein
+untergeschobener fremder Link kann die Automatik nicht kapern.
+
 **Was `--lan` bedeutet:** Ohne die Angabe hört der Server nur auf dem eigenen
 Rechner – das ist der sichere Standard. Mit `--lan` kann ihn jedes Gerät im
 selben Netz benutzen. Im Heim-WLAN ist das unbedenklich (er kann nur

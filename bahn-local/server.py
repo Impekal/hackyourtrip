@@ -482,6 +482,18 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if route == "/health":
                 return self._send(200, {"ok": True, "service": "hackyourtrip-bahn"})
+            if route == "/info":
+                # Die lokal ausgelieferte App fragt hier die eigene
+                # Heimnetz-Adresse ab und baut daraus QR-Code und
+                # Einrichtungslink - damit niemand eine IP abtippen muss.
+                lan = _lan_address() if LAN_MODE else None
+                mdns = _mdns_name() if LAN_MODE else None
+                return self._send(200, {
+                    "ok": True, "service": "hackyourtrip-bahn",
+                    "lanMode": LAN_MODE,
+                    "lanUrl": f"http://{lan}:{PORT}" if lan else None,
+                    "mdnsUrl": f"http://{mdns}:{PORT}" if mdns else None,
+                })
             if route == "/orte":
                 q = (params.get("q") or "").strip()
                 if not q:
