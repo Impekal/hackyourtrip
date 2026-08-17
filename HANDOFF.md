@@ -415,6 +415,29 @@ landen typischerweise im Scratchpad, nicht im Repo.
 
 ## Aktueller Stand / offene Aufgaben
 
+**NÄCHSTE AUFGABE (vom Nutzer beauftragt am 17.08.2026, für eine neue
+Session): Umzug des Hostings zu Cloudflare Pages.** Ziel: Repo darf
+wieder privat werden, Webapp läuft unter eigener Domain. Plan:
+
+1. Cloudflare Pages mit dem GitHub-Repo `Impekal/hackyourtrip` verbinden
+   (Build-Ordner `docs/`, kein Build-Schritt nötig - statische Dateien).
+   Der Nutzer braucht dafür eine **Klick-Anleitung ohne CLI** (Cloudflare-
+   Konto existiert, der Proxy-Worker läuft dort schon).
+2. `APP_SOURCE` in `bahn-local/server.py` von der GitHub-raw-URL auf die
+   veröffentlichte Cloudflare-Seite umstellen (bei privatem Repo liefert
+   raw 404 - das war am 17.08. schon einmal der stille Ausfall des
+   App-Selbst-Updates). Danach muss der Nutzer `~/bahn-server.py` einmal
+   neu herunterladen (Server-Datei aktualisiert sich nicht selbst).
+3. README-Download-Anleitungen anpassen (raw-URLs funktionieren bei
+   privatem Repo nicht; Alternative: Download über die Repo-Webseite oder
+   von der Cloudflare-Seite ausliefern).
+4. Erst wenn alles läuft: Repo wieder privat stellen. Beachten: private
+   Repos verbrauchen GitHub-Actions-Minuten (2000/Monat frei; unsere
+   Läufe passen locker rein). GitHub Pages geht dann wieder aus - die
+   github.io-Adresse stirbt, Lesezeichen auf die neue Domain umziehen.
+5. Eigene Domain in Cloudflare Pages anbinden (Domain muss der Nutzer
+   kaufen, z.B. bei Cloudflare Registrar zum Selbstkostenpreis).
+
 Nachtrag 17.08.2026 (Build 2026-08-09-20):
 
 - **Ganztags-Bahnsuche**: Eine DB-`/fahrplan`-Anfrage ist eine "Seite"
