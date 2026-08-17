@@ -6,10 +6,12 @@ aufgebaut ist, welche Entscheidungen warum getroffen wurden, und was gerade
 offen ist. Bitte diese Datei aktuell halten (TODO-Liste unten pflegen,
 neue Design-Entscheidungen dokumentieren) - sie ersetzt kein Gedächtnis.
 
-Repo: `github.com/kalivolut/hackyourtrip` (**Achtung**: umbenannt von
-`mysportpilot/hackyourtrip` - siehe Abschnitt "Git-Stolperfallen" unten,
-der lokale `origin`-Remote zeigt noch auf die alte URL und funktioniert nur
-deshalb, weil GitHub automatisch weiterleitet).
+Repo: `github.com/Impekal/hackyourtrip` (**Achtung**: zweimal umbenannt -
+`mysportpilot` → `kalivolut` → `Impekal`; siehe Abschnitt
+"Git-Stolperfallen" unten, der lokale `origin`-Remote zeigt noch auf die
+ursprüngliche URL und funktioniert nur deshalb, weil GitHub automatisch
+weiterleitet). Stand 17.08.2026 ist das Repo **privat** - Folgen siehe
+Git-Stolperfallen.
 
 ## Was ist das Projekt?
 
@@ -364,16 +366,24 @@ landen typischerweise im Scratchpad, nicht im Repo.
 
 ## Git-Stolperfallen (wichtig für neue Sessions!)
 
-- Der GitHub-Nutzername wurde von `mysportpilot` zu `kalivolut` geändert.
-  Der lokale `origin`-Remote zeigt weiterhin auf
-  `https://github.com/mysportpilot/hackyourtrip` - **das ist Absicht**:
-  der Session-Git-Proxy autorisiert nur den ursprünglichen Owner-String,
-  ein Remote auf die neue `kalivolut/...`-URL bekommt 403. GitHubs
-  automatische Weiterleitung macht das aber transparent - `git push` auf
-  die alte URL funktioniert einwandfrei und landet im richtigen (jetzt
-  umbenannten) Repo.
-- **Nicht versuchen, den Remote auf `kalivolut/...` umzustellen** - das
+- Der GitHub-Nutzername wurde zweimal geändert: `mysportpilot` →
+  `kalivolut` → `Impekal` (Stand 17.08.2026). Der lokale `origin`-Remote
+  zeigt weiterhin auf `https://github.com/mysportpilot/hackyourtrip` -
+  **das ist Absicht**: der Session-Git-Proxy autorisiert nur den
+  ursprünglichen Owner-String, ein Remote auf die neue URL bekommt 403.
+  GitHubs automatische Weiterleitung macht das aber transparent -
+  `git push` auf die alte URL funktioniert einwandfrei und landet im
+  richtigen (jetzt umbenannten) Repo.
+- **Nicht versuchen, den Remote auf `Impekal/...` umzustellen** - das
   bricht den Push in dieser Sandbox-Umgebung.
+- Das Repo ist seit der Umbenennung zu `Impekal` **privat** (per
+  `list_repos` gemessen: `visibility: private`; `raw.githubusercontent.com`
+  antwortet unauthentifiziert mit 404). Zwei Dinge hängen an einem
+  öffentlichen Repo: die GitHub-Pages-Seite (auf dem Free-Plan gibt es
+  Pages nur für öffentliche Repos) und der App-Datei-Selbst-Update des
+  lokalen Bahn-Servers (`APP_SOURCE` lädt `docs/` per raw-URL nach -
+  privat heißt: der Server bleibt still auf seiner alten Fassung stehen).
+  Solange das Repo privat ist, funktionieren beide Wege nicht.
 - `python3`/`pip3` in dieser Sandbox haben `requests`/`PyYAML`/`pytest`
   nicht vorinstalliert (nur `/root/.local/bin/pytest` als isoliertes
   `uv`-Tool, das die falschen Packages sieht) - `pip3 install --user`

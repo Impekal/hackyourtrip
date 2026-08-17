@@ -368,7 +368,7 @@ APP_FILES = {
     "/index.html": ("index.html", "text/html; charset=utf-8"),
     "/app.js": ("app.js", "application/javascript; charset=utf-8"),
 }
-APP_SOURCE = "https://raw.githubusercontent.com/kalivolut/hackyourtrip/main/docs/"
+APP_SOURCE = "https://raw.githubusercontent.com/Impekal/hackyourtrip/main/docs/"
 APP_MAX_AGE_S = 900
 _app_dir = Path(__file__).resolve().parent / "app"
 

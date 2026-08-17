@@ -57,7 +57,7 @@ const TRANSIT_FORWARDABLE_PARAMS = {
 };
 // Transitous asks API consumers to identify themselves, so they can get in
 // touch about traffic rather than just blocking it.
-const TRANSIT_USER_AGENT = "HackYourTrip/1.0 (+https://github.com/kalivolut/hackyourtrip)";
+const TRANSIT_USER_AGENT = "HackYourTrip/1.0 (+https://github.com/Impekal/hackyourtrip)";
 
 // Ryanair's own fare finder: public, no key, no account - and unlike the
 // Travelpayouts index these are *live, bookable* fares straight from the

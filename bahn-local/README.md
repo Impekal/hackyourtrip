@@ -31,7 +31,7 @@ Fahrplan und den Deutschland-Ticket-Preis – nie einen erfundenen Preis.
 
    ```bash
    cd ~
-   curl -sS -o bahn-server.py https://raw.githubusercontent.com/kalivolut/hackyourtrip/main/bahn-local/server.py
+   curl -sS -o bahn-server.py https://raw.githubusercontent.com/Impekal/hackyourtrip/main/bahn-local/server.py
    python3 bahn-server.py
    ```
 
@@ -175,7 +175,7 @@ einmal eine kleine Datei.
 **Einmalig einrichten** – dieser Block darf am Stück eingefügt werden:
 
 ```bash
-curl -sS -o ~/bahn-server.py https://raw.githubusercontent.com/kalivolut/hackyourtrip/main/bahn-local/server.py
+curl -sS -o ~/bahn-server.py https://raw.githubusercontent.com/Impekal/hackyourtrip/main/bahn-local/server.py
 
 mkdir -p ~/Library/LaunchAgents
 cat > ~/Library/LaunchAgents/de.hackyourtrip.bahnserver.plist <<PLIST
@@ -223,7 +223,7 @@ curl -sS http://127.0.0.1:8899/health
 **Server aktualisieren**, wenn ich etwas daran geändert habe:
 
 ```bash
-curl -sS -o ~/bahn-server.py https://raw.githubusercontent.com/kalivolut/hackyourtrip/main/bahn-local/server.py
+curl -sS -o ~/bahn-server.py https://raw.githubusercontent.com/Impekal/hackyourtrip/main/bahn-local/server.py
 launchctl kickstart -k gui/$(id -u)/de.hackyourtrip.bahnserver
 ```
 

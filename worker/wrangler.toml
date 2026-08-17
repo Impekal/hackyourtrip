@@ -4,7 +4,7 @@ compatibility_date = "2026-01-01"
 
 # Optional: restrict CORS to your actual Pages origin instead of "*".
 # [vars]
-# ALLOWED_ORIGIN = "https://kalivolut.github.io"
+# ALLOWED_ORIGIN = "https://impekal.github.io"
 
 # TRAVELPAYOUTS_TOKEN is a secret, not a var - set it with:
 #   wrangler secret put TRAVELPAYOUTS_TOKEN

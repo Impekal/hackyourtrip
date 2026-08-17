@@ -32,7 +32,7 @@ DEAL_FEEDS = [
 ]
 
 HEADERS = {
-    "User-Agent": "HackYourTrip/1.0 (+https://github.com/kalivolut/hackyourtrip)",
+    "User-Agent": "HackYourTrip/1.0 (+https://github.com/Impekal/hackyourtrip)",
     "Accept": "application/rss+xml, application/xml, text/xml, */*",
 }
 

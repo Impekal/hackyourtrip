@@ -119,7 +119,7 @@ def d_ticket_coverage(itinerary: dict, origin: dict | None, destination: dict | 
 
 # Transitous asks API users to identify themselves so they can get in touch
 # about traffic rather than just blocking it.
-USER_AGENT = "HackYourTrip/1.0 (+https://github.com/kalivolut/hackyourtrip)"
+USER_AGENT = "HackYourTrip/1.0 (+https://github.com/Impekal/hackyourtrip)"
 
 
 def _to_local_naive(utc_iso: str, tz_name: str) -> str:
