@@ -307,6 +307,52 @@ def get_fahrplan(from_id: str, to_id: str, when: str, klasse: str,
     return result
 
 
+# Eine einzelne Fahrplan-Anfrage ist eine "Seite": die DB liefert ~6-10
+# Verbindungen ab dem angefragten Zeitpunkt, danach ist Schluss. Wer mit
+# einem blanken Datum sucht, meint aber den ganzen Tag - und bekam frueher
+# nur die eine Seite ab 08:00. Ergebnis (echte Nutzer-Beschwerde): "nur 6
+# Angebote auf einen ganzen Tag und die teuersten", waehrend die DB-App
+# deutlich mehr und guenstigere zeigte. Deshalb wird der Tag jetzt an
+# mehreren Ankerzeiten abgefragt und das Ergebnis zusammengelegt.
+DAY_ANCHORS = ("00:00:00", "05:00:00", "09:00:00",
+               "13:00:00", "17:00:00", "21:00:00")
+
+
+def get_fahrplan_ganztag(from_id: str, to_id: str, date: str, klasse: str,
+                          products: str = "") -> object:
+    """Alle Anker abfragen, Dubletten zusammenlegen, nach Abfahrt sortieren.
+
+    Jeder Anker laeuft durch get_fahrplan und damit durch dessen Cache -
+    ein Wiederholungslauf innerhalb der Cache-Zeit kostet keine einzige
+    DB-Anfrage. Taucht dieselbe Verbindung an zwei Ankern auf (die Seiten
+    ueberlappen), gewinnt die Fassung mit dem besseren Preis: die DB
+    vergibt Kontingente, derselbe Zug kann je nach Abfrage verschieden
+    bepreist sein.
+    """
+    beste: dict[tuple, dict] = {}
+    reihenfolge: list[tuple] = []
+    for anchor in DAY_ANCHORS:
+        seite = get_fahrplan(from_id, to_id, f"{date}T{anchor}",
+                             klasse, products)
+        for conn in seite["connections"]:
+            # Spaete Anker liefern auch Verbindungen des Folgetags mit -
+            # die gehoeren nicht zur Frage "was faehrt an diesem Tag?".
+            if not (conn["depart"] or "").startswith(date):
+                continue
+            key = (conn["depart"], conn["arrive"], conn["transfers"],
+                   tuple(leg["line"] for leg in conn["legs"]))
+            alt = beste.get(key)
+            if alt is None:
+                beste[key] = conn
+                reihenfolge.append(key)
+            elif conn["price"] is not None and (
+                    alt["price"] is None or conn["price"] < alt["price"]):
+                beste[key] = conn
+    merged = sorted((beste[k] for k in reihenfolge),
+                    key=lambda c: c["depart"] or "")
+    return {"connections": merged}
+
+
 # --- Die App selbst ausliefern ---------------------------------------------
 # Damit Seite und Preisabfrage dieselbe Herkunft haben (siehe Modul-Doku).
 # Die Dateien liegen neben diesem Skript und werden von GitHub geholt.
@@ -370,14 +416,16 @@ def _app_file(name: str) -> bytes | None:
     return _download_app_file(name, path)
 
 
-def _widen_date(raw: str) -> str | None:
-    """Blankes Datum -> voller Zeitstempel; volles durchlassen; sonst None."""
+def _parse_when(raw: str) -> tuple[str, str] | None:
+    """Blankes Datum meint den ganzen Tag, ein voller Zeitstempel genau
+    diesen Moment (Split-Ticket-Reststrecke: dort zaehlt die Anschlusszeit).
+    Alles andere ist Unfug -> None."""
     if not raw:
         return None
     if len(raw) == 10 and raw[4] == "-" and raw[7] == "-":
-        return f"{raw}T08:00:00"
+        return ("tag", raw)
     if len(raw) == 19 and raw[10] == "T":
-        return raw
+        return ("moment", raw)
     return None
 
 
@@ -442,13 +490,18 @@ class Handler(BaseHTTPRequestHandler):
             if route == "/fahrplan":
                 from_id = params.get("from")
                 to_id = params.get("to")
-                when = _widen_date(params.get("date", ""))
+                when = _parse_when(params.get("date", ""))
                 if not (from_id and to_id and when):
                     return self._send(400, {
                         "error": "from, to und date (YYYY-MM-DD) noetig."})
+                art, zeit = when
+                klasse = params.get("class", "2")
+                produkte = params.get("products", "")
+                if art == "tag":
+                    return self._send(200, get_fahrplan_ganztag(
+                        from_id, to_id, zeit, klasse, produkte))
                 return self._send(200, get_fahrplan(
-                    from_id, to_id, when, params.get("class", "2"),
-                    params.get("products", "")))
+                    from_id, to_id, zeit, klasse, produkte))
             return self._send(404, {"error": "Unbekannter Endpunkt."})
         except BahnError as exc:
             self._send(exc.status, {"error": str(exc),

@@ -157,12 +157,97 @@ server.get_fahrplan("a", "b", "2026-09-15T08:00:00", "1")
 check("erste Klasse wird durchgereicht", captured["body"]["klasse"] == "KLASSE_1")
 
 
-# --- Datum weiten ----------------------------------------------------------
-check("blankes Datum wird auf 08:00 gesetzt",
-      server._widen_date("2026-09-15") == "2026-09-15T08:00:00")
-check("voller Zeitstempel bleibt", server._widen_date("2026-09-15T14:30:00") == "2026-09-15T14:30:00")
-check("Unfug-Datum -> None", server._widen_date("15.09.2026") is None)
-check("leer -> None", server._widen_date("") is None)
+# --- Datum deuten ----------------------------------------------------------
+check("blankes Datum meint den ganzen Tag",
+      server._parse_when("2026-09-15") == ("tag", "2026-09-15"))
+check("voller Zeitstempel meint genau diesen Moment",
+      server._parse_when("2026-09-15T14:30:00") == ("moment", "2026-09-15T14:30:00"))
+check("Unfug-Datum -> None", server._parse_when("15.09.2026") is None)
+check("leer -> None", server._parse_when("") is None)
+
+
+# --- Ganztags-Suche: mehrere Anker statt einer 08:00-Seite -----------------
+# Die echte Beschwerde: "nur 6 Angebote auf einen ganzen Tag und die
+# teuersten" - weil eine einzige DB-Seite ab 08:00 geholt wurde. Jetzt muss
+# ein blankes Datum den Tag an mehreren Ankerzeiten abklappern.
+def _conn(depart, arrive, price, line="ICE 1", transfers=0):
+    return {
+        "umstiegsAnzahl": transfers,
+        "verbindungsDauerInSeconds": 10000,
+        "angebotsPreis": {"betrag": price, "waehrung": "EUR"} if price is not None else {},
+        "verbindungsAbschnitte": [{
+            "abfahrtsOrt": "Berlin Hbf", "ankunftsOrt": "München Hbf",
+            "abfahrt": {"sollzeit": depart}, "ankunft": {"sollzeit": arrive},
+            "verkehrsmittel": {"produktGattung": "ICE", "name": line},
+        }],
+    }
+
+
+# Jede Ankerzeit bekommt ihre eigene Seite. Die 09:00-Seite wiederholt eine
+# Verbindung der 05:00-Seite - einmal teurer (anderes Kontingent) - und die
+# 21:00-Seite laeuft in den Folgetag ueber.
+SEITEN = {
+    "2026-09-15T00:00:00": [_conn("2026-09-15T04:30:00", "2026-09-15T08:30:00", 27.99)],
+    "2026-09-15T05:00:00": [_conn("2026-09-15T06:00:00", "2026-09-15T10:00:00", 39.99, "ICE 501")],
+    "2026-09-15T09:00:00": [
+        _conn("2026-09-15T06:00:00", "2026-09-15T10:00:00", 59.99, "ICE 501"),
+        _conn("2026-09-15T10:00:00", "2026-09-15T14:00:00", 49.99, "ICE 901"),
+    ],
+    "2026-09-15T13:00:00": [_conn("2026-09-15T14:00:00", "2026-09-15T18:00:00", None, "ICE 1301")],
+    "2026-09-15T17:00:00": [
+        # dieselbe Verbindung wie um 13:00, diesmal MIT Preis - der muss
+        # die preislose Fassung ersetzen.
+        _conn("2026-09-15T14:00:00", "2026-09-15T18:00:00", 44.99, "ICE 1301"),
+    ],
+    "2026-09-15T21:00:00": [
+        _conn("2026-09-15T22:00:00", "2026-09-16T06:00:00", 29.99, "NJ 40421"),
+        _conn("2026-09-16T05:00:00", "2026-09-16T09:00:00", 19.99, "ICE 501"),
+    ],
+}
+anfragen = []
+
+
+def fan_curl(method, url, body=None):
+    anfragen.append(body["anfrageZeitpunkt"])
+    return {"verbindungen": SEITEN.get(body["anfrageZeitpunkt"], [])}
+
+
+server._curl = fan_curl
+server._cache.clear()
+tag = server.get_fahrplan_ganztag("a", "b", "2026-09-15", "2")
+departs = [c["depart"] for c in tag["connections"]]
+preise = {c["depart"]: c["price"] for c in tag["connections"]}
+
+check("jede Ankerzeit wird abgefragt",
+      anfragen == [f"2026-09-15T{a}" for a in server.DAY_ANCHORS], str(anfragen))
+check("die Seiten werden zusammengelegt und nach Abfahrt sortiert",
+      departs == sorted(departs) and len(departs) == 5, str(departs))
+check("der fruehe Zug vor 05:00 ist dabei (00:00-Anker)",
+      "2026-09-15T04:30:00" in departs, str(departs))
+check("die Dublette zaehlt nur einmal", departs.count("2026-09-15T06:00:00") == 1)
+check("bei Dubletten gewinnt der bessere Preis (Kontingente)",
+      preise["2026-09-15T06:00:00"] == 39.99, str(preise))
+check("ein spaeter gefundener Preis ersetzt die preislose Fassung",
+      preise["2026-09-15T14:00:00"] == 44.99, str(preise))
+check("Verbindungen des Folgetags fliegen raus",
+      "2026-09-16T05:00:00" not in departs, str(departs))
+check("der Nachtzug am Abend des Tages bleibt aber drin",
+      "2026-09-15T22:00:00" in departs, str(departs))
+
+# Der zweite Lauf muss komplett aus dem Cache kommen - sechs Anker duerfen
+# nicht sechs neue DB-Anfragen je Wiederholung heissen.
+anfragen.clear()
+tag2 = server.get_fahrplan_ganztag("a", "b", "2026-09-15", "2")
+check("Wiederholung kostet keine neue DB-Anfrage",
+      anfragen == [] and len(tag2["connections"]) == 5, str(anfragen))
+
+# Die Split-Ticket-Reststrecke fragt mit vollem Zeitstempel - dort zaehlt
+# die Anschlusszeit, ein Faecher ueber den ganzen Tag waere falsch.
+anfragen.clear()
+server._cache.clear()
+server.get_fahrplan("a", "b", "2026-09-15T14:30:00", "2")
+check("voller Zeitstempel bleibt genau EINE Anfrage",
+      anfragen == ["2026-09-15T14:30:00"], str(anfragen))
 
 
 # --- ein 403 der DB wird als BahnError(403) gemeldet -----------------------
