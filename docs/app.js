@@ -4,7 +4,7 @@
 // guessing: if this doesn't match, the browser is running a cached old
 // app.js and any "the fix didn't work" report is about the old file. Bump
 // together with the ?v= in index.html.
-const BUILD_STAMP = '2026-08-09-22';
+const BUILD_STAMP = '2026-08-09-23';
 document.getElementById('buildStamp').textContent = BUILD_STAMP;
 
 /* =========================================================================
@@ -3599,9 +3599,59 @@ function fmtShort(date) { return date.toLocaleDateString('de-DE', { day: '2-digi
 // Mock offers either have no url at all (JS mocks) or a placeholder
 // "https://example.invalid/..." (Python mocks, fed through data/deals.json) -
 // only render a clickable booking link for a URL that could actually work.
+/* --- Werbekennzeichnung ---------------------------------------------------
+ * Sobald ein Link Provision einbringen kann, muss das erkennbar sein - in
+ * Deutschland/EU ist die kommerzielle Absicht kennzeichnungspflichtig, und
+ * zwar an der Stelle, an der man klickt, nicht nur im Kleingedruckten.
+ *
+ * Deshalb steht hier eine Liste der Ziele, an denen wir verdienen koennen,
+ * statt einer Faustregel: eine Regel wie "alles Externe ist Werbung" waere
+ * falsch (die Anbieterliste unten ist blosse Hilfe, dort verdient niemand),
+ * und "gar nichts markieren" waere es erst recht.
+ *
+ * Ehrlich bleibt auch das "ggf.": bis der Affiliate-Marker eingebaut ist
+ * (naechste Aufgabe), bringt keiner dieser Links tatsaechlich etwas ein.
+ * ----------------------------------------------------------------------- */
+const AFFILIATE_HOSTS = [
+  'aviasales.com', 'search.aviasales.com', 'tp.media', 'travelpayouts.com',
+  'booking.com', 'www.booking.com',
+];
+
+function isAffiliateUrl(url) {
+  if (!url) return false;
+  try {
+    const host = new URL(url, location.href).hostname.toLowerCase();
+    return AFFILIATE_HOSTS.some(h => host === h || host.endsWith('.' + h));
+  } catch (e) {
+    return false;
+  }
+}
+
+const AD_MARK_TITLE = 'Werbelink: Buchst du darüber, erhalten wir ggf. eine Provision. '
+                    + 'Für dich ändert sich der Preis dadurch nicht.';
+
+/** Der Erklaertext zur Kennzeichnung - einmal pro Ergebnisliste. */
+const AD_DISCLOSURE = `
+  <p class="ad-note">Mit <span class="ad-mark">*</span> markierte Links sind <strong>Werbelinks</strong>
+  (Affiliate): Buchst du darüber, erhalten wir ggf. eine Provision. <strong>Für dich ändert sich der
+  Preis dadurch nicht</strong>, und die Reihenfolge der Angebote hängt nicht davon ab - sortiert wird
+  nach deinen Kriterien, nicht nach Provision.</p>`;
+
 function bookingSiteHtml(name, url) {
   const isReal = url && !url.includes('example.invalid');
-  return isReal ? `<a href="${url}" target="_blank" rel="noopener">${name}</a>` : name;
+  if (!isReal) return name;
+  // rel="sponsored" ist die technisch korrekte Auszeichnung eines bezahlten
+  // Links; das sichtbare * ist die Kennzeichnung fuer den Menschen.
+  const werbung = isAffiliateUrl(url);
+  const rel = werbung ? 'sponsored nofollow noopener' : 'noopener';
+  const mark = werbung ? `<span class="ad-mark" title="${AD_MARK_TITLE}">*</span>` : '';
+  return `<a href="${url}" target="_blank" rel="${rel}">${name}</a>${mark}`;
+}
+
+/** Enthaelt diese Ergebnisliste ueberhaupt Werbelinks? */
+function hasAffiliateLinks(options) {
+  return (options || []).some(opt => (opt.offers || []).some(
+    o => isAffiliateUrl(o.url || o.booking_url)));
 }
 
 // IATA -> city name, so a feed post saying "Hamburg" is matched against a
@@ -4429,10 +4479,14 @@ async function renderOptionList(route, section, options, flightFallbackReason, b
     kostenlos und ohne Anmeldung). Diese Quelle enthält keine Fahrpreise, deshalb steht hier kein Preis statt eines
     erfundenen. Zeiten, Linie und Umstiege stimmen - den Preis unten beim Anbieter prüfen.` : ''}${busReasonHtml}${bahnLiveHint}</p>` : '';
 
+  // Werbekennzeichnung nur, wenn tatsaechlich Werbelinks in der Liste
+  // stehen - eine Kennzeichnung ohne gekennzeichnete Links waere Rauschen.
+  const adNote = hasAffiliateLinks(options) ? AD_DISCLOSURE : '';
   searchResultsEl.innerHTML = `
     ${sectionNote}
     ${storeNote}
     ${partyNote}
+    ${adNote}
     ${warning}
     ${timetableNote}
     <div class="route">

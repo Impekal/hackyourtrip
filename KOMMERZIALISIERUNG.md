@@ -101,9 +101,16 @@ abgeleitet werden.
 3. **Affiliate-Marker in allen Buchungslinks** – Travelpayouts-Marker
    sauber durchreichen, Klick-Tracking prüfen. *(baubar, sobald du die
    Partner-ID hast)*
-4. **Werbekennzeichnung** – Affiliate-Links müssen erkennbar sein
-   (Pflicht in DE/EU). Hinweis in der Ergebnisliste + eigener
-   Abschnitt. *(baubar, sofort)*
+4. ~~**Werbekennzeichnung**~~ ✅ erledigt (Build 2026-08-09-23).
+   Provisionsfähige Links tragen ein erklärtes `*` **direkt am Link**
+   (dort wird geklickt) plus `rel="sponsored"`; die Ergebnisliste
+   erklärt es, die Fußzeile dauerhaft. Bewusst über eine Liste der
+   Ziele, an denen wir verdienen können (`AFFILIATE_HOSTS`), nicht über
+   eine Faustregel: die Anbieterliste „Echte Preise direkt prüfen"
+   bringt nichts ein und wird deshalb **nicht** gekennzeichnet – der
+   Test prüft beide Richtungen (`ui_werbung.py`, 23/23). Der Text sagt
+   ehrlich „ggf. eine Provision", denn bis Aufgabe 3 greift, bringt
+   kein Link etwas ein.
 
 ### Phase 1 – MVP-Kette: 1 Flug + 1 Bahn + 1 Hotel
 
